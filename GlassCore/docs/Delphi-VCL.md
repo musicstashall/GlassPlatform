@@ -3522,3 +3522,269 @@ MSVC/Windows-сборка недоступна; Buffered TPanel, TSplitView и �
 BeginBufferedPaint, BufferedPaintSetAlpha, EndBufferedPaint и предшествующие
 заливки/BitBlt. Эти buffered API уже есть в DebugDetour-зонде (номера 30/33/31);
 новый глобальный зонд для запроса не добавлялся.
+
+## Тест 94: Form.DoubleBuffered OFF → ON → OFF — подтверждённая перезапись альфы
+
+### Материал и способ сопоставления
+
+Пользователь переключил Form.DoubleBuffered туда и обратно при активном зонде.
+`LogViewer-19.log`: UTF-8 без BOM, 528873 байта, 2748 записей с timestamp,
+PID 28816 / TID 28916, 21:36:01.730–21:36:06.297. SHA-256:
+`5d612cff13ffd38b8db2a5b51c7ea268c85846ecbcaf2dc6869ef007de73a33b`.
+В glyph-index text есть управляющие символы: `str.splitlines()` даёт ложные
+дополнительные строки. Разбор использует LF и начало timestamp-записи.
+
+Буферы приложения сопоставлены по PID/TID/hbp **в пределах времени жизни**,
+от успешного Begin до End, с target HWND/DC, buffer DC и прямоугольником.
+У всех этих вызовов outerCaller и retAddrMod — DelphiControlsSample_Win64.exe.
+Внутренние буферы uxtheme не смешиваются с ними; прямые вызовы из GlassCore
+диагностический hook намеренно не выводит. Поэтому остальные 36 Begin и 155 End
+от uxtheme не являются сами по себе доказательством утечки или нарушения пар.
+
+| API приложения | Количество | Результат полной корреляции |
+| --- | --- | --- |
+| BeginBufferedPaint | 40 | 34 успешных; 6 с пустым target=[0,0,0,0], hbp=NULL и buffer DC=NULL. У всех format=2 (BPBF_COMPOSITED), flags=0, pBlend=NULL. |
+| BufferedPaintSetAlpha | 34 | Ровно один на каждый успешный hbp: alpha=255, rect совпадает с target Begin, hr=0x00000000. |
+| EndBufferedPaint | 34 | Ровно один на каждый успешный hbp: fUpdate=1, hr=0x00000000; незакрытых/несопоставленных EXE-буферов нет. |
+| BufferedPaintClear | 0 | Нет зарегистрированных вызовов; это не означает отсутствия очисток GlassCore. |
+
+Для **каждого из 34** между SetAlpha и записью End найден BitBlt от uxtheme:
+source DC равен buffer DC данного Begin, destination DC равен его target DC,
+координаты/размер совпадают с target, ROP=SRCCOPY (0x00CC0020). End зонд
+логирует после true API, поэтому внутреннее копирование появляется раньше
+его строки. Это не подбор похожих handles из разных repaint.
+
+Успешные циклы охватывают **19 точных классов**: TPanel ×10, TGroupBox ×6,
+TControlBar ×2; по одному TPageControl, TScrollBox, TCardPanel, TCard,
+TStackPanel, TRelativePanel, TCategoryButtons, TButtonGroup, TCategoryPanelGroup,
+TCategoryPanel, TCategoryPanelSurface, TRadioGroup, TGridPanel, TFlowPanel,
+TMemo и TStatusBar. Это объясняет массовый характер симптома, а не дефект
+одной panel-кисти. Поддержка всех этих buffered-классов **не заявляется**.
+
+### Переходы ON / OFF
+
+- В начале caption Form.DoubleBuffered рисуется как checkbox part=3,
+  state=1/2 (unchecked). При включении идёт массовый repaint:
+  21:36:02.321–02.426 — 39 Begin, 33 успешных цикла с SetAlpha255/End.
+  Checkbox в 02.422 уже checked (state=6), в 03.025 — checked normal (5).
+- В 05.658 виден checked pressed (7); при обратном переключении панельные
+  фоны снова рисуются на оконные DC без массовых EXE-буферов. Например, тот же
+  TScrollBox HWND=0x960C5E в 05.764 получает alpha=0/ok=1 непосредственно
+  на DC=0xFFFFFFFFC6012C7B вместо memory DC=0x7A011C60 из ON-кадра.
+  В 05.860 checkbox уже unchecked (2), в 06.049 — unchecked normal (1).
+- Есть одно важное исключение: TControlBar HWND=0x1F1014 в 05.856–05.857
+  всё ещё проходит собственный успешный Begin/SetAlpha255/BitBlt/End.
+  Поэтому утверждение «OFF убрал все buffered вызовы» неверно.
+  Состояния checkbox — ориентиры repaint, не точные timestamps присваивания
+  свойства и не доказательство значения DoubleBuffered каждого потомка.
+
+### Фон правильный до завершающего A255
+
+Ниже — реальные цепочки на одном и том же buffer DC, а не только исходниковая
+гипотеза из теста 93. Во всех строках таблицы финал — SetAlpha255 на весь
+**target данного Begin**, затем соответствующий SRCCOPY и End(update=1), hr=0.
+
+| Начало / точный HWND | hbp / buffer DC | Что зарегистрировано до финала |
+| --- | --- | --- |
+| 02.330 TScrollBox 0x960C5E | 0x7954 / 0x7A011C60 | FillRect 0xF0F0F0, alpha=0, ok=1, [0,0,1092,549]. |
+| 02.342 TPanel 0x7B0560 | 0x1BFC / 0x41012664 | FillRect 0xF0F0F0, alpha=100, ok=1, [0,0,420,78]; caption compositor bufferHr/drawHr=0. |
+| 02.345 TPanel 0x4F0BE4 | 0x42BE / 0x34011A98 | FillRect 0xFFFFFF, alpha=0, ok=1; полный [0,0,288,76] и bevel inset [1,1,287,75]. |
+| 02.350 TCategoryButtons 0x360C32 | 0x388A / 0x44012664 | Full-client alpha=0; gradient 0xFFEAFF → 0xF0F0F0, alpha=100, [2,1,234,44]; оба пути ok=1. |
+| 02.359 TCategoryPanelGroup 0x490AE8 | 0x04F0 / 0x46012664 | FillRect 0xA4A0A0, alpha=100, ok=1, [0,0,481,107]; target буфера частичный: [185,0,481,107]. |
+| 02.387 TPanel 0xD907B0 | 0x3605 / 0x35011C3F | FillRect 0xE8FFE8, alpha=100, ok=1; target=[0,0,199,27], исходные fill rect=[0,0,200,120] и [1,1,199,119] клипуются. |
+
+Для TCategoryPanelGroup перед публикацией зонд дополнительно прочитал
+`px00=pxMid=0x403F3F`. Это соответствует premultiplied каналам 0xA4A0A0
+при A100: round(0xA4×100/255)=0x40, round(0xA0×100/255)=0x3F.
+SetAlpha255 не возвращает исходную яркость RGB. Поэтому механизм объясняет
+не только непрозрачный чёрный вместо очистки, но и тёмную непрозрачную заливку
+вместо полупрозрачного цвета. GetPixel-образцы дают **RGB, не alpha**;
+альфа подтверждена успешным API-вызовом, не измерением пикселей DWM.
+Всего в логе четыре background-диагностики этой группы с 0xA4A0A0:
+02.360, 05.730, 05.735 и 05.754 — все alpha=100/ok=1. При обратном
+переключении HWND группы меняется с 0x490AE8 на 0x4A0AE8; идентичность всех
+дочерних HWND через этот переход не предполагается. Client группы, header
+TCategoryPanel и отдельный TCategoryPanelSurface по-прежнему не смешиваются.
+
+### Границы диагноза и безопасное направление
+
+Теперь успешный **SetAlpha255 перед публикацией** — runtime-факт, а не только
+reference MakeOpaque-гипотеза теста 93. В справочном Winapi.UxTheme.pas
+MakeOpaque inline вызывает именно SetAlpha(...,255); отдельный экспорт
+MakeOpaque для наблюдения этого пути не требуется. Успех фонового A0/A100
+и portable GREEN не означают сохранение этой альфы до конца буферного кадра.
+
+Однако **Begin самой TDelphiControlsForm HWND=0x220410 в 02.321 вернул NULL**:
+target=[0,0,0,0]. Лог не доказывает успешный буфер всей формы и не позволяет
+приписать этому вызову непрозрачность её собственного client/NC. Остальные
+пять пустых Begin — TTabSheet, TCategoryPanel, TCategoryPanelSurface,
+TScrollBox и TStatusBar. Точного класса TSplitView нет: caption
+«WinX: SplitView, стек, карточки» не является установлением владельца HWND.
+Ни исходный default DoubleBuffered=True у reference TSplitView, ни общий
+симптом галереи не закрывают его собственные routing/background gates.
+
+Следующий production-шаг следует ограничить **точным поддержанным панельным
+путём и доказанной связью target HWND/DC → hbp → buffer DC**, в Full и при
+разрешённом backdrop. Цель — сохранить уже сформированную Glass-альфу при
+финализации, не меняя DoubleBuffered приложения. Не подавлять SetAlpha255
+глобально/по одному ambient HWND; не назначать A100 целому буферу; не считать
+любой чёрный прозрачным и не перерисовывать фон поверх готовых caption/значков.
+Одно подавление MakeOpaque ещё не является готовым решением: native GDI
+может нуждаться в нормализации альфы текста, рамок и прочего содержимого.
+Нужны проверки границ/clip/повторного использования и вложенности буферов,
+отказов Begin/SetAlpha/End, чужих DC, режима/backdrop и сохранности текста,
+рамок и ImageList. Расширять на остальные классы — после Windows-проверки,
+а не по общности завершающего API. Для установления самой причины новый
+такой же общий лог переключателя уже не нужен.
+
+В этом шаге изменена только документация: production hooks, renderer/Edit,
+panel policy теста 93, списки классов и диагностический зонд не менялись.
+Проверки без изменения production: contracts **73/73**, panels **12/12**,
+button groups **9/9**, TCoolBar **9/9**, input icons **6/6** — PASS;
+UTF-8 без BOM и `git diff --check` — PASS. Машинная сверка всех 34 циклов,
+шести NULL Begin, временных групп и четырёх цветных заливок — PASS.
+Windows/MSVC и визуальная проверка исправления не выполнялись; исправление
+буферной финализации пока не реализовано. После сохранения выводов исходный
+LogViewer-19 удалён из входящих вложений; копия лога не хранится.
+Временные файлы не создавались.
+
+## Тест 95: Restorator — точные TBomeMemo / TBMGutter, ANSI-строки и системные фоны
+
+### Scope и данные API Monitor
+
+Пользователь отложил общую финализацию DoubleBuffered и чёрный непрозрачный
+тулбар галереи на отдельную задачу. Этот шаг **не реализует** предложение
+из теста 94: нет перехвата/подавления MakeOpaque/SetAlpha255, изменения свойства
+DoubleBuffered или общей реконструкции альфы окна.
+
+В Restorator пользователь установил класс memo **TBomeMemo** и дочерний
+**TBMGutter**. Inline-зонд 21:59:26, PID 29724 / TID 18700,
+HWND=0x9E0B04 показывает только generic EXE SetBkColor: COLOR_WINDOW→0.
+Это ремап состояния DC, а не подтверждение alpha-отрисовки текста/заливки.
+
+`API-Monitor-6.log`: UTF-8 без BOM, 41252 байта, **412 API-записей**, thread=1
+(номер потока API Monitor, не OS TID), 22:01:28.712–28.749. SHA-256:
+`4f42e96459e3a003ec8485a4f34a3e0e13abc4907cabe65a381130530cf0cd34`.
+Записи с glyph-index text содержат переводы строк: разбор выполнялся по началу
+записи с ID/time, не по количеству строк `str.splitlines()`.
+
+| API ID | Наблюдаемый путь |
+| --- | --- |
+| 1, 27–40 | EXE BeginPaint(0x9E0B04) → DC=0xBF012AB8; CreateCompatibleDC(NULL) → 0x5A0125B6, SelectObject bitmap=0x8705076B; GetSysColor(COLOR_WINDOW), SetBkColor(0xFFFFFF), OPAQUE; DrawTextA первой XML-строки. |
+| 40–230 | **10 DrawTextA и 11 FillRect** на memory DC=0x5A0125B6. Все DrawTextA: DT_NOPREFIX\|DT_SINGLELINE\|DT_VCENTER, результаты 16; FillRect возвращают 1. Исходные строки — manifest/XML, не caption окна. |
+| 245–257 | BITSPIXEL=32 / PLANES=1 относятся к **destination DC**; StretchBlt(dst=0xBF012AB8, 35,0,981,576, src=0x5A0125B6, 0,0,981,576, SRCCOPY) → TRUE; EndPaint(0x9E0B04), затем восстановление GDI objects и DeleteDC(memory). |
+| 258–412 | Второй EXE BeginPaint(0x500410) → DC=0x28012BF1. COLOR_BTNFACE=0xF0F0F0, OPAQUE, **37 FillRect**, 10 DrawTextA с номерами «1»…«10» и теми же flags, результаты 14; LineTo(34,556), затем EndPaint. |
+
+Второй проход согласуется с gutter по номерам строк и описанию пользователя,
+но сам API Monitor здесь **не содержит GetClassName/GetParent**, значений
+RECT/LOGBRUSH по указателям или BITMAP выбранного source bitmap. Поэтому
+не считать доказанными его bpp, точные fill bounds или родство окон только
+по этому текстовому экспорту. В тестовых двойниках используются API-строки
+и геометрия строк/клиента, согласованные с наблюдаемыми IntersectClipRect /
+StretchBlt; это не восстановление всех значений структур из capture.
+
+В предоставленном фрагменте нет BeginBufferedPaint/SetAlpha/EndBufferedPaint,
+а финальный перенос — **обычный StretchBlt из совместимого bitmap**. Нельзя
+объяснять его тем же успешным SetAlpha255, что доказан в LogViewer-19.
+Текущий generic root slot перехватывал EXE DrawTextW, но не **DrawTextA**;
+внутренний ExtTextOutW из user32/gdi32full не проходит через EXE DrawTextW IAT.
+Отсутствие собственного текстового лога зонда не означало отсутствия API.
+
+### Отдельный узкий путь без изменения Edit / renderer
+
+- `GlassBomeMemo.h` перечисляет **только TBomeMemo и TBMGutter**, case-insensitive,
+  без подстрок. Оба — DelphiContainer → существующий Root_Attach в Full,
+  **не алиасы Edit/TMemo** и не получатели native Edit-сообщений/композитора.
+- В root cache два выделенных EXE IAT slot: **DrawTextA / FillRect**, только
+  Paint-канал и только HINSTANCE==entry-point. Сохранённый original берётся
+  по модулю/номеру слота, не по return address trampoline. Используется прежняя
+  сбалансированная Root BeginPaint/EndPaint-сессия; новых экспортов, меж-DLL
+  связей, Detours и lifecycle/refcount-инфраструктуры нет.
+- `delphi/TBomeMemoDraw` допускает только текущий BeginPaint DC либо записанный
+  PaintDispatcher memory DC этого HWND при открытом paint и совпадении верхней
+  drawing session. Один ambient HWND недостаточен. NC/GetWindowDC, чужой или
+  неучтённый memory DC, standalone GetDC, другой mode/backdrop — native.
+  Это контекстная запись CreateCompatibleDC, не доказательство физической
+  цепочки bitmap → финальный StretchBlt; сам перенос не перехватывается.
+  Для memory DC дополнительно проверяется **selected BITMAP: 1 plane / 32bpp**,
+  положительные размеры. Неизвестный/24bpp bitmap не преобразуется наугад;
+  появляется ограниченная диагностика `BomeMemo] UnsupportedBitmap`.
+- Поддержаны MM_TEXT, GM_COMPATIBLE, обычный layout и нулевые window/viewport
+  origins. Неизвестные transforms/layout передаются оригиналу. Native clip
+  DC сохраняется; фоновые rect строк/остатков не обязаны быть full-client.
+- Для TBomeMemo очищается **только текущий COLOR_WINDOW**; для TBMGutter —
+  COLOR_WINDOW **или COLOR_BTNFACE**. В FillRect учитываются solid HBRUSH и
+  encoded COLOR_*+1. Black/custom/selection RGB, отличные от этих системных
+  значений, и pattern brushes остаются native — новый A100/selection classifier
+  не вводится.
+- В DrawTextA поддержаны наблюдаемые single-line rows. При OPAQUE допускается
+  только такой системный фон: сначала BLACKNESS на layout rect, затем прежний
+  `DrawTextWithAlpha(..., transparentBufferBackground=true)`. При TRANSPARENT
+  фон не очищается. Используются исходный выбранный font и text color DC;
+  caller RECT отдаётся renderer через копию. SaveDC/RestoreDC ограничивает
+  TRANSPARENT, включая внутренний plain-GDI fallback прежнего renderer.
+  При отказе до очистки — исходный ANSI API. После успешной очистки фон уже
+  Glass: отказ renderer даёт native ANSI glyphs в TRANSPARENT поверх него,
+  а не повторную непрозрачную заливку. Это **не** транзакционный откат пикселей;
+  состояние DC восстанавливается при успехе, отказе и C++-исключении.
+- ANSI декодируется по charset выбранного шрифта через TranslateCharsetInfo;
+  DEFAULT_CHARSET использует CP_ACP, Symbol/неизвестный charset — native.
+  Соблюдаются явный **байтовый** count, DBCS и -1 с исключением завершающего NUL
+  из Unicode count. XML `encoding='UTF-8'` не принимается за кодовую страницу
+  аргумента DrawTextA. DT_CALCRECT, DT_MODIFYSTRING, DT_NOCLIP и multiline
+  layout остаются native, как пустой/невалидный ввод и переполнение RECT.
+- Generic SetBkColor/GetSysColorBrush/CreateSolidBrush не должны заранее
+  превращать исходный системный RGB в неотличимый black ни в собственной,
+  ни во вложенной root-сессии этих классов. Исключение ограничено двумя
+  точными классами; прежняя политика остальных окон/групп сохранена.
+
+Финальный StretchBlt, cached bitmap приложения, NC/LineTo, RenderText,
+Edit/RichEdit, панели/фреймы, grids, TCoolBar и ImageList-код не менялись.
+Добавлены ограниченные записи `[GlassCore][BomeMemo] text` / `fill` с HWND/DC,
+кодовой страницей/длинами, RGB/результатом. Это не новый глобальный зонд.
+
+### Проверки и Windows acceptance
+
+`WndCompat/tests/bome_memo_rendering_test.py` компилирует production helper
+и реальные root gate/dependency rows/wrappers, а также DelphiContainer-ветку
+classifier с Win32/IAT doubles.
+**8/8 × Release/Debug**, отдельно ASan+UBSan — PASS: memo memory/direct gutter,
+20 ANSI-строк, кодовые страницы/DBCS/count, opaque/transparent и динамические
+системные RGB, настоящий black/custom/selection passthrough, measurement/
+mutation/unclipped passthrough, 32bpp/DC/paint/mode/layout/backdrop gates,
+ошибки конверсии/SaveDC/SetBkMode/очистки/renderer, reentry, original slot
+и shutdown. Contracts **75/75**; panels **12/12 × Release/Debug**, button groups
+**9/9 × Release/Debug**, TCoolBar **9/9**, input icons **6/6** — PASS.
+Проверки XML проектов, UTF-8 без BOM и `git diff --check` — PASS.
+
+**Windows/MSVC Debug|Win32 и визуальная проверка Restorator не выполнялись.**
+Portable doubles не доказывают сохранение альфы в реальном compatible bitmap
+и после native StretchBlt; BITSPIXEL target из лога не заменяет проверку source.
+После сборки проверить основной текст, номера строк, repaint/scroll/resize,
+caret/focus и выделение, non-ASCII, Full/backdrop toggle. Неподтверждённые
+GetDC/BPL/другие text API не заявляются как покрытые. Если дефект остаётся:
+скриншот + «Логи при отображении» (новые BomeMemo text/fill/UnsupportedBitmap)
++ «Логи с зондом при отображении элемента». Финализация галерейного буфера и
+тулбар остаются отдельной задачей.
+
+### Отдельное сообщение о Debug|Win32 access violation
+
+При старте отладки пользователь получил в процессе rundll32.exe:
+**0xC0000005**, instruction=**0x004D2DCD**, read=**0x0086AFF5**;
+продолжение позволяет работать дальше. Стек, имя faulting module, его база/
+PDB и дамп не переданы; API-Monitor-6 содержит рисование Restorator, а не
+эту остановку. Адреса без загрузочных баз не определяют функцию, а имя
+процесса rundll32 не определяет виновный DLL-модуль.
+
+По описанию это может быть first-chance исключение, перехватываемое SEH,
+но **безвредность и причина не установлены**. В коде есть защищённые PE/IAT
+чтения и helper намеренного AV для определения vtable offset, однако это
+не связывает их с данным instruction address или фактическим стеком старта.
+Не добавлять blind catch/проверку адреса и не рекомендовать глобально
+отключать остановку на AV. Нужны скопированный Call Stack в точке остановки
+(с внешними кадрами до первого Glass-модуля), имя модуля/функция/строка,
+состояние символов соответствующей Win32 Debug DLL; при недостатке — дамп
+именно остановленного процесса. Исключение этим render-патчем не исправлено.
+
+После сохранения выводов и сверки SHA-256 исходный API-Monitor-6 удалён
+из входящих вложений; копия capture в репозитории не сохранялась.

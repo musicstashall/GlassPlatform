@@ -105,7 +105,8 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('&& !GlassShared::IsDelphiButtonGroupsWindow(hWnd)', root)
         gdi = read('GlassCore/src/Hooks/RootGdiHooks.cpp')
         bk = gdi.split('COLORREF WINAPI Root_MySetBkColor(HDC hdc', 1)[1].split('HBRUSH WINAPI Root_MyGetSysColorBrush(', 1)[0]
-        self.assertIn('GlassShared::IsDelphiButtonGroupsClassName(cls)) return o(hdc, color)', bk)
+        self.assertIn('&& (GlassShared::IsDelphiButtonGroupsClassName(cls)\n'
+                      '                    || GlassShared::IsBomeMemoClassName(cls))) return o(hdc, color)', bk)
         for start, end, passthrough in (
             ('HBRUSH WINAPI Root_MyGetSysColorBrush(int nIndex)', 'HBRUSH WINAPI Root_MyCreateSolidBrush(COLORREF color)', 'return o(nIndex)'),
             ('HBRUSH WINAPI Root_MyCreateSolidBrush(COLORREF color)', 'HGDIOBJ WINAPI Root_MySelectObject(', 'return o(color)'),
@@ -1330,7 +1331,8 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('pixel[3] = kCustomBackgroundAlpha', policy)
         cache = read('GlassCore/src/Hooks/RootWindowHooks.cpp')
         self.assertIn('if (!GlassShared::IsDelphiPanelClassName(cls)\n'
-                      '                    && !GlassShared::IsDelphiButtonGroupsClassName(cls))', cache)
+                      '                    && !GlassShared::IsDelphiButtonGroupsClassName(cls)\n'
+                      '                    && !GlassShared::IsBomeMemoClassName(cls))', cache)
         self.assertIn('&& !GlassShared::IsDelphiPanelWindow(hWnd)', cache)
 
     def test_panel_sessions_release_only_acquired_refs_and_isolate_dcs(self):
@@ -1364,6 +1366,77 @@ class DelphiPipelineContract(unittest.TestCase):
                        'L"TShownValueList"', 'PatBlt(hdc, rc.left, rc.top', 'return ok != FALSE;'):
             self.assertIn(marker, body)
         self.assertIn('RegisterPostPaintProvider({ Root_OnDelphiGridAfterBeginPaint })', root)
+
+    def test_bome_memo_exact_container_classes_and_exe_ansi_slots_are_registered(self):
+        classes = read('GlassShared/include/GlassBomeMemo.h')
+        for name in ('TBomeMemo', 'TBMGutter'):
+            self.assertIn('_wcsicmp(name, L"' + name + '") == 0', classes)
+        self.assertEqual(classes.count('_wcsicmp'), 2)
+        for forbidden in ('wcsstr', 'wcsncmp', 'find('):
+            self.assertNotIn(forbidden, classes)
+        classifier = read('WndCompat/Tracker/WindowClassifier.cpp')
+        self.assertIn('GlassShared::IsBomeMemoClassName(cls.c_str())', classifier)
+        edit = classifier.split('// ── Edit ─', 1)[1].split('// ── RichEdit', 1)[0]
+        self.assertNotIn('Bome', edit)
+        root = read('GlassCore/src/Hooks/RootWindowHooks.cpp')
+        gate = root.split('// Custom-painted TBomeMemo/TBMGutter:', 1)[1].split('// VCL paints windowless', 1)[0]
+        for guard in ('instMod == GlassCore::ModuleHandler::g_entryPointModule',
+                      'GlassShared::IsBomeMemoClassName(cls)', 'OHK_BOME_MEMO_TEXT', 'OHK_BOME_MEMO_FILL'):
+            self.assertIn(guard, gate)
+        self.assertNotIn('PushDc', gate)
+        gdi = read('GlassCore/src/Hooks/RootGdiHooks.cpp')
+        wrappers = gdi.split('// Bome memo EXE wrappers:', 1)[1].split('int WINAPI Root_MyDrawTextW(', 1)[0]
+        for token in ('GetRootOrg<OHK_BOME_MEMO_TEXT, decltype(&::DrawTextA)>',
+                      'GetRootOrg<OHK_BOME_MEMO_FILL, decltype(&::FillRect)>',
+                      'GlassCore::ModuleHandler::g_entryPointModule', 'g_shutdown.load',
+                      'GlassCore::DelphiBomeMemo::DrawAnsiText', 'GlassCore::DelphiBomeMemo::FillBackground'):
+            self.assertIn(token, wrappers)
+        self.assertNotIn('_ReturnAddress', wrappers)
+        self.assertIn('"DrawTextA", reinterpret_cast<PVOID>(Root_MyBomeMemoText)', gdi)
+        self.assertIn('"FillRect", reinterpret_cast<PVOID>(Root_MyBomeMemoFill)', gdi)
+        header = read('GlassCore/Include/Hooks/RootGdiHooks.h')
+        enum = header.split('enum RootHookIndex : size_t', 1)[1].split('#if defined(_DEBUG)', 1)[0]
+        indices = [line.strip().split(',')[0].split('=')[0].strip()
+                   for line in enum.splitlines() if line.strip().startswith('OHK_')]
+        rows = gdi.split('inline const HookDispatcherDependency<OHK_COUNT, 3> g_rootHookDep', 1)[1].split('#if defined(_DEBUG)', 1)[0]
+        apis = [line.split('"')[1] for line in rows.splitlines() if 'reinterpret_cast<PVOID>' in line]
+        self.assertEqual(len(indices), len(apis))
+        self.assertEqual(apis[indices.index('OHK_BOME_MEMO_TEXT')], 'DrawTextA')
+        self.assertEqual(apis[indices.index('OHK_BOME_MEMO_FILL')], 'FillRect')
+        for project in ('GlassCore/GlassCore.vcxproj', 'GlassCore/GlassCore.vcxproj.filters'):
+            self.assertIn(r'src\Hooks\delphi\TBomeMemoDraw.cpp', read(project))
+            self.assertIn(r'Include\Hooks\delphi\TBomeMemoDraw.h', read(project))
+        for project in ('GlassShared/GlassShared.vcxproj', 'GlassShared/GlassShared.vcxproj.filters'):
+            self.assertIn(r'include\GlassBomeMemo.h', read(project))
+
+    def test_bome_memo_keeps_source_colors_and_requires_owned_paint_dc(self):
+        root = read('GlassCore/src/Hooks/RootWindowHooks.cpp')
+        self.assertIn('&& !GlassShared::IsBomeMemoClassName(cls)', root)
+        self.assertIn('&& !GlassShared::IsBomeMemoWindow(hWnd)', root)
+        gdi = read('GlassCore/src/Hooks/RootGdiHooks.cpp')
+        set_bk = gdi.split('COLORREF WINAPI Root_MySetBkColor(HDC hdc', 1)[1].split('HBRUSH WINAPI Root_MyGetSysColorBrush(', 1)[0]
+        sys_brush = gdi.split('HBRUSH WINAPI Root_MyGetSysColorBrush(int nIndex)', 1)[1].split('HBRUSH WINAPI Root_MyCreateSolidBrush(', 1)[0]
+        create_brush = gdi.split('HBRUSH WINAPI Root_MyCreateSolidBrush(COLORREF color)', 1)[1].split('HGDIOBJ WINAPI Root_MySelectObject(', 1)[0]
+        self.assertIn('GlassShared::IsBomeMemoClassName(cls)', set_bk)
+        for body in (sys_brush, create_brush):
+            self.assertIn('GlassShared::IsBomeMemoWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd())', body)
+        draw = read('GlassCore/src/Hooks/delphi/TBomeMemoDraw.cpp')
+        for guard in ('IsFullInjectionMode()', 'GlassIsBackdropAllowedForHwnd(hwnd)',
+                      'HasOpenPaintSessionForHwnd(hwnd)', 'IsTopWindowDrawingSession(hwnd)',
+                      'IsCurrentPaintDcForHwnd(hwnd, dc)', 'IsPaintStackDcForHwnd(hwnd, dc)',
+                      'GetStackOwnerForDc(dc)', 'bitmap.bmBitsPixel != 32', 'GetMapMode(dc) != MM_TEXT',
+                      'GetGraphicsMode(dc) != GM_COMPATIBLE', 'GetLayout(dc) != 0',
+                      'DT_CALCRECT | DT_MODIFYSTRING | DT_NOCLIP', '!(flags & DT_SINGLELINE)',
+                      'SaveDC(dc)', 'RestoreDC(dc, saved)', 'SetBkMode(dc, TRANSPARENT)',
+                      'MultiByteToWideChar', 'GetTextCharset(dc)',
+                      'TranslateCharsetInfo', 'SYMBOL_CHARSET', 'if (opaque && !DefaultBackground',
+                      'GetSysColor(COLOR_WINDOW)', 'GetSysColor(COLOR_BTNFACE)', 'BS_SOLID',
+                      'count == -1 ? size - 1 : size', 'if (g_inside', 'catch (...)',
+                      '[GlassCore][BomeMemo] text', '[GlassCore][BomeMemo] fill'):
+            # The reentry test is part of the compound PaintWindow guard.
+            self.assertIn(guard, draw)
+        for forbidden in ('CreateSolidColorBrushWithAlpha', 'BufferedPaintSetAlpha', 'GetVTableIndex'):
+            self.assertNotIn(forbidden, draw)
 
 if __name__ == "__main__":
     unittest.main()
