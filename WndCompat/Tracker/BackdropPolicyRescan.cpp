@@ -10,6 +10,7 @@
 #include <Controls/TreeViewSubclass.h>
 #include <Controls/ButtonSubclass.h>
 #include <Controls/ListViewSubclass.h>
+#include <Controls/RebarSubclass.h>
 #include <Explorer/ExplorerIslandContainerSubclass.h>
 #include <WinUiBridge/WinUiDesktopBridgeHost.h>
 #include <GlassControlKind.h>
@@ -143,6 +144,18 @@ namespace
 
         if (WndCompat::IsGlassSettingsBitmapSwitchHwnd(hChild))
             return;
+
+        // Rebar/TCoolBar: свой сабкласс и своя сессия отрисовки.
+        {
+            wchar_t cls[64]{};
+            if (GetClassNameW(hChild, cls, static_cast<int>(std::size(cls))) > 0
+                && (wcsstr(cls, L"CoolBar") != nullptr || wcsstr(cls, L"ReBar") != nullptr
+                    || wcsstr(cls, L"Rebar") != nullptr))
+            {
+                WndCompat::Rebar_Attach(hChild);
+                return;
+            }
+        }
 
         if (GlassShared::GlassGetWindowKind(hChild) != GK::None)
         {
