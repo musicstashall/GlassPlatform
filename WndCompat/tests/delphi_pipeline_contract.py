@@ -535,10 +535,10 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('SetLastError(originalError)', body)
         self.assertIn('return result;', body)
 
-    def test_richedit_background_uses_alpha_brush_for_every_non_window_color(self):
+    def test_richedit_and_memo_background_use_alpha_brush_for_every_non_window_color(self):
         source = read('GlassCore/src/Hooks/EditHooks.cpp')
         apply = source.split('static void ApplyEditBackgroundRect(', 1)[1].split('static COLORREF GetRichEdit20BackgroundFromEm', 1)[0]
-        self.assertRegex(apply, r'const bool fill = IsRichEditKind\(GlassShared::GlassGetWindowKind\(sessionHwnd\)\)\s*'
+        self.assertRegex(apply, r'const bool fill = IsRichEditKind\(GlassShared::GlassGetWindowKind\(sessionHwnd\)\) \|\| IsDelphiMemo\(sessionHwnd\)\s*'
                                r'\? rgb != sysWnd : rgb != 0 && rgb != sysBtn && rgb != sysWnd;')
         self.assertIn('CreateSolidColorBrushWithAlpha(color, 100)', apply)
         self.assertRegex(apply, r'(?s)if \(!fill\)\s*\{[^}]*\}\s*else\s*\{\s*FillRect\(targetDC, &r, brush.get\(\)\);')
@@ -552,7 +552,7 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('PushSessionBlacknessRect(r,', apply)
         self.assertIn('FillRect(targetDC, &r, brush.get())', apply)
         replay = source.split('static void ReplayMemoBackgrounds(', 1)[1].split('// ── FlushEditBuffer', 1)[0]
-        self.assertRegex(replay, r'(?s)for \(const auto& op : buf.memoBackgrounds\).*?PatBlt\(dc.*?if \(op.fill\).*?CreateSolidColorBrushWithAlpha\(op.color, 255\).*?FillRect\(dc')
+        self.assertRegex(replay, r'(?s)for \(const auto& op : buf.memoBackgrounds\).*?PatBlt\(dc.*?if \(op.fill\).*?CreateSolidColorBrushWithAlpha\(op.color, 100\).*?FillRect\(dc')
         flush = source.split('static void FlushEditBuffer()', 1)[1].split('static void ApplyEditBackgroundRect(', 1)[0]
         self.assertRegex(flush, r'(?s)if \(buf->delphiMemo\)\s*\{.*?ReplayMemoBackgrounds\(composeDC, \*buf\);.*?GdiAlphaBlend\(composeDC')
         self.assertRegex(flush, r'(?s)if \(buf->delphiMemo\)\s*\{.*?ReplayMemoBackgrounds\(buf->screenDC, \*buf\);.*?GdiAlphaBlend\(buf->screenDC')
@@ -562,10 +562,14 @@ class DelphiPipelineContract(unittest.TestCase):
         root = read('WndCompat/Root/RootSubclass.cpp')
         capture = root.split('const bool validBrush = GetObject(', 1)[1].split('if (validBrush)', 1)[0]
         for guard in ('WM_CTLCOLORSTATIC', 'L"TMemo"', 'validBrush', 'BS_SOLID', 'OPAQUE',
-                      'GetBkColor(hdc)', 'COLOR_WINDOW', 'COLOR_BTNFACE'):
+                      'GetBkColor(hdc)', 'COLOR_WINDOW'):
             self.assertIn(guard, capture)
         self.assertIn('SetDelphiMemoBackground(memo, rgb)', capture)
         self.assertIn('ClearDelphiMemoBackground(memo)', capture)
+        self.assertNotIn('rgb != 0', capture)
+        self.assertNotIn('COLOR_BTNFACE', capture)
+        self.assertIn('if (!memoBackground) SetBkColor(hdc, 0)', root)
+        self.assertIn('uMsg != WM_CTLCOLOREDIT || !WndCompat::IsWindowClass(reinterpret_cast<HWND>(lParam), L"TMemo")', root)
         edit_host = read('WndCompat/Controls/EditSubclass.cpp')
         self.assertEqual(edit_host.count('GlassShared::ClearDelphiMemoBackground(hWnd)'), 2)
         prop = read('GlassShared/include/GlassDelphiMemoBackground.h')
@@ -578,7 +582,7 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('op.fill && (op.color & 0xFFFFFFu) == buf.memoSolidBackground', confirm)
         prime = edit.split('static bool PrimeMemoSolidBackground(', 1)[1].split('static void ReplayMemoBackgrounds(', 1)[0]
         self.assertIn('!HasConfirmedMemoSolidBackground(buf)', prime)
-        self.assertIn('CreateSolidColorBrushWithAlpha(buf.memoSolidBackground, 255)', prime)
+        self.assertIn('CreateSolidColorBrushWithAlpha(buf.memoSolidBackground, 100)', prime)
         flush = edit.split('static void FlushEditBuffer()', 1)[1].split('static void ApplyEditBackgroundRect(', 1)[0]
         for dc in ('composeDC', 'buf->screenDC'):
             self.assertLess(flush.index(f'PrimeMemoSolidBackground({dc}, *buf)'), flush.index(f'ReplayMemoBackgrounds({dc}, *buf)'))
