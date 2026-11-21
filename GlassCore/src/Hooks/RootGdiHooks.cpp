@@ -1069,8 +1069,15 @@ namespace GlassCore::Root
                 const HGDIOBJ oldFont = t.font ? SelectObject(dc, t.font) : nullptr;
                 const COLORREF oldColor = SetTextColor(dc, t.color);
                 const int oldBk = SetBkMode(dc, TRANSPARENT);
-                ExtTextOutW(dc, t.x, t.y, t.options & ~static_cast<UINT>(ETO_OPAQUE),
-                    &t.rect, t.text.c_str(), static_cast<UINT>(t.text.size()), nullptr);
+                // Тот же путь, что и при обычной отрисовке: чистый GDI-текст
+                // чёрным на прозрачном фоне уходит в color key и пропадает.
+                const UINT drawOpt = t.options & ~static_cast<UINT>(ETO_OPAQUE);
+                const HRESULT hr = GlassCore::Text::ExtTextOutWithAlpha(dc, t.x, t.y,
+                    drawOpt, &t.rect, t.text.c_str(), static_cast<UINT>(t.text.size()),
+                    nullptr, &::ExtTextOutW);
+                if (FAILED(hr))
+                    ExtTextOutW(dc, t.x, t.y, drawOpt, &t.rect, t.text.c_str(),
+                        static_cast<UINT>(t.text.size()), nullptr);
                 SetBkMode(dc, oldBk);
                 SetTextColor(dc, oldColor);
                 if (oldFont)
