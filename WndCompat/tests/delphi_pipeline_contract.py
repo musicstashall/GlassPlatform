@@ -922,10 +922,27 @@ class DelphiPipelineContract(unittest.TestCase):
         rebar = read("GlassCore/src/Hooks/RebarHooks.cpp")
         self.assertNotIn('CoolBar', rebar)
 
+    def test_tcoolbar_subclass_filename_matches_its_message_scope(self):
+        source = read('WndCompat/Controls/TCoolBarSubclass.cpp')
+        self.assertTrue((ROOT / 'WndCompat/Controls/TCoolBarSubclass.h').is_file())
+        for extension in ('cpp', 'h'):
+            self.assertFalse((ROOT / ('WndCompat/Controls/CoolBarSubclass.' + extension)).exists())
+            for project in ('WndCompat/WndCompat.vcxproj', 'WndCompat/WndCompat.vcxproj.filters'):
+                contents = read(project)
+                self.assertIn('Controls\\TCoolBarSubclass.' + extension, contents)
+                self.assertNotIn('Controls\\CoolBarSubclass.' + extension, contents)
+        self.assertIn('SetWindowSubclass(hWnd, TCoolBarSubclassProc, 1, 0)', source)
+        self.assertIn('RemoveWindowSubclass(hWnd, TCoolBarSubclassProc, 1)', source)
+        self.assertIn('#include <Controls/TCoolBarSubclass.h>', source)
+        for path in ('WndCompat/Tracker/WindowClassifier.cpp', 'WndCompat/Tracker/WinEventHandler.cpp',
+                     'WndCompat/Tracker/BackdropPolicyRescan.cpp', 'WndCompat/Root/RootSubclass.cpp',
+                     'WndCompat/Root/Win32ChromeRestore.cpp'):
+            self.assertIn('#include <Controls/TCoolBarSubclass.h>', read(path))
+
     def test_coolbar_raw_class_gate_is_shared_by_classifier_attach_and_rescan(self):
         # The probe reports GetClassNameW == TCoolBar. It is not the caption
         # or the theme class Rebar, and NormalizeWindowClass keeps the T.
-        code = read('WndCompat/Controls/CoolBarSubclass.cpp')
+        code = read('WndCompat/Controls/TCoolBarSubclass.cpp')
         predicate = code.split('bool CoolBar_IsClassName(const wchar_t* className) noexcept', 1)[1].split(
             'void CoolBar_Attach(HWND hWnd)', 1)[0]
         self.assertIn('_wcsicmp(className, L"TCoolBar") == 0', predicate)
@@ -933,7 +950,7 @@ class DelphiPipelineContract(unittest.TestCase):
         for forbidden in ('wcsstr', 'wcsncmp', 'ContainsSubstr', 'ReBarWindow32', 'SizeableRebar'):
             self.assertNotIn(forbidden, predicate)
         window_gate = code.split('bool IsCoolBarClass(HWND hWnd) noexcept', 1)[1].split(
-            'LRESULT CALLBACK CoolBarSubclassProc', 1)[0]
+            'LRESULT CALLBACK TCoolBarSubclassProc', 1)[0]
         self.assertIn('GetClassNameW', window_gate)
         self.assertIn('WndCompat::CoolBar_IsClassName(cls)', window_gate)
         self.assertIn('if (!IsCoolBarClass(hWnd))', code)
@@ -949,7 +966,7 @@ class DelphiPipelineContract(unittest.TestCase):
 
     def test_coolbar_dedicated_path(self):
         # WndCompat: свой сабкласс и провайдер.
-        subclass = read("WndCompat/Controls/CoolBarSubclass.cpp")
+        subclass = read("WndCompat/Controls/TCoolBarSubclass.cpp")
         for marker in ('void CoolBar_Attach(HWND hWnd)',
                        'void CoolBar_Detach(HWND hWnd)',
                        'void CoolBar_DetachAll()',
@@ -1028,7 +1045,7 @@ class DelphiPipelineContract(unittest.TestCase):
             self.assertIn(diag, hooks)
 
     def test_coolbar_printclient_is_native_paint_with_a_balanced_session(self):
-        subclass = read('WndCompat/Controls/CoolBarSubclass.cpp')
+        subclass = read('WndCompat/Controls/TCoolBarSubclass.cpp')
         paint = subclass.split('case WM_PAINT:', 1)[1].split('case WM_ERASEBKGND:', 1)[0]
         self.assertIn('case WM_PRINTCLIENT:', paint)
         self.assertIn('p->OnPaintBegin(hWnd, reinterpret_cast<HDC>(wParam))', paint)

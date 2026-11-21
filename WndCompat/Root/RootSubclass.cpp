@@ -26,7 +26,7 @@
 #include <Controls/TrackBarHost.h>
 #include <Controls/DirectUISubclass.h>
 #include <Controls/RebarSubclass.h>
-#include <Controls/CoolBarSubclass.h>
+#include <Controls/TCoolBarSubclass.h>
 #include <Controls/ToolbarSubclass.h>
 #include <Explorer/ExplorerIslandContainerSubclass.h>
 #include <Root/ExplorerRootSubclass.h>

@@ -48,7 +48,7 @@
 #include <Controls/EditSubclass.h>
 #include <Controls/StaticSubclass.h>
 #include <Controls/RebarSubclass.h>
-#include <Controls/CoolBarSubclass.h>
+#include <Controls/TCoolBarSubclass.h>
 #include <Controls/HeaderSubclass.h>
 #include <Controls/ListBoxSubclass.h>
 #include <Controls/StatusBarSubclass.h>

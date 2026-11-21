@@ -2,7 +2,7 @@
 // shim. No duplicate implementation of the routing logic lives in this test.
 #include "coolbar_test_shim.h"
 #include "../../GlassCore/src/Hooks/delphi/TCoolBarDraw.cpp"
-#include "../Controls/CoolBarSubclass.cpp"
+#include "../Controls/TCoolBarSubclass.cpp"
 #include "../Providers/CoolBarEventProvider.cpp"
 #include <stdexcept>
 
@@ -119,6 +119,9 @@ namespace
         // Probe evidence: hdcWin class="TCoolBar" in both modes, not "CoolBar".
         CHECK(c.window.cls == L"TCoolBar");
         CHECK(c.window.kind == GlassShared::GlassControlKind::None && !c.window.subclass);
+        // Native drawing may run before PaintDispatcher has a BeginPaint host.
+        // The message subclass must already own the complete hook scope.
+        Test::host = Test::topWindow = nullptr;
         WndCompat::CoolBar::SetCoolBarEventProvider({&OnPaintBegin, &OnPaintEnd});
         WndCompat::CoolBar_Attach(&c.window);
         CHECK(c.window.subclass && c.window.kind == GlassShared::GlassControlKind::CoolBar);
@@ -126,6 +129,7 @@ namespace
         bool themed = true;
         Test::duringNativePaint = [&](HWND w, UINT msg, WPARAM wp, LPARAM) {
             CHECK(w == &c.window && msg == WM_PAINT && wp == 0);
+            CHECK(!Test::host && !Test::topWindow);
             c.CheckRefs(1);
             constexpr UINT hidePrefix = 0x100000;
             if (themed)
@@ -315,12 +319,16 @@ namespace
     void PrintClientBridge()
     {
         Context c; c.Start();
+        // A standalone print uses the supplied DC: no BeginPaint/GetDC provider
+        // and no paint owner are simulated anywhere in this message.
+        Test::host = Test::topWindow = nullptr;
         WndCompat::CoolBar::SetCoolBarEventProvider({&OnPaintBegin, &OnPaintEnd});
         WndCompat::CoolBar_Attach(&c.window);
         CHECK(c.window.subclass && WndCompat::CoolBar_IsTracked(&c.window));
         Test::duringNativePaint = [&](HWND w, UINT msg, WPARAM wp, LPARAM lp) {
             CHECK(w == &c.window && msg == WM_PRINTCLIENT && lp == 4);
             CHECK(reinterpret_cast<HDC>(wp) == &c.foreign);
+            CHECK(!Test::host && !Test::topWindow);
             c.CheckRefs(1);
             Call(c.modules[Legacy], "DrawTextW", &::DrawTextW,
                 &c.foreign, c.text, 8, &c.textRect, 0u);

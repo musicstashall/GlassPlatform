@@ -1,10 +1,11 @@
-// Сабкласс Delphi TCoolBar (точные классы окна TCoolBar / CoolBar).
-// WM_PAINT / WM_PRINTCLIENT сохраняют native paint внутри отдельной
-// GlassCore-сессии delphi/TCoolBarDraw; generic rebar не используется.
+// Сабкласс Delphi TCoolBar: границы WM_PAINT / WM_PRINTCLIENT держат
+// отдельную GlassCore-сессию delphi/TCoolBarDraw вокруг native paint.
+// Это не Host с одним маркером/кистью: WM_CTLCOLOR* не задаёт область жизни
+// текстовых IAT-хуков, а WM_PRINTCLIENT может не вызывать BeginPaint/GetDC.
 // WM_ERASEBKGND чистит фон; рамку VCL продолжает рисовать через DrawEdge.
 
 #include "WndPch.h"
-#include <Controls/CoolBarSubclass.h>
+#include <Controls/TCoolBarSubclass.h>
 #include <Tracker/WinEventHandler.h>
 #include <InjectionMode.h>
 #include <GlassMessages.h>
@@ -25,7 +26,7 @@ namespace
             && WndCompat::CoolBar_IsClassName(cls);
     }
 
-    LRESULT CALLBACK CoolBarSubclassProc(
+    LRESULT CALLBACK TCoolBarSubclassProc(
         HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
         UINT_PTR /*id*/, DWORD_PTR /*data*/)
     {
@@ -106,8 +107,7 @@ namespace WndCompat
 {
     bool CoolBar_IsClassName(const wchar_t* className) noexcept
     {
-        // Не тема Rebar, не текст подписи и не подстрока имени окна:
-        // GetClassNameW в зонде возвращает именно TCoolBar.
+        // Имя окна из GetClassNameW; CoolBar сохранён как прежний алиас.
         return className && (_wcsicmp(className, L"TCoolBar") == 0
             || _wcsicmp(className, L"CoolBar") == 0);
     }
@@ -125,7 +125,7 @@ namespace WndCompat
             DebugLog(DBG_NORMAL, L"[WndCompat][CoolBar] CoolBar_Attach: skip (class) hwnd=0x%p", hWnd);
             return;
         }
-        if (!SetWindowSubclass(hWnd, CoolBarSubclassProc, 1, 0))
+        if (!SetWindowSubclass(hWnd, TCoolBarSubclassProc, 1, 0))
         {
             DebugLog(DBG_WARNING, L"[WndCompat][CoolBar] CoolBar_Attach: SetWindowSubclass FAILED hwnd=0x%p", hWnd);
             return;
@@ -145,7 +145,7 @@ namespace WndCompat
         if (it != g_coolBarWindows.end())
             g_coolBarWindows.erase(it);
         if (IsWindow(hWnd))
-            RemoveWindowSubclass(hWnd, CoolBarSubclassProc, 1);
+            RemoveWindowSubclass(hWnd, TCoolBarSubclassProc, 1);
         DebugLog(DBG_NORMAL, L"[WndCompat][CoolBar] CoolBar_Detach: hwnd=0x%p", hWnd);
     }
 
@@ -158,7 +158,7 @@ namespace WndCompat
             if (!IsWindow(hWnd))
                 continue;
             GlassShared::GlassUnmarkWindow(hWnd);
-            if (!RemoveWindowSubclass(hWnd, CoolBarSubclassProc, 1)
+            if (!RemoveWindowSubclass(hWnd, TCoolBarSubclassProc, 1)
                 && !WndCompat::IsShuttingDown())
             {
                 DWORD_PTR unused = 0;

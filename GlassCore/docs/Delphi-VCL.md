@@ -2766,7 +2766,7 @@ GDI, а не наш alpha. `image-49.png` — с визуальными стил
 - `ControlKind::CoolBar` (классификатор) — класс окна `CoolBar`;
   `ReBarWindow32`/`SizeableRebar` остались в `ControlKind::ReBar`, из rebar-ветки
   `CoolBar` убран полностью (ках-ап, рескан, `Rebar_CatchUp`, `RebarHooks`);
-- `WndCompat/Controls/CoolBarSubclass.cpp` — свой сабкласс: `CoolBar_Attach/
+- `WndCompat/Controls/TCoolBarSubclass.cpp` — свой сабкласс: `CoolBar_Attach/
   Detach/DetachAll/CatchUp`, `WM_GLASS_DETACH_COOLBAR`, `WM_ERASEBKGND`/
   `WM_PRINTCLIENT` → `PatBlt(BLACKNESS)`, `WM_PAINT` → провайдер
   `OnPaintBegin/OnPaintEnd`; окно помечается `GlassControlKind::CoolBar`;
@@ -2788,7 +2788,7 @@ GDI, а не наш alpha. `image-49.png` — с визуальными стил
 
 ## Тест 82: правки сборки для CoolBar
 
-Сборка падала на `WndCompat/Controls/CoolBarSubclass.cpp`:
+Сборка падала на `WndCompat/Controls/TCoolBarSubclass.cpp`:
 
 ```
 C3861 WinEventHook_SignalDetachComplete: идентификатор не найден
@@ -2889,7 +2889,7 @@ stackOwner, прямоугольник, флаги, text/bk color и BkMode. У�
 - `python3 WndCompat/tests/delphi_pipeline_contract.py` — 58/58;
 - `python3 WndCompat/tests/coolbar_rendering_test.py` — 7/7 исполняемых C++
   сценариев с Win32/IAT/RenderText doubles. Компилируются настоящие исходники
-  TCoolBarDraw, CoolBarSubclass и провайдера, не копия алгоритма. Проверяются
+  TCoolBarDraw, TCoolBarSubclass и провайдера, не копия алгоритма. Проверяются
   обе версии comctl32, альтернативные text API, прозрачный BkMode и restore,
   принадлежность DC, реентерабельность, refs, нижняя линия и WM_PRINTCLIENT;
 - те же 7 C++-сценариев с AddressSanitizer/UndefinedBehaviorSanitizer — OK;
@@ -2932,7 +2932,7 @@ gdi32full ExtTextOutW ETO_GLYPH_INDEX c=8
 
 1. `NormalizeWindowClass` сохраняет обычное Win32/VCL-имя без изменений,
    префикс `T` не снимает.
-2. Классификатор, `CoolBarSubclass` и `BackdropPolicyRescan` проверяли только
+2. Классификатор, `TCoolBarSubclass` и `BackdropPolicyRescan` проверяли только
    точное `CoolBar`. Поэтому реальное `TCoolBar` получало `ControlKind::Unknown`
    и попадало в общий `Root_Attach`, а не в `CoolBar_Attach`.
 3. Общий `RootSubclassProc::WM_ERASEBKGND` объясняет `PatBlt caller=WndCompat`
@@ -3119,3 +3119,81 @@ BeginPaint/GetDC не приобретает root text-слот: тестиру�
 WM_PRINTCLIENT-мост работает самостоятельно. Произвольные BPL/GetProcAddress
 и неизвестные offscreen DC по-прежнему не гарантируются. Визуальный результат
 на Windows ещё не проверен.
+
+## Тест 87: подтверждение фреймов, роль TCoolBarSubclass и аудит сопоставления имён
+
+Пользователь подтвердил: **TFrame, TSampleFrame, TEmbeddedForm — ОК**.
+Их renderer, фон и текст в этом шаге не меняются.
+
+### Почему оставлен именно TCoolBarSubclass, а не TCoolBarHost
+
+Для одного возврата кисти родителем сабкласс самого контрола был бы лишним.
+Но текущий модуль выполняет другие обязанности:
+
+1. До native обработки `WM_PAINT` / `WM_PRINTCLIENT` вызывает
+   `CoolBarEventProvider::OnPaintBegin`, после неё — сохранённый `OnPaintEnd`.
+   Так текстовые и фоновые IAT-слоты `delphi/TCoolBarDraw` имеют точные границы
+   жизни, в том числе до появления host в PaintDispatcher.
+2. Передаёт DC из `wParam`. Standalone `WM_PRINTCLIENT` не обязан вызывать
+   BeginPaint/GetDC и может рисовать в memory DC или DC родителя. Только
+   регистрация PaintDispatcher-провайдера этот случай не покрывает.
+3. Обрабатывает `WM_ERASEBKGND` и собственный detach/NCDESTROY. Возврат кисти
+   в `WM_CTLCOLOR*` не заменяет ни обрамление текста, ни парное снятие хуков.
+
+Это необходимость **нынешнего конвейера**, а не универсальное требование
+Win32 обязательно subclass-ить каждый rebar. Для варианта Host потребовалось
+бы сначала перенести перечисленные обязанности в другой подтверждённый путь,
+а не просто убрать SetWindowSubclass. Рабочий renderer не переделывается.
+
+У rebar есть собственные механизмы рисования: [NM_CUSTOMDRAW через WM_NOTIFY](https://github.com/MicrosoftDocs/win32/blob/docs/desktop-src/Controls/nm-customdraw-rebar.md)
+и [RB_SETBKCOLOR / REBARBANDINFO.clrBack](https://github.com/MicrosoftDocs/win32/blob/docs/desktop-src/Controls/rb-setbkcolor.md).
+Документация Microsoft отдельно указывает, что RB_SETBKCOLOR не действует
+при включённых visual styles. Это не универсальный WM_CTLCOLOR-протокол
+дочерних контролов.
+
+Переименованы `Controls/CoolBarSubclass.cpp/.h` →
+**`Controls/TCoolBarSubclass.cpp/.h`**, внутренний callback —
+`TCoolBarSubclassProc`. Обновлены includes, project/filter, тесты и ссылки
+документации. Имена публичных CoolBar-функций, provider ABI, маркер kind,
+сообщения detach и весь алгоритм отрисовки сохранены. После нормализации
+ренейма и удаления комментариев код обоих переименованных файлов совпадает
+с предыдущим. Generic Rebar и принятые панели не менялись.
+
+### Что означала неудачная фраза «без поиска по подстроке»
+
+В TCoolBar и новом panel/frame-пути **не вводился** такой способ выбора
+контрола. `_wcsicmp(className, L"TCoolBar") == 0` сравнивает имя целиком;
+`CoolBar` — второй явно перечисленный алиас. GetClassNameW только возвращает
+имя HWND, не ищет текст в нём. `std::find(g_coolBarWindows, ..., hWnd)` —
+проверка наличия HWND в векторе, а `map.find(hwnd)` — поиск по ключу, не
+сопоставление части имени класса.
+
+Аудит текущих production C++/C#/headers (без vendor/frozen и tests) обнаружил
+следующие отдельные применения поиска части строки:
+
+| Область | Файл / функция | Что сопоставляется |
+|---|---|---|
+| Классификация HWND | `WndCompat/Tracker/WindowClassifier.cpp`, `ContainsSubstrI` → `IsAtlWtlNoiseOrUnknown` | `.NET-BroadcastEventWindow` и `Afx:` в нормализованном имени. Это фильтр Ignored, не выбор VCL renderer. Реализация — цикл сравнений `_wcsnicmp` со смещением. |
+| Только диагностический список HWND | `ExplorerCompat/xaml/XamlTapSite.cpp`, `LogShellTrayBridgeHwndsOnce` | `wcsstr(cls, L"Bridge"/L"Xaml")` и те же проверки gcls выбирают, какие дочерние окна логировать; не вызывают attach и не задают backdrop. |
+| Класс **темы**, не HWND | `GlassCore/src/Subsystems/MenuRendering.cpp`, `HandleDrawThemeBackground` | `std::wcsstr(cls, L"Menu")` после GetThemeClass. |
+| XAML runtime type/name | `ExplorerCompat/xaml/Patcher/XamlHostBarPatcher.cpp`, `...Patch.cpp`, `...PopupDwxs.cpp` | `WszContainsI` (обёртка StrStrIW) проверяет признаки Explorer и shell chrome; это строки GetRuntimeClassName/type/name. |
+| XAML runtime type/property | `ExplorerCompat/xaml/Patcher/XamlHostBarPatcherApply.cpp`, `...RestoreHostBar.cpp`, `...Lazy.cpp`, `...Common.cpp` | `find`, `wcsstr`, StrStrIW: Navigation/Command/Address/Tab control, DesktopWindowXamlSource, PopupRoot/RootScrollViewer, Brush и имена свойств Background/BorderBrush/Fill/Opacity/Child. |
+| XAML runtime type/name | `UICompat/xaml/UiVisualTreeWatcher.cpp` | `wstring_view::find` по Jump/JumpView/JumpList и WebView/HostedWebView. |
+| XAML runtime type | `TaskbarCompat/xaml/TaskbarZonePainter.cpp` | `wstring::find` по TaskbarBackground и TaskListButton в коротком имени типа. |
+
+Отдельно есть **проверки префикса**, не произвольного вхождения:
+`HasPrefixI` для ATL:/WTL_ в WindowClassifier, ATL: в RootGdiHooks/RootWindowHooks;
+нормализация WindowsForms10./HwndWrapper в WindowClassUtils и RootBackdropPolicy,
+префикс WPF_HwndWrapper в RootBackdropPolicy. Суффиксные проверки `.ends_with`
+в UICompat/TaskbarCompat относятся к XAML runtime types, не к VCL HWND.
+Поиск в командных строках, именах процессов, путях, свойствах окна/меню и
+коллекциях не является эвристикой выбора класса контрола. Эти существующие
+механизмы **не изменялись** в рамках ренейма TCoolBar; перечисление — результат
+аудита, а не предложение расширить их на Delphi.
+
+Проверки: contracts **66/66**; CoolBar production C++ **9/9**, включая
+WM_PAINT до host PaintDispatcher и standalone WM_PRINTCLIENT с пустым
+paint-stack/переданным DC; контрольные panel C++ **10/10**. Оба C++-набора
+также прошли ASan/UBSan (**9/9 + 10/10**). UTF-8, project XML, отсутствие
+устаревших путей в includes/projects и `git diff --check` — OK. MSVC-сборка
+здесь не выполнялась; новый визуальный алгоритм в этом шаге не вводился.

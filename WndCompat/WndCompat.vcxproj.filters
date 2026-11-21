@@ -72,7 +72,7 @@
     <ClCompile Include="Controls\ProgressBarSubclass.cpp">
       <Filter>Controls</Filter>
     </ClCompile>
-    <ClCompile Include="Controls\CoolBarSubclass.cpp">
+    <ClCompile Include="Controls\TCoolBarSubclass.cpp">
       <Filter>Controls</Filter>
     </ClCompile>
     <ClCompile Include="Controls\RebarSubclass.cpp">
@@ -241,7 +241,7 @@
     <ClInclude Include="Controls\NetUISubclass.h">
       <Filter>Controls</Filter>
     </ClInclude>
-    <ClInclude Include="Controls\CoolBarSubclass.h">
+    <ClInclude Include="Controls\TCoolBarSubclass.h">
       <Filter>Controls</Filter>
     </ClInclude>
     <ClInclude Include="Controls\RebarSubclass.h">
