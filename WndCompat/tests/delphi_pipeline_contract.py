@@ -202,7 +202,10 @@ class DelphiPipelineContract(unittest.TestCase):
 
     def test_vcl_draw_hook_slots_do_not_shadow_winapi_macros(self):
         code = read('GlassCore/src/Hooks/delphi/TListBoxDraw.cpp')
-        self.assertIn('enum : size_t { FillSlot, ExtTextSlot, DrawTextSlot, RectangleSlot, Count }', code)
+        self.assertIn('FillSlot, ExtTextSlot, DrawTextSlot, RectangleSlot,', code)
+        self.assertIn('BitBltSlot, StretchBltSlot,', code)
+        self.assertIn('Original<StretchBltSlot, decltype(&::StretchBlt)>()', code)
+        self.assertIn('Original<BitBltSlot, decltype(&::BitBlt)>()', code)
         self.assertIn('Original<DrawTextSlot, decltype(&::DrawTextW)>()', code)
         self.assertIn('Original<FillSlot, decltype(&::FillRect)>()', code)
         self.assertIn('Original<ExtTextSlot, decltype(&::ExtTextOutW)>()', code)
@@ -650,7 +653,8 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('if (!count) return TRUE;', combo_text)
         begin_draw = draw.split('bool BeginDraw(HWND parent', 1)[1].split('bool TryCheckListThemeBackground', 1)[0]
         for guard in ('const bool comboField', 'if (!comboField) return false;',
-                      'if (s.combo && i != FillSlot && i != ExtTextSlot && i != DrawTextSlot) continue;', 's.field = comboField'):
+                      'if (s.combo && i != FillSlot && i != ExtTextSlot && i != DrawTextSlot',
+                      '&& i != BitBltSlot && i != StretchBltSlot) continue;', 's.field = comboField'):
             self.assertIn(guard, begin_draw)
         self.assertIn('opaque-brush', draw)
         self.assertIn('CreateSolidColorBrushWithAlpha(lb.lbColor, 255)', draw)
@@ -860,6 +864,24 @@ class DelphiPipelineContract(unittest.TestCase):
         probe = read("GlassCore/src/Hooks/delphi/TListBoxProbe.cpp")
         for name in ("TFileListBox", "TDirectoryListBox"):
             self.assertIn('_wcsicmp(cls, L"%s")' % name, probe)
+
+    def test_list_item_icons_are_alpha_composited(self):
+        draw = read("GlassCore/src/Hooks/delphi/TListBoxDraw.cpp")
+        # Слоты BitBlt/StretchBlt в сессии owner-draw.
+        for marker in ('"BitBlt", reinterpret_cast<void*>(MyBitBlt)',
+                       '"StretchBlt", reinterpret_cast<void*>(MyStretchBlt)',
+                       'BOOL WINAPI MyStretchBlt(HDC dc, int x, int y, int cx, int cy,'):
+            self.assertIn(marker, draw)
+        # Пара «цвет + маска» заменяется одним alpha-композитом, маска гасится.
+        self.assertIn('rop == 0x00E20746 || rop == 0x00220326', draw)
+        self.assertIn('g_stack.back().iconAlphaDone = true;', draw)
+        self.assertIn('g_stack.back().iconAlphaDone = false;', draw)
+        # Вырез фона: настройка Root\Control\ListBox|ComboBox либо ключ по углам.
+        self.assertIn('QueryIconBackgroundColorRemovalContext(', draw)
+        self.assertIn('{ L"Root", L"Control", L"ListBox" }', draw)
+        self.assertIn('{ L"Root", L"Control", L"ComboBox" }', draw)
+        self.assertIn('ApplyIconBackground(converted.get());', draw)
+        self.assertIn('GdiAlphaBlend(dst, x, y, cx, cy, src, sx, sy, scx, scy, bf)', draw)
 
     def test_delphi_grid_replay_supports_row_only_fixed_area(self):
         root = read("GlassCore/src/Hooks/RootGdiHooks.cpp")
