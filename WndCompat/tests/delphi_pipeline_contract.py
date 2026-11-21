@@ -804,6 +804,16 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('PushPaint(instMod, OHK_BITBLT, cache);', grid)
         self.assertIn('bmp=0x%p px=0x%08X', win)
 
+    def test_delphi_grid_specs_enabled_on_beginpaint_caller(self):
+        win = read("GlassCore/src/Hooks/RootWindowHooks.cpp")
+        block = win.split('kGridSessionSpecs[] = {', 1)[1].split('g_rootPaintStack.push_back', 1)[0]
+        for marker in ('OHK_DELPHI_GRID_FILL', 'OHK_GETSYSCOLOR', 'OHK_PATBLT',
+                       'EnableRootHook(callerMod, idx, true)',
+                       'session.specs.push_back(HookSpec{ static_cast<void*>(callerMod), idx })'):
+            self.assertIn(marker, block)
+        # Парность: спеки добавляются в сессию, которую снимает Root_OnEndPaint.
+        self.assertIn('EnableSpecs(session.specs, false)', win)
+
     def test_delphi_grid_kills_window_color_for_client_fill(self):
         root = read("GlassCore/src/Hooks/RootGdiHooks.cpp")
         body = root.split('DWORD WINAPI Root_MyGetSysColor(int nIndex)', 1)[1].split(

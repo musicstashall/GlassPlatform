@@ -772,6 +772,41 @@ namespace GlassCore::Root
             }
             if (session.winFormsDrawTextEx)
                 GlassCore::FormsHooks::DrawTextExAttach(true);
+            // VCL может быть в runtime-пакете (bpl): тогда фон клиента таблицы
+            // (TCustomGrid.Paint: GetSysColor(COLOR_WINDOW) → CreateBrushIndirect →
+            // FillRect(ClientRect)) рисуется через IAT пакета, а не точки входа, и
+            // наши grid-слоты там не стоят. Включаем тот же набор на модуле,
+            // вызвавшем BeginPaint (парная пара снимется в Root_OnEndPaint).
+            if (callerMod
+                && (StrEqI(cn, L"TStringGrid") || StrEqI(cn, L"TDrawGrid")
+                    || StrEqI(cn, L"TShownValueList")))
+            {
+                static constexpr size_t kGridSessionSpecs[] = {
+                    OHK_DELPHI_GRID_TEXT, OHK_DELPHI_GRID_FILL, OHK_DELPHI_GRID_THEME,
+                    OHK_GETSYSCOLOR, OHK_PATBLT, OHK_BITBLT };
+                unsigned added = 0;
+                for (const size_t idx : kGridSessionSpecs)
+                {
+                    bool already = false;
+                    for (const auto& sp : session.specs)
+                    {
+                        if (sp.module == static_cast<void*>(callerMod) && sp.index == idx)
+                        {
+                            already = true;
+                            break;
+                        }
+                    }
+                    if (already)
+                        continue;
+                    EnableRootHook(callerMod, idx, true);
+                    session.specs.push_back(HookSpec{ static_cast<void*>(callerMod), idx });
+                    ++added;
+                }
+                if (added)
+                    DebugLog(DBG_NORMAL,
+                        L"[GlassCore][Root][Session] BeginPaint: hwnd=0x%p class=\"%s\" caller=0x%p +%u grid-слотов на модуле caller'а",
+                        hWnd, cn, callerMod, added);
+            }
             g_rootPaintStack.push_back(std::move(session));
         }
 
