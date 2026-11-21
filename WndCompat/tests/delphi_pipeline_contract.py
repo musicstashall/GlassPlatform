@@ -914,6 +914,11 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('themed=%d dtb=%d', rebar)
         # Политика свечения не должна глушить текст полосы.
         self.assertIn('glow-policy=0 hwnd=0x%p', rebar)
+        # DC сессии приоритетнее PaintDispatcher-хоста, иначе текст уходил в GDI.
+        self.assertIn('if (IsRebarPaintDc(hdc))', rebar)
+        self.assertIn('text-bypass hdc=0x%p reason=%s', rebar)
+        self.assertIn('static thread_local unsigned g_rebarTextDepth = 0;', rebar)
+        self.assertIn('[GlassCore][Rebar] text hdc=0x%p hr=0x%08X', rebar)
         rescan = read("WndCompat/Tracker/BackdropPolicyRescan.cpp")
         self.assertIn('WndCompat::Rebar_Attach(hChild);', rescan)
         handler = read("WndCompat/Tracker/WinEventHandler.cpp")
