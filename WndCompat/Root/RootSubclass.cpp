@@ -26,12 +26,15 @@
 #include <Controls/TrackBarHost.h>
 #include <Controls/DirectUISubclass.h>
 #include <Controls/RebarSubclass.h>
+#include <Controls/TCoolBarSubclass.h>
 #include <Controls/ToolbarSubclass.h>
 #include <Explorer/ExplorerIslandContainerSubclass.h>
 #include <Root/ExplorerRootSubclass.h>
 #include <Tracker/WindowClassUtils.h>
 #include <Tracker/WinEventHandler.h>
 #include <GlassControlKind.h>
+#include <GlassDelphiMemoBackground.h>
+#include <GlassDelphiInputBackground.h>
 #include <GlassComctlScrollHost.h>
 #include <InjectionMode.h>
 #include <Helpers/ThemeHelper.h>
@@ -48,6 +51,7 @@
 #include "Root/RootExplorerSubclassBridge.h"
 #include "Root/ExplorerRootSubclass.h"
 #include "Root/RootSubclassShared.h"
+#include "Root/DelphiPanelPaint.h"
 #include "Root/RootBackdropRefreshThrottle.h"
 #include "Root/TaskbarHost.h"
 #include <string>
@@ -586,6 +590,72 @@ namespace
             pfn(enable ? TRUE : FALSE);
     }
 
+#if defined(_DEBUG)
+    // Диагностика только существующего CTLCOLOR-пути: без Detours/IAT и текста из окна.
+    void LogDelphiMemoCtlColor(HWND parent, UINT msg, HWND child, HDC dc,
+        LRESULT originalBrush, LRESULT resultBrush, COLORREF originalBk, int originalMode) noexcept
+    {
+        if (!child || !WndCompat::IsWindowClass(child, L"TMemo"))
+            return;
+        static thread_local ULONGLONG epoch = 0;
+        static thread_local unsigned budget = 0;
+        const ULONGLONG now = GetTickCount64();
+        if (!epoch || now - epoch >= 1000)
+        {
+            epoch = now;
+            budget = 16;
+        }
+        if (!budget) return;
+        --budget;
+        LOGBRUSH brush{};
+        const bool valid = GetObject(reinterpret_cast<HGDIOBJ>(originalBrush), sizeof(brush), &brush) == sizeof(brush);
+        DebugLog(DBG_NORMAL,
+            L"[WndCompat][DelphiMemo] CTLCOLOR parent=0x%p hwnd=0x%p msg=0x%X focused=%d "
+            L"bk=0x%08X mode=%d brush=0x%p valid=%d style=%u color=0x%08X result=0x%p finalBk=0x%08X",
+            parent, child, msg, GetFocus() == child ? 1 : 0,
+            static_cast<unsigned>(originalBk), originalMode, reinterpret_cast<void*>(originalBrush),
+            valid ? 1 : 0, static_cast<unsigned>(brush.lbStyle), static_cast<unsigned>(brush.lbColor),
+            reinterpret_cast<void*>(resultBrush), static_cast<unsigned>(GetBkColor(dc)));
+    }
+#endif
+
+    static void CaptureNumberBoxDefaultBackground(HWND child, HDC dc, LRESULT brush) noexcept
+    {
+        if (!child || !dc || !WndCompat::IsWindowClass(child, L"TNumberBox")) return;
+        LOGBRUSH lb{};
+        const bool solid = GetObjectW(reinterpret_cast<HGDIOBJ>(brush), sizeof(lb), &lb) == sizeof(lb)
+            && lb.lbStyle == BS_SOLID && GetBkMode(dc) == OPAQUE;
+        const COLORREF color = lb.lbColor & 0xFFFFFFu;
+        const bool isDefault = solid && color == (GetBkColor(dc) & 0xFFFFFFu)
+            && (color == (GetSysColor(COLOR_WINDOW) & 0xFFFFFFu)
+                || color == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFFu));
+        GlassShared::SetDelphiInputDefaultBackground(child, isDefault);
+    }
+
+#if defined(_DEBUG)
+    static void LogDelphiInputCtlColor(HWND parent, UINT msg, HWND child, HDC dc, LRESULT brush) noexcept
+    {
+        if (!child || !dc || !(WndCompat::IsWindowClass(child, L"TNumberBox")
+            || WndCompat::IsWindowClass(child, L"THotKey")
+            || WndCompat::IsWindowClass(child, L"TSpinEdit"))) return;
+        static thread_local ULONGLONG epoch = 0;
+        static thread_local unsigned budget = 0;
+        const ULONGLONG now = GetTickCount64();
+        if (!epoch || now - epoch >= 1000) { epoch = now; budget = 24; }
+        if (!budget) return;
+        --budget;
+        WCHAR cls[64]{};
+        GetClassNameW(child, cls, _countof(cls));
+        LOGBRUSH lb{};
+        const bool valid = GetObjectW(reinterpret_cast<HGDIOBJ>(brush), sizeof(lb), &lb) == sizeof(lb);
+        DebugLog(DBG_NORMAL, L"[WndCompat][DelphiInputColor] parent=0x%p hwnd=0x%p class=%s msg=0x%X dc=0x%p dcWnd=0x%p focus=%d style=0x%08X brush=0x%p brushValid=%d brushStyle=%u brushColor=0x%08X bk=0x%08X mode=%d",
+            parent, child, cls, msg, dc, WindowFromDC(dc), GetFocus() == child ? 1 : 0,
+            static_cast<unsigned>(GetWindowLongW(child, GWL_STYLE)), reinterpret_cast<void*>(brush),
+            valid ? 1 : 0, static_cast<unsigned>(lb.lbStyle), static_cast<unsigned>(lb.lbColor),
+            static_cast<unsigned>(GetBkColor(dc)), GetBkMode(dc));
+    }
+#endif
+
     // BWM WinHandler WM_CTLCOLORSTATIC/LISTBOX — probe кисти через DefSubclassProc + SetBkColor hook.
     [[nodiscard]] bool TryResolveCtlColorStaticBrush(
         HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, LRESULT& outResult) noexcept
@@ -609,33 +679,74 @@ namespace
         SetCtlColorBkColorProbeAttach(true);
         const LRESULT defResult = DefSubclassProc(hWnd, uMsg, wParam, lParam);
         SetCtlColorBkColorProbeAttach(false);
+        if (uMsg == WM_CTLCOLORSTATIC)
+            CaptureNumberBoxDefaultBackground(reinterpret_cast<HWND>(lParam), hdc, defResult);
+#if defined(_DEBUG)
+        LogDelphiInputCtlColor(hWnd, uMsg, reinterpret_cast<HWND>(lParam), hdc, defResult);
+        const HWND memoChild = reinterpret_cast<HWND>(lParam);
+        const bool isMemo = memoChild && WndCompat::IsWindowClass(memoChild, L"TMemo");
+        const COLORREF memoOriginalBk = isMemo ? GetBkColor(hdc) : CLR_INVALID;
+        const int memoOriginalMode = isMemo ? GetBkMode(hdc) : 0;
+#endif
 
         LOGBRUSH lb{};
-        if (GetObject(reinterpret_cast<HGDIOBJ>(defResult), sizeof(lb), &lb))
+        const bool validBrush = GetObject(reinterpret_cast<HGDIOBJ>(defResult), sizeof(lb), &lb) == sizeof(lb);
+        // Read-only TMemo получает WM_CTLCOLORSTATIC. Сохраняем только цвет
+        // сплошной кисти, совпадающий с цветом DC. Прозрачные/pattern кисти
+        // и COLOR_WINDOW не аппроксимируем одним RGB.
+        const HWND memo = reinterpret_cast<HWND>(lParam);
+        const bool memoBackground = uMsg == WM_CTLCOLORSTATIC && memo && WndCompat::IsWindowClass(memo, L"TMemo");
+        if (memoBackground)
+        {
+            const COLORREF rgb = lb.lbColor & 0xFFFFFFu;
+            if (validBrush && lb.lbStyle == BS_SOLID && GetBkMode(hdc) == OPAQUE
+                && rgb == (GetBkColor(hdc) & 0xFFFFFFu)
+                && rgb != (GetSysColor(COLOR_WINDOW) & 0xFFFFFFu))
+            {
+                if (!GlassShared::SetDelphiMemoBackground(memo, rgb))
+                    GlassShared::ClearDelphiMemoBackground(memo);
+            }
+            else
+                GlassShared::ClearDelphiMemoBackground(memo);
+        }
+        if (validBrush)
         {
             if (lb.lbStyle == BS_SOLID && GetBkMode(hdc) == OPAQUE)
             {
-                if (!lb.lbColor
-                    || lb.lbColor == GetSysColor(COLOR_WINDOW)
-                    || lb.lbColor == GetSysColor(COLOR_BTNFACE))
+                if (memoBackground ? (lb.lbColor & 0xFFFFFFu) == (GetSysColor(COLOR_WINDOW) & 0xFFFFFFu)
+                    : (!lb.lbColor || lb.lbColor == GetSysColor(COLOR_WINDOW)
+                        || lb.lbColor == GetSysColor(COLOR_BTNFACE)))
                 {
                     // sys-фон → чёрная кисть ниже
                 }
                 else
                 {
                     outResult = defResult;
+#if defined(_DEBUG)
+                    LogDelphiMemoCtlColor(hWnd, uMsg, reinterpret_cast<HWND>(lParam), hdc,
+                        defResult, outResult, memoOriginalBk, memoOriginalMode);
+#endif
                     return true;
                 }
             }
             else if (lb.lbStyle == BS_NULL && GetBkMode(hdc) == TRANSPARENT)
             {
                 outResult = defResult;
+#if defined(_DEBUG)
+                LogDelphiMemoCtlColor(hWnd, uMsg, reinterpret_cast<HWND>(lParam), hdc,
+                    defResult, outResult, memoOriginalBk, memoOriginalMode);
+#endif
                 return true;
             }
         }
 
-        SetBkColor(hdc, 0);
+        // Keep COLOR_WINDOW distinguishable from a genuinely black TMemo.
+        if (!memoBackground) SetBkColor(hdc, 0);
         outResult = reinterpret_cast<LRESULT>(GetStockObject(BLACK_BRUSH));
+#if defined(_DEBUG)
+        LogDelphiMemoCtlColor(hWnd, uMsg, reinterpret_cast<HWND>(lParam), hdc,
+            defResult, outResult, memoOriginalBk, memoOriginalMode);
+#endif
         return true;
     }
 
@@ -884,6 +995,12 @@ namespace
         if (WndCompat::IsShuttingDown())
             return DefSubclassProc(hWnd, uMsg, wParam, lParam);
 
+        // VCL-панелям нужен исходный Brush.Color: безусловный BLACKNESS в
+        // WM_ERASEBKGND ниже уничтожает его до вызова родного VCL-обработчика.
+        LRESULT panelResult{};
+        if (WndCompat::TryHandleDelphiPanelPaint(hWnd, uMsg, wParam, lParam, panelResult))
+            return panelResult;
+
         switch (uMsg)
         {
         case WM_THEMECHANGED:
@@ -945,6 +1062,25 @@ namespace
             if (Shared::RootBackdropPolicy::IsFileExplorerShellRootHwnd(hWnd))
                 break;
 
+            // VCL-таблицы (TStringGrid/TDrawGrid/TShownValueList) стирают фон
+            // здесь, до paint-сессии: без этого фиксированные ячейки остаются
+            // непрозрачными (в журнале для них нет ни Fill, ни PatBlt).
+            if (WndCompat::IsWindowClass(hWnd, L"TStringGrid")
+                || WndCompat::IsWindowClass(hWnd, L"TDrawGrid")
+                || WndCompat::IsWindowClass(hWnd, L"TShownValueList")
+                || WndCompat::IsWindowClass(hWnd, L"TValueListEditor")
+                || WndCompat::IsWindowClass(hWnd, L"TControlList"))
+            {
+                HDC hdc = reinterpret_cast<HDC>(wParam);
+                RECT rc{};
+                if (hdc && GetClipBox(hdc, &rc) != ERROR && !IsRectEmpty(&rc))
+                {
+                    PatBlt(hdc, rc.left, rc.top, rc.right - rc.left,
+                        rc.bottom - rc.top, BLACKNESS);
+                    return 1;
+                }
+            }
+
             if (!GlassShared::GlassIsBackdropAllowedForHwnd(hWnd))
                 break;
 
@@ -1004,12 +1140,33 @@ namespace
                 break;
 
             // Визуальный стиль устанавливает SetTextColor на DC через DefWindowProc
-            DefSubclassProc(hWnd, uMsg, wParam, lParam);
+            const LRESULT originalBrush = DefSubclassProc(hWnd, uMsg, wParam, lParam);
 
             // Переопределяем только фон для стекла
             HDC hdc = reinterpret_cast<HDC>(wParam);
-            SetBkColor(hdc, 0);
-            return reinterpret_cast<LRESULT>(GetStockObject(BLACK_BRUSH));
+            if (uMsg == WM_CTLCOLOREDIT)
+                CaptureNumberBoxDefaultBackground(reinterpret_cast<HWND>(lParam), hdc, originalBrush);
+#if defined(_DEBUG)
+            if (uMsg == WM_CTLCOLOREDIT)
+                LogDelphiInputCtlColor(hWnd, uMsg, reinterpret_cast<HWND>(lParam), hdc, originalBrush);
+            const HWND memoChild = reinterpret_cast<HWND>(lParam);
+            const bool isMemo = uMsg == WM_CTLCOLOREDIT && memoChild
+                && WndCompat::IsWindowClass(memoChild, L"TMemo");
+            const COLORREF memoOriginalBk = isMemo ? GetBkColor(hdc) : CLR_INVALID;
+            const int memoOriginalMode = isMemo ? GetBkMode(hdc) : 0;
+#else
+            (void)originalBrush;
+#endif
+            // EditHooks needs the original TMemo RGB for the alpha-100 policy.
+            if (uMsg != WM_CTLCOLOREDIT || !WndCompat::IsWindowClass(reinterpret_cast<HWND>(lParam), L"TMemo"))
+                SetBkColor(hdc, 0);
+            const LRESULT resultBrush = reinterpret_cast<LRESULT>(GetStockObject(BLACK_BRUSH));
+#if defined(_DEBUG)
+            if (isMemo)
+                LogDelphiMemoCtlColor(hWnd, uMsg, reinterpret_cast<HWND>(lParam), hdc,
+                    originalBrush, resultBrush, memoOriginalBk, memoOriginalMode);
+#endif
+            return resultBrush;
         }
 
         // ComboLBox / ListBox в Full: как у прочих WM_CTLCOLOR* — сначала Def для SetTextColor темы, потом чёрный фон
@@ -1172,6 +1329,108 @@ namespace
             if (!dis)
                 break;
 
+#if defined(_DEBUG)
+            // Passive owner-draw observation: VCL combo items may be painted by
+            // the application, independently of the native ComboBox DTB path.
+            if (dis->CtlType == ODT_COMBOBOX && dis->hwndItem
+                && GetParent(dis->hwndItem) == hWnd
+                && (WndCompat::IsWindowClass(dis->hwndItem, L"TComboBox")
+                    || WndCompat::IsWindowClass(dis->hwndItem, L"TColorBox")
+                    || WndCompat::IsWindowClass(dis->hwndItem, L"TDriveComboBox")
+                    || WndCompat::IsWindowClass(dis->hwndItem, L"TFilterComboBox")))
+            {
+                static thread_local ULONGLONG epoch = 0;
+                static thread_local unsigned budget = 0;
+                const ULONGLONG now = GetTickCount64();
+                if (!epoch || now - epoch >= 1000) { epoch = now; budget = 24; }
+                if (budget)
+                {
+                    --budget;
+                    wchar_t cls[64]{};
+                    GetClassNameW(dis->hwndItem, cls, _countof(cls));
+                    const RECT& r = dis->rcItem;
+                    DebugLog(DBG_NORMAL,
+                        L"[WndCompat][DelphiCombo] WM_DRAWITEM parent=0x%p hwnd=0x%p class=%s dc=0x%p dcWnd=0x%p item=%u action=0x%X state=0x%X rect=[%ld,%ld,%ld,%ld]",
+                        hWnd, dis->hwndItem, cls, dis->hDC, WindowFromDC(dis->hDC),
+                        dis->itemID, dis->itemAction, dis->itemState, r.left, r.top, r.right, r.bottom);
+                }
+            }
+            // Пассивный зонд именно owner-draw TBitBtn; не меняет передачу
+            // WM_DRAWITEM, содержимое DRAWITEMSTRUCT или результаты VCL.
+            if (dis->CtlType == ODT_BUTTON && dis->hwndItem
+                && GetParent(dis->hwndItem) == hWnd
+                && WndCompat::IsWindowClass(dis->hwndItem, L"TBitBtn"))
+            {
+                static thread_local ULONGLONG epoch = 0;
+                static thread_local unsigned budget = 0;
+                const ULONGLONG now = GetTickCount64();
+                if (!epoch || now - epoch >= 1000) { epoch = now; budget = 24; }
+                if (budget)
+                {
+                    --budget;
+                    const RECT& r = dis->rcItem;
+                    DebugLog(DBG_NORMAL,
+                        L"[WndCompat][DelphiBitBtn] WM_DRAWITEM parent=0x%p hwnd=0x%p dc=0x%p dcWnd=0x%p action=0x%X state=0x%X rect=[%ld,%ld,%ld,%ld]",
+                        hWnd, dis->hwndItem, dis->hDC, WindowFromDC(dis->hDC),
+                        dis->itemAction, dis->itemState, r.left, r.top, r.right, r.bottom);
+                }
+            }
+#endif
+            // Не меняем VCL WM_DRAWITEM: на время DefSubclassProc передаём
+            // GlassCore именно DRAWITEMSTRUCT.hDC и затем закрываем сессию.
+            if (dis->CtlType == ODT_BUTTON && dis->hwndItem
+                && GetParent(dis->hwndItem) == hWnd
+                && WndCompat::IsWindowClass(dis->hwndItem, L"TBitBtn"))
+            {
+                using BeginFn = BOOL (WINAPI*)(HWND, const DRAWITEMSTRUCT*) noexcept;
+                using EndFn = void (WINAPI*)() noexcept;
+                const HMODULE core = GetModuleHandleW(L"GlassCore.dll");
+                const auto begin = core ? reinterpret_cast<BeginFn>(GetProcAddress(core, "GlassCore_BeginDelphiBitBtnDraw")) : nullptr;
+                const auto end = core ? reinterpret_cast<EndFn>(GetProcAddress(core, "GlassCore_EndDelphiBitBtnDraw")) : nullptr;
+                if (begin && end && begin(hWnd, dis))
+                {
+                    auto finish = wil::scope_exit([&]() noexcept { end(); });
+                    return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+                }
+            }
+            // VCL рисует строку в HDC из DRAWITEMSTRUCT. Production сессия
+            // обрабатывает только этот DC; необязательная probe ничего не меняет.
+            const bool listOwnerDraw = dis->CtlType == ODT_LISTBOX && dis->hwndItem
+                && GetParent(dis->hwndItem) == hWnd
+                && (WndCompat::IsWindowClass(dis->hwndItem, L"TListBox")
+                    || WndCompat::IsWindowClass(dis->hwndItem, L"TCheckListBox")
+                    || WndCompat::IsWindowClass(dis->hwndItem, L"TColorListBox")
+                    || WndCompat::IsWindowClass(dis->hwndItem, L"TFileListBox")
+                    || WndCompat::IsWindowClass(dis->hwndItem, L"TDirectoryListBox"));
+            // VCL combo fields that draw their item themselves. TComboBox is not
+            // here: its field text already goes through the child Edit path.
+            const bool comboOwnerDraw = dis->CtlType == ODT_COMBOBOX && dis->hwndItem
+                && GetParent(dis->hwndItem) == hWnd
+                && (WndCompat::IsWindowClass(dis->hwndItem, L"TColorBox")
+                    || WndCompat::IsWindowClass(dis->hwndItem, L"TDriveComboBox")
+                    || WndCompat::IsWindowClass(dis->hwndItem, L"TFilterComboBox"));
+            if (listOwnerDraw || comboOwnerDraw)
+            {
+                using BeginFn = BOOL (WINAPI*)(HWND, const DRAWITEMSTRUCT*) noexcept;
+                using EndFn = void (WINAPI*)() noexcept;
+                const HMODULE core = GetModuleHandleW(L"GlassCore.dll");
+                const auto begin = core ? reinterpret_cast<BeginFn>(GetProcAddress(core, "GlassCore_BeginDelphiListBoxProbe")) : nullptr;
+                const auto end = core ? reinterpret_cast<EndFn>(GetProcAddress(core, "GlassCore_EndDelphiListBoxProbe")) : nullptr;
+                const auto drawBegin = core ? reinterpret_cast<BeginFn>(GetProcAddress(core, "GlassCore_BeginDelphiListBoxDraw")) : nullptr;
+                const auto drawEnd = core ? reinterpret_cast<EndFn>(GetProcAddress(core, "GlassCore_EndDelphiListBoxDraw")) : nullptr;
+                if (drawBegin && drawEnd && drawBegin(hWnd, dis))
+                {
+                    auto finishDraw = wil::scope_exit([&]() noexcept { drawEnd(); });
+                    const bool probing = listOwnerDraw && begin && end && begin(hWnd, dis);
+                    auto finishProbe = wil::scope_exit([&]() noexcept { if (probing) end(); });
+                    return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+                }
+                if (listOwnerDraw && begin && end && begin(hWnd, dis))
+                {
+                    auto finish = wil::scope_exit([&]() noexcept { end(); });
+                    return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+                }
+            }
             // Нас интересуют только пункты меню
             if (dis->CtlType == ODT_MENU)
             {
@@ -1571,6 +1830,10 @@ namespace WndCompat
             return;
         if (WndCompat::IsShuttingDown())
             return;
+        wchar_t className[256]{};
+        if (GetClassNameW(hWnd, className, static_cast<int>(_countof(className))) > 0
+            && (_wcsicmp(className, L"TApplication") == 0 || _wcsicmp(className, L"TPUtilWindow") == 0))
+            return;
         // Полная обвязка (Full / GenericContainer) уже обрабатывает CBN_DROPDOWN — не дублируем.
         if (WndCompat::Root_IsAttached(hWnd))
             return;
@@ -1632,6 +1895,22 @@ namespace WndCompat
         wchar_t rootClassName[256]{};
         if (GetClassNameW(hRoot, rootClassName, static_cast<int>(_countof(rootClassName))) <= 0)
             rootClassName[0] = L'\0';
+
+        // Защита для прямых attach-вызовов в обход классификатора: TApplication
+        // — служебный VCL HWND. Его жизненный цикл принадлежит Delphi.
+        if (_wcsicmp(rootClassName, L"TApplication") == 0)
+        {
+            DebugLog(L"[WndCompat][Root] Root_Attach: skip VCL TApplication hwnd=0x%p", hRoot);
+            return;
+        }
+
+        // Защита и для прямого Root_Attach в обход классификатора.
+        // WM_NCDESTROY слишком поздно: DeallocateHWnd уже сохранил WNDPROC.
+        if (_wcsicmp(rootClassName, L"TPUtilWindow") == 0)
+        {
+            DebugLog(L"[WndCompat][Root] Root_Attach: skip VCL TPUtilWindow hwnd=0x%p", hRoot);
+            return;
+        }
 
         // Панель задач — только TaskbarHost_Attach (без RootSubclassProc).
         if (_wcsicmp(rootClassName, L"Shell_TrayWnd") == 0
@@ -1757,6 +2036,11 @@ namespace WndCompat
 
         if (Shared::RootBackdropPolicy::IsHwndBackdropExempt(hRoot))
             Shared::GlassHostRegistry::MarkSubtreeGlassDisabled(hRoot);
+
+        // Rebar/TCoolBar в этом поддереве: догоняющий attach, иначе такие окна
+        // остаются без сабкласса (нет Windows-события CREATE после инжекции).
+        WndCompat::Rebar_CatchUp(hRoot);
+        WndCompat::CoolBar_CatchUp(hRoot);
 
         WndCompat::BackdropPolicyRescan::ScheduleSubtreeRescanAfterRootAttach(hRoot);
     }

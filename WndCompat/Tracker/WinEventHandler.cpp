@@ -48,6 +48,7 @@
 #include <Controls/EditSubclass.h>
 #include <Controls/StaticSubclass.h>
 #include <Controls/RebarSubclass.h>
+#include <Controls/TCoolBarSubclass.h>
 #include <Controls/HeaderSubclass.h>
 #include <Controls/ListBoxSubclass.h>
 #include <Controls/StatusBarSubclass.h>
@@ -935,7 +936,12 @@ namespace
                     // не аттачим вовсе.
                     HWND parent = GetParent(hWnd);
                     if (!allowGlassForHwnd || !parent)
+                    {
+                        DebugLog(DBG_NORMAL,
+                            L"[WndCompat][WinEvent] Rebar_Attach: skip (allow=%d parent=0x%p) hwnd=0x%p",
+                            allowGlassForHwnd ? 1 : 0, parent, hWnd);
                         break;
+                    }
                     if (!isFull && WindowClassifier::IsCommonDialogHeaderPieWindow(hWnd))
                     {
                         DebugLog(L"[WndCompat][WinEvent] Rebar_Attach: skip (PopupOnly dialog-header π) hwnd=0x%p", hWnd);
@@ -946,6 +952,7 @@ namespace
                         || WndCompat::IsWindowClass(parent, L"SizeableRebar");
                     const bool topLevelHostRebar =
                         isFull && (GetAncestor(parent, GA_ROOT) == parent);
+
                     if (isFull && (shellRebar || topLevelHostRebar))
                     {
                         DebugLog(L"[WndCompat][WinEvent] Rebar_Attach: hwnd=0x%p shell=%d toplevelHost=%d",
@@ -953,6 +960,17 @@ namespace
                             shellRebar ? 1 : 0,
                             topLevelHostRebar ? 1 : 0);
                         WndCompat::Rebar_Attach(hWnd);
+                    }
+                    break;
+                }
+
+                case ControlKind::CoolBar:
+                {
+                    // Delphi TCoolBar (классы TCoolBar / CoolBar): свой путь отрисовки.
+                    if (isFull && allowGlassForHwnd)
+                    {
+                        DebugLog(L"[WndCompat][WinEvent] CoolBar_Attach: hwnd=0x%p", hWnd);
+                        WndCompat::CoolBar_Attach(hWnd);
                     }
                     break;
                 }
@@ -1023,6 +1041,7 @@ namespace
                     }
                     break;
 
+                case ControlKind::DelphiContainer:
                 case ControlKind::GenericContainer:
                     // Full: Root_Attach для WM_CTLCOLOR*. PopupOnly: не аттачить —
                     // AutoIt/#32770 и т.п. иначе получают subclass + hooks cache на load.

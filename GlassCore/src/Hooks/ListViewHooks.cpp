@@ -74,6 +74,7 @@ namespace GlassCore::ListViewControl
         GlassShared::GlassControlKind kind{};
         HWND                          hWnd{};
         bool                          needBlackout{};
+        bool                          vclListView{};
     };
     thread_local std::vector<ListViewPaintSession> g_lvSessionStack;
     // Окна, чей фон уже чернили post-BLACKNESS (первый paint либо BkFlip).
@@ -603,6 +604,31 @@ namespace GlassCore::ListViewControl
     //   другой цвет  → заменяем кисть на alpha-aware версию
     // Гистограмма заливок снята (финиш 2026-10-13).
 
+    [[nodiscard]] static bool IsDelphiListView(HWND hwnd) noexcept
+    {
+        WCHAR cls[128]{};
+        return hwnd && GetClassNameW(hwnd, cls, _countof(cls)) > 0
+            && (_wcsicmp(cls, L"TListView") == 0 || _wcsicmp(cls, L"TSystemListView") == 0);
+    }
+
+#if defined(_DEBUG)
+    // Отдельные лимиты для Begin и Fill; возобновляются после очистки лога.
+    [[nodiscard]] static bool AllowDelphiListViewLog(unsigned channel) noexcept
+    {
+        static thread_local ULONGLONG epoch[3]{};
+        static thread_local unsigned budget[3]{};
+        const ULONGLONG now = GetTickCount64();
+        if (!epoch[channel] || now - epoch[channel] >= 1000)
+        {
+            epoch[channel] = now;
+            budget[channel] = 16;
+        }
+        if (!budget[channel]) return false;
+        --budget[channel];
+        return true;
+    }
+#endif
+
     BOOL WINAPI Overall_MyFillRect(HDC hdc, const RECT* lprc, HBRUSH hbr)
     {
         HMODULE callerMod = GetCallerModule(_ReturnAddress());
@@ -620,6 +646,17 @@ namespace GlassCore::ListViewControl
         LOGBRUSH lb{};
         if (GetObject(hbr, sizeof(lb), &lb) && lb.lbStyle == BS_SOLID)
         {
+#if defined(_DEBUG)
+            if (IsDelphiListView(g_lvSessionStack.back().hWnd) && AllowDelphiListViewLog(1))
+            {
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiListView] FillRect hwnd=0x%p dc=0x%p dcWnd=0x%p caller=0x%p "
+                    L"rect=[%ld,%ld,%ld,%ld] style=%u color=0x%08X",
+                    g_lvSessionStack.back().hWnd, hdc, WindowFromDC(hdc), callerMod,
+                    lprc->left, lprc->top, lprc->right, lprc->bottom,
+                    static_cast<unsigned>(lb.lbStyle), static_cast<unsigned>(lb.lbColor));
+            }
+#endif
             const int rcW = lprc->right - lprc->left;
             const int rcH = lprc->bottom - lprc->top;
             const int band = GetScrollBandSizeForDpiCached(hdc);
@@ -649,7 +686,8 @@ namespace GlassCore::ListViewControl
                 return TRUE;
             }
 
-            // Чёрный (0) — уже прозрачный, не трогаем
+            // Чёрный (0) — не меняем: WindowFromDC не отличает клиентский
+            // DC от оконного/неклиентского DC во время BeginPaint.
             if (!lb.lbColor)
                 return orig(hdc, lprc, hbr);
 
@@ -1316,11 +1354,19 @@ namespace GlassCore::ListViewControl
         // FIX repaint-storm: слать только при смене значения — comctl инвалидирует
         // список на каждый LVM_SETBKCOLOR, превращая paint в самоподдержку (60fps).
         bool diagFlipped = false;
+#if defined(_DEBUG)
+        COLORREF vclBkBefore = CLR_INVALID;
+        COLORREF vclTextBkBefore = CLR_INVALID;
+#endif
         if (kind == GlassControlKind::ListView)
         {
             // Дефолтный bk сбрасываем в чёрный (прозрачный фон).
             const COLORREF diagBk = ListView_GetBkColor(hWnd);
             const COLORREF diagTBk = ListView_GetTextBkColor(hWnd);
+#if defined(_DEBUG)
+            vclBkBefore = diagBk;
+            vclTextBkBefore = diagTBk;
+#endif
             if (diagBk != 0)
             {
                 ListView_SetBkColor(hWnd, 0);
@@ -1346,8 +1392,23 @@ namespace GlassCore::ListViewControl
         if (g_lvBgPrimed.size() > 512)
             g_lvBgPrimed.clear(); // защита от роста на recycled HWND
         const bool firstPaint = g_lvBgPrimed.insert(hWnd).second;
+        const bool vclListView = IsDelphiListView(hWnd);
+#if defined(_DEBUG)
+        if (vclListView && AllowDelphiListViewLog(0))
+        {
+            WCHAR cls[128]{};
+            RECT client{};
+            GetClassNameW(hWnd, cls, _countof(cls));
+            GetClientRect(hWnd, &client);
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiListView] Begin hwnd=0x%p class=%s client=[%ld,%ld,%ld,%ld] caller=0x%p bkBefore=0x%08X textBkBefore=0x%08X flipped=%d first=%d",
+                hWnd, cls, client.left, client.top, client.right, client.bottom, callerMod,
+                static_cast<unsigned>(vclBkBefore), static_cast<unsigned>(vclTextBkBefore),
+                diagFlipped ? 1 : 0, firstPaint ? 1 : 0);
+        }
+#endif
 
-        g_lvSessionStack.push_back({ callerMod, kind, hWnd, diagFlipped || firstPaint });
+        g_lvSessionStack.push_back({ callerMod, kind, hWnd, diagFlipped || firstPaint, vclListView });
         DebugLog(DBG_NORMAL, L"[GlassCore][ListView] BeginPaint: callerMod=0x%p hWnd=0x%p kind=%d depth=%zu",
             callerMod, hWnd, static_cast<int>(kind), g_lvSessionStack.size());
         EnableListViewHooksForModule(hWnd, callerMod, kind, true);
@@ -1367,9 +1428,9 @@ namespace GlassCore::ListViewControl
         DebugLog(DBG_NORMAL, L"[GlassCore][ListView] EndPaint: hWnd=0x%p depth=%zu", hWnd, g_lvSessionStack.size());
     }
 
-    // Post-BeginPaint: разовая зачистка фона (первый paint окна либо после
-    // BkFlip). Диспетчер гасит fErase по возврату true. Каждый paint не
-    // черним: при шторме это стробоскоп blackout→контент.
+    // Post-BeginPaint: first/flip для обычных списков. Только для VCL —
+    // экспериментальная зачистка update region при каждом paint (возможен flicker).
+    // Диспетчер гасит fErase только после успешного PatBlt.
     [[nodiscard]] static bool OnListViewAfterBeginPaint(
         HWND hWnd, HDC hdc, LPPAINTSTRUCT ps, HMODULE /*callerMod*/) noexcept
     {
@@ -1384,15 +1445,30 @@ namespace GlassCore::ListViewControl
         if (!hdc || !ps || IsRectEmpty(&ps->rcPaint))
             return false;
 
-        if (g_lvSessionStack.empty() || !g_lvSessionStack.back().needBlackout)
-            return false; // фон уже чернили: не стробим, fErase не трогаем
-        g_lvSessionStack.back().needBlackout = false;
-
-        PatBlt(hdc,
+        if (g_lvSessionStack.empty() || g_lvSessionStack.back().hWnd != hWnd)
+            return false;
+        auto& session = g_lvSessionStack.back();
+        // У двух VCL-классов белые области появляются после scroll: повторно
+        // очищаем только update region *на клиентском DC из BeginPaint* до
+        // рисования элементов. Остальные списки сохраняют прежний first/flip.
+        const bool clear = session.needBlackout || session.vclListView;
+#if defined(_DEBUG)
+        if (session.vclListView && AllowDelphiListViewLog(2))
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiListView] PostBegin hwnd=0x%p rect=[%ld,%ld,%ld,%ld] erase=%d blackout=%d vclClear=%d",
+                hWnd, ps->rcPaint.left, ps->rcPaint.top, ps->rcPaint.right, ps->rcPaint.bottom,
+                ps->fErase ? 1 : 0, session.needBlackout ? 1 : 0, session.vclListView ? 1 : 0);
+#endif
+        if (!clear)
+            return false;
+        const BOOL cleared = PatBlt(hdc,
             ps->rcPaint.left, ps->rcPaint.top,
             ps->rcPaint.right - ps->rcPaint.left,
             ps->rcPaint.bottom - ps->rcPaint.top,
             BLACKNESS);
+        if (!cleared)
+            return false;
+        session.needBlackout = false;
         return true;
     }
 

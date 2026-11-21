@@ -145,6 +145,18 @@
     <ClInclude Include="include\GlassBackdropMark.h">
       <Filter>include</Filter>
     </ClInclude>
+    <ClInclude Include="include\GlassDelphiInputBackground.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\GlassDelphiMemoBackground.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\GlassDelphiPanel.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\GlassDelphiButtonGroups.h">
+      <Filter>include</Filter>
+    </ClInclude>
     <ClInclude Include="include\GlassHostRegistry.h">
       <Filter>include</Filter>
     </ClInclude>
@@ -270,6 +282,9 @@
     </ClInclude>
     <ClInclude Include="include\DefaultProcessListsSeed.h">
       <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Providers\CoolBarEventProvider.h">
+      <Filter>include\Providers</Filter>
     </ClInclude>
     <ClInclude Include="include\Providers\DirectUIEventProvider.h">
       <Filter>include\Providers</Filter>

@@ -14,6 +14,7 @@
 #include <Subsystems/RenderText.h>
 #include <Helpers/ThemeHelper.h>
 #include <Subsystems/ThemePaintRegistry.h>
+#include <Hooks/delphi/TListBoxDraw.h>
 #include <Core/Intercept/HookDispatcher.h>
 
 #include <Module/ModuleHandler.h>
@@ -121,6 +122,16 @@ namespace GlassCore::ComboBoxControl
         }
 
         static bool CbxSessionActive() noexcept { return g_activePaintMod != nullptr || g_activeHotMod != nullptr; }
+
+        // A window of the predefined class "ComboBox" may be painted by the host
+        // application instead of comctl32 (LogViewer-8: BeginPaint caller == EXE).
+        // Only this exact class is allowed to open a session from the EXE IAT.
+        [[nodiscard]] static bool IsNativeComboBoxClass(HWND hWnd) noexcept
+        {
+            wchar_t cls[64]{};
+            return hWnd && GetClassNameW(hWnd, cls, _countof(cls))
+                && StrEq(cls, L"ComboBox");
+        }
 
         // Имя caller-модуля без пути — узкая проверка своих сценариев (паритет ListView/ComboLBox).
         [[nodiscard]] static bool CallerBaseIs(HMODULE caller, LPCWSTR base) noexcept
@@ -335,9 +346,14 @@ namespace GlassCore::ComboBoxControl
                     WCHAR dcClass[MAX_PATH + 1]{};
                     if (hTheme && SUCCEEDED(Shared::ThemeHelper::GetThemeClass(hTheme, dcClass, MAX_PATH)))
                     {
+                        // dcWnd/class shows which control the unthemed paint belongs
+                        // to; an unattached native ComboBox reaches this branch.
+                        const HWND dcWnd = WindowFromDC(hdc);
+                        WCHAR wndClass[64]{};
+                        if (dcWnd) GetClassNameW(dcWnd, wndClass, _countof(wndClass));
                         DebugLog(DBG_NORMAL,
-                            L"[GlassCore][ComboBoxControl] DTB(вне сессии): class=\"%s\" part=%d state=%d caller=%p",
-                            dcClass, iPartId, iStateId, callerMod);
+                            L"[GlassCore][ComboBoxControl] DTB(вне сессии): class=\"%s\" part=%d state=%d caller=%p dcWnd=0x%p wndClass=%s",
+                            dcClass, iPartId, iStateId, callerMod, dcWnd, wndClass);
                     }
                 }
                 return orig(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
@@ -388,26 +404,8 @@ namespace GlassCore::ComboBoxControl
                 pRect->bottom,
                 static_cast<unsigned>(effAlpha));
 
-            if (dropPart)
-            {
-                if (effAlpha == 0)
-                {
-                    RECT fill{};
-                    if (pClipRect)
-                    {
-                        if (!IntersectRect(&fill, pRect, pClipRect))
-                            return S_OK;
-                    }
-                    else
-                        fill = *pRect;
-                    PatBlt(hdc, fill.left, fill.top, fill.right - fill.left, fill.bottom - fill.top, BLACKNESS);
-                    return S_OK;
-                }
-                DebugLog(DBG_NORMAL,
-                    L"[GlassCore][ComboBoxControl] InvokeComboDrawThemeBg: drop part → orig (без DIB+AlphaBlend)");
-                return orig(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
-            }
-
+            // Field and drop button use the same themed-chrome opacity. Drop
+            // parts still bypass field dedup: each state/paint must reach DTB.
             const bool alphaOk = Shared::WinApiUtils::DrawThemeBackgroundWithConstantAlpha(
                 orig,
                 hTheme,
@@ -417,11 +415,28 @@ namespace GlassCore::ComboBoxControl
                 pRect,
                 pClipRect,
                 effAlpha);
-
-            g_comboDtbDedupField = dedupKey;
-
+#if defined(_DEBUG)
+            static thread_local ULONGLONG epoch = 0;
+            static thread_local unsigned budget = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (!epoch || now - epoch >= 1000) { epoch = now; budget = 32; }
+            if (budget)
+            {
+                --budget;
+                wchar_t cls[64]{};
+                GetClassNameW(g_comboHwnd, cls, _countof(cls));
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][ComboBoxControl] DTB result hwnd=0x%p class=%s dc=0x%p part=%d state=%d alpha=%u drop=%d success=%d clip=%d",
+                    g_comboHwnd, cls, hdc, iPartId, iStateId, static_cast<unsigned>(effAlpha),
+                    dropPart ? 1 : 0, alphaOk ? 1 : 0, pClipRect ? 1 : 0);
+            }
+#endif
             if (alphaOk)
+            {
+                if (!dropPart) g_comboDtbDedupField = dedupKey;
                 return S_OK;
+            }
+            if (!dropPart) g_comboDtbDedupField.reset();
             return orig(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
         }
 
@@ -435,6 +450,11 @@ namespace GlassCore::ComboBoxControl
                 return DrawTextW(hdc, lpchText, cchText, lprc, format);
 
             if (!CbxSessionActive())
+                return orig(hdc, lpchText, cchText, lprc, format);
+
+            // VCL owner-draw combo field already renders its text through the
+            // scoped Delphi session; do not composite the same glyphs twice.
+            if (GlassCore::DelphiListBox::IsInsideDraw())
                 return orig(hdc, lpchText, cchText, lprc, format);
 
             if (format & DT_CALCRECT)
@@ -458,6 +478,9 @@ namespace GlassCore::ComboBoxControl
                 return DrawTextExW(hdc, lpchText, cchText, lprc, format, lpdtp);
 
             if (!CbxSessionActive())
+                return orig(hdc, lpchText, cchText, lprc, format, lpdtp);
+
+            if (GlassCore::DelphiListBox::IsInsideDraw())
                 return orig(hdc, lpchText, cchText, lprc, format, lpdtp);
 
             if (format & DT_CALCRECT)
@@ -489,6 +512,11 @@ namespace GlassCore::ComboBoxControl
             };
 
             if (!CbxSessionActive())
+                return callOrig(options);
+
+            // The scoped Delphi combo-field session owns fill and glyph drawing
+            // for this WM_DRAWITEM DC; avoid a second PatBlt/alpha text pass.
+            if (GlassCore::DelphiListBox::IsInsideDraw())
                 return callOrig(options);
 
             RECT client{};
@@ -893,23 +921,83 @@ namespace GlassCore::ComboBoxControl
                 return;
 
             const GlassControlKind kind = GlassGetWindowKind(hWnd);
-            if (!IsComboBoxSessionKind(kind) || g_activePaintMod)
+            if (!IsComboBoxSessionKind(kind))
                 return;
+#if defined(_DEBUG)
+            // Narrow, rate-limited diagnosis: why a ComboBox paint did not open
+            // a themed-field session (nested/leaked session or foreign caller).
+            static thread_local ULONGLONG s_beginEpoch = 0;
+            static thread_local unsigned s_beginBudget = 0;
+            [[maybe_unused]] auto logSkip = [&](const wchar_t* reason)
+            {
+                const ULONGLONG now = GetTickCount64();
+                if (!s_beginEpoch || now - s_beginEpoch >= 1000)
+                {
+                    s_beginEpoch = now;
+                    s_beginBudget = 32;
+                }
+                if (!s_beginBudget) return;
+                --s_beginBudget;
+                wchar_t cls[64]{};
+                GetClassNameW(hWnd, cls, _countof(cls));
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][ComboBoxControl] BeginPaint session skip hwnd=0x%p class=%s caller=%p active=0x%p reason=%s",
+                    hWnd, cls, callerMod, g_comboHwnd, reason);
+            };
+#else
+            [[maybe_unused]] auto logSkip = [](const wchar_t*) noexcept {};
+#endif
+            if (g_activePaintMod)
+            {
+                logSkip(L"active-session");
+                return;
+            }
 
             auto* g_new = GlassCore::ModuleHandler::g_comctl32New;
             auto* g_legacy = GlassCore::ModuleHandler::g_comctl32Legacy;
-            if (callerMod != g_new && callerMod != g_legacy)
+            HMODULE entryPoint = GlassCore::ModuleHandler::g_entryPointModule;
+            const bool appPaintedNative =
+                callerMod && callerMod == entryPoint && IsNativeComboBoxClass(hWnd);
+            if (callerMod != g_new && callerMod != g_legacy && !appPaintedNative)
+            {
+                logSkip(L"caller-not-comctl32");
                 return;
+            }
 
-            const HMODULE comctlMod = ResolveComboComctlHookModule(callerMod);
+            const HMODULE comctlMod = appPaintedNative
+                ? entryPoint : ResolveComboComctlHookModule(callerMod);
             if (!comctlMod)
+            {
+                logSkip(L"comctl-module-unresolved");
                 return;
+            }
 
             GlassCore::ScrollBarTheme::EnsureComctlScrollBarIatIfComctlCaller(hWnd, callerMod);
             g_comboDtbDedupField.reset();
             g_activePaintMod = comctlMod;
             g_comboHwnd = hWnd;
             EnableComboBoxHooksForSession(kind, comctlMod, true);
+#if defined(_DEBUG)
+            {
+                static thread_local ULONGLONG s_openEpoch = 0;
+                static thread_local unsigned s_openBudget = 0;
+                const ULONGLONG now = GetTickCount64();
+                if (!s_openEpoch || now - s_openEpoch >= 1000)
+                {
+                    s_openEpoch = now;
+                    s_openBudget = 16;
+                }
+                if (s_openBudget)
+                {
+                    --s_openBudget;
+                    wchar_t openCls[64]{};
+                    GetClassNameW(hWnd, openCls, _countof(openCls));
+                    DebugLog(DBG_NORMAL,
+                        L"[GlassCore][ComboBoxControl] BeginPaint session open hwnd=0x%p class=%s source=%s",
+                        hWnd, openCls, appPaintedNative ? L"app-iat" : L"comctl32");
+                }
+            }
+#endif
             // Паритет BWM Paint/ComboBox (caller == comctl32 v6, т.е. g_new):
             // текст поля рисует точка входа (cleanmgr.exe) — цепляем её ExtTextOutW.
             // Тело Overall_MyExtTextOutW гейтится CbxSessionActive, отдельный
@@ -960,10 +1048,14 @@ namespace GlassCore::ComboBoxControl
 
             auto* g_new = GlassCore::ModuleHandler::g_comctl32New;
             auto* g_legacy = GlassCore::ModuleHandler::g_comctl32Legacy;
-            if (callerMod != g_new && callerMod != g_legacy)
+            HMODULE entryPoint = GlassCore::ModuleHandler::g_entryPointModule;
+            const bool appPaintedNative =
+                callerMod && callerMod == entryPoint && IsNativeComboBoxClass(hWnd);
+            if (callerMod != g_new && callerMod != g_legacy && !appPaintedNative)
                 return;
 
-            const HMODULE comctlMod = ResolveComboComctlHookModule(callerMod);
+            const HMODULE comctlMod = appPaintedNative
+                ? entryPoint : ResolveComboComctlHookModule(callerMod);
             if (!comctlMod)
                 return;
 

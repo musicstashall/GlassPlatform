@@ -8,8 +8,13 @@
 #include <Hooks/MonthCal.h>
 #include <Hooks/DirectUI.h>
 #include <Hooks/Button.h>
+#include <Hooks/delphi/TBitBtnHooks.h>
+#include <Hooks/delphi/TListBoxProbe.h>
+#include <Hooks/delphi/TListBoxDraw.h>
+#include <Hooks/delphi/TPanelDraw.h>
 #include <Hooks/Static.h>
 #include <Hooks/Rebar.h>
+#include <Hooks/delphi/TCoolBarDraw.h>
 #include <GlassCoreProviders.h>
 #include <Core/Engine.h>
 #include <Hooks/RootWindowHooks.h>
@@ -288,6 +293,54 @@ void WINAPI GlassCore_ApplyDropDownShow(HWND hWndDropDown)
     GlassCore::DropDown::OnDropDownShow(hWndDropDown);
 }
 
+// Узкий необязательный мост без изменения ABI GlassCoreProviders.
+extern "C" __declspec(dllexport)
+BOOL WINAPI GlassCore_BeginDelphiBitBtnDraw(HWND parent, const DRAWITEMSTRUCT* dis) noexcept
+{
+    return GlassCore::Button::BeginDelphiBitBtnOwnerDraw(parent, dis) ? TRUE : FALSE;
+}
+
+extern "C" __declspec(dllexport)
+void WINAPI GlassCore_EndDelphiBitBtnDraw() noexcept
+{
+    GlassCore::Button::EndDelphiBitBtnOwnerDraw();
+}
+
+extern "C" __declspec(dllexport)
+BOOL WINAPI GlassCore_BeginDelphiListBoxDraw(HWND parent, const DRAWITEMSTRUCT* dis) noexcept
+{
+    return GlassCore::DelphiListBox::BeginDraw(parent, dis) ? TRUE : FALSE;
+}
+extern "C" __declspec(dllexport)
+void WINAPI GlassCore_EndDelphiListBoxDraw() noexcept
+{
+    GlassCore::DelphiListBox::EndDraw();
+}
+
+extern "C" __declspec(dllexport)
+BOOL WINAPI GlassCore_BeginDelphiListBoxProbe(HWND parent, const DRAWITEMSTRUCT* dis) noexcept
+{
+    return GlassCore::DelphiListBox::BeginDrawProbe(parent, dis) ? TRUE : FALSE;
+}
+
+extern "C" __declspec(dllexport)
+void WINAPI GlassCore_EndDelphiListBoxProbe() noexcept
+{
+    GlassCore::DelphiListBox::EndDrawProbe();
+}
+
+extern "C" __declspec(dllexport)
+BOOL WINAPI GlassCore_BeginDelphiPanelPaint(HWND hwnd, UINT message, HDC suppliedDc) noexcept
+{
+    return GlassCore::DelphiPanel::BeginPaint(hwnd, message, suppliedDc) ? TRUE : FALSE;
+}
+
+extern "C" __declspec(dllexport)
+void WINAPI GlassCore_EndDelphiPanelPaint() noexcept
+{
+    GlassCore::DelphiPanel::EndPaint();
+}
+
 extern "C" __declspec(dllexport)
 BOOL WINAPI GlassCore_GetProviders(GlassCoreProviders* out)
 {
@@ -377,6 +430,10 @@ BOOL WINAPI GlassCore_GetProviders(GlassCoreProviders* out)
     // ─── Rebar domain ──────────────────────────────────────────────────────
     out->rebar.OnPaintBegin = &GlassCore::RebarControl::OnPaintBegin;
     out->rebar.OnPaintEnd   = &GlassCore::RebarControl::OnPaintEnd;
+
+    // ─── CoolBar (Delphi TCoolBar) ──────────────────────────────────────────
+    out->coolbar.OnPaintBegin = &GlassCore::CoolBarControl::OnPaintBegin;
+    out->coolbar.OnPaintEnd   = &GlassCore::CoolBarControl::OnPaintEnd;
 
     // ─── Tooltip / KbxLabel ───────────────────────────────────────────────────
     out->tooltip.IsTooltipIatReady = &GlassCore::Tooltip::IsTooltipIatReady;

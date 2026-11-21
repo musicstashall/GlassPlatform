@@ -34,6 +34,12 @@
     <Filter Include="src\Hooks">
       <UniqueIdentifier>{AD2D1EBD-89BF-41BB-98D5-B0EBF2A27B8F}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\Hooks\delphi">
+      <UniqueIdentifier>{2A70F838-1F17-4897-9A6A-5328C95F8EC2}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Include\Hooks\delphi">
+      <UniqueIdentifier>{8C477C68-CE73-4817-A77B-6D6A347D9A48}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\Hooks\forms">
       <UniqueIdentifier>{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}</UniqueIdentifier>
     </Filter>
@@ -103,6 +109,33 @@
     <ClCompile Include="src\Hooks\ExplorerFrameHooks.cpp">
       <Filter>src\Hooks</Filter>
     </ClCompile>
+    <ClCompile Include="src\Hooks\delphi\TBackgroundHooks.cpp">
+      <Filter>src\Hooks\delphi</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\delphi\TPanelDraw.cpp">
+      <Filter>src\Hooks\delphi</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\delphi\TButtonGroupsDraw.cpp">
+      <Filter>src\Hooks\delphi</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\delphi\TInputHooks.cpp">
+      <Filter>src\Hooks\delphi</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\delphi\TInputIcons.cpp">
+      <Filter>src\Hooks\delphi</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\delphi\TListBoxDraw.cpp">
+      <Filter>src\Hooks\delphi</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\delphi\TListBoxProbe.cpp">
+      <Filter>src\Hooks\delphi</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\delphi\TBitBtnHooks.cpp">
+      <Filter>src\Hooks\delphi</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\delphi\TToggleSwitchHooks.cpp">
+      <Filter>src\Hooks\delphi</Filter>
+    </ClCompile>
     <ClCompile Include="src\Hooks\forms\FormsHooks.cpp">
       <Filter>src\Hooks\forms</Filter>
     </ClCompile>
@@ -150,6 +183,9 @@
     </ClCompile>
     <ClCompile Include="src\Hooks\ProgressBarHooks.cpp">
       <Filter>src\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\delphi\TCoolBarDraw.cpp">
+      <Filter>src\Hooks\delphi</Filter>
     </ClCompile>
     <ClCompile Include="src\Hooks\RebarHooks.cpp">
       <Filter>src\Hooks</Filter>
@@ -330,6 +366,36 @@
     <ClInclude Include="Include\Hooks\ExplorerFrame.h">
       <Filter>Include\Hooks</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Hooks\delphi\TBackgroundHooks.h">
+      <Filter>Include\Hooks\delphi</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\delphi\TPanelDraw.h">
+      <Filter>Include\Hooks\delphi</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\delphi\TButtonGroupsDraw.h">
+      <Filter>Include\Hooks\delphi</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\delphi\TInputHooks.h">
+      <Filter>Include\Hooks\delphi</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\delphi\TInputIcons.h">
+      <Filter>Include\Hooks\delphi</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\delphi\TListBoxDraw.h">
+      <Filter>Include\Hooks\delphi</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\delphi\TListBoxProbe.h">
+      <Filter>Include\Hooks\delphi</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\delphi\TBitBtnHooks.h">
+      <Filter>Include\Hooks\delphi</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\delphi\TBitBtnBridge.h">
+      <Filter>Include\Hooks\delphi</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\delphi\TToggleSwitchHooks.h">
+      <Filter>Include\Hooks\delphi</Filter>
+    </ClInclude>
     <ClInclude Include="Include\Hooks\forms\FormsHooks.h">
       <Filter>Include\Hooks\forms</Filter>
     </ClInclude>
@@ -371,6 +437,9 @@
     </ClInclude>
     <ClInclude Include="Include\Hooks\ProgressBar.h">
       <Filter>Include\Hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\delphi\TCoolBarDraw.h">
+      <Filter>Include\Hooks\delphi</Filter>
     </ClInclude>
     <ClInclude Include="Include\Hooks\Rebar.h">
       <Filter>Include\Hooks</Filter>
