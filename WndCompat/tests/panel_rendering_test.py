@@ -94,6 +94,9 @@ class PanelRenderingTest(unittest.TestCase):
     def test_themed_measurement_callback_failure_and_reentry_are_native(self):
         self.run_case('themed-native-semantics')
 
+    def test_card_and_radio_group_use_probe_options_without_panel_background_changes(self):
+        self.run_case('card-and-radio-captions')
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -215,7 +215,8 @@ namespace
         GlassCore::Hooks::HookDispatcher<1, 1> rootDispatcher{dep, &c.module};
         for (const wchar_t* name : {L"TEmbeddedForm", L"TFrame", L"TSampleFrame",
             L"TPanel", L"TFlowPanel", L"TGridPanel", L"TStackPanel", L"TRelativePanel",
-            L"TCategoryPanel", L"TCategoryPanelGroup", L"TScrollBox", L"TGroupBox", L"TTabSheet", L"tframe"})
+            L"TCategoryPanel", L"TCategoryPanelGroup", L"TScrollBox", L"TGroupBox", L"TTabSheet",
+            L"TCard", L"TRadioGroup", L"tframe"})
         {
             c.window.cls = name;
             wchar_t rawClass[64]{};
@@ -300,6 +301,51 @@ namespace
             CHECK(std::memcmp(&PanelTest::themeOptions, &expected, sizeof(expected)) == 0);
             CHECK(std::memcmp(&options, &originalOptions, sizeof(options)) == 0);
             CHECK(rect.left == p.text.left && rect.right == p.text.right && rect.bottom == p.text.bottom);
+        }
+    }
+    void CardAndRadioGroupProbe()
+    {
+        Context c;
+        TestTheme theme;
+        struct Probe { LPCWSTR name; RECT client, rect; int part; DWORD flags, options; };
+        const Probe probes[]{
+            {L"TCard", {0,0,248,40}, {0,0,31,15}, 1, 0x40, 0x801},
+            {L"TRadioGroup", {0,0,200,68}, {8,0,78,15}, 4, 0, 1},
+        };
+        for (const auto& p : probes)
+        {
+            c.window.cls = p.name; PanelTest::clients[&c.window] = p.client;
+            CHECK(!GlassShared::IsDelphiPanelWindow(&c.window));
+            CHECK(!c.Message(WM_PAINT)); // Captions only: no new panel background bridge.
+            RECT rect = p.rect;
+            DTTOPTS options{}; options.dwSize = sizeof(options); options.dwFlags = p.options;
+            options.crText = RGB(12,23,34); options.iGlowSize = 5;
+            const auto before = options;
+            const int buffers = PanelTest::themeBuffers;
+            CHECK(DrawContainerThemeTextEx(&ChainedThemeOriginal, &theme, &c.dc,
+                p.part, 1, p.name, -1, p.flags, &rect, &options) == S_OK);
+            CHECK(PanelTest::themeBuffers == buffers+1 && !PanelTest::bufferErased);
+            CHECK(PanelTest::themeDc != &c.dc && PanelTest::themePart == p.part);
+            CHECK(PanelTest::themeState == 1 && PanelTest::themeFlags == p.flags);
+            CHECK(PanelTest::themeText == p.name && PanelTest::themeCount == -1);
+            auto expected = before; expected.dwFlags |= DTT_COMPOSITED;
+            CHECK(std::memcmp(&PanelTest::themeOptions, &expected, sizeof(expected)) == 0);
+            CHECK(std::memcmp(&options, &before, sizeof(before)) == 0);
+            CHECK(std::memcmp(&rect, &p.rect, sizeof(rect)) == 0);
+            CHECK(Test::black == 0 && PanelTest::blends == 0);
+            const int native = PanelTest::nativeThemeCalls;
+            // Parent replay into a child's unowned MEMDC is not a caption DC.
+            CHECK(DrawContainerThemeTextEx(&ChainedThemeOriginal, &theme, &c.memory,
+                p.part, 1, p.name, -1, p.flags, &rect, &options) == S_OK);
+            CHECK(PanelTest::themeBuffers == buffers+1 && PanelTest::nativeThemeCalls == native+1);
+        }
+        for (LPCWSTR name : {L"TCard2", L"MyTRadioGroup", L"TGroupButton", L"RadioGroup"})
+        {
+            c.window.cls = name;
+            RECT r{0,0,31,15}; const int buffers = PanelTest::themeBuffers;
+            CHECK(DrawContainerThemeTextEx(&ChainedThemeOriginal, &theme, &c.dc,
+                1, 1, name, -1, 0x40, &r, nullptr) == S_OK);
+            CHECK(PanelTest::themeBuffers == buffers);
         }
     }
     void ThemedDcAndLegacyContainers()
@@ -415,6 +461,7 @@ int main(int argc, char** argv)
         {"root-themed-route", RootThemedClassGateAndOriginal},
         {"probe-themed-captions", ProbeThemedCaptions}, {"themed-dc-and-legacy", ThemedDcAndLegacyContainers},
         {"themed-native-semantics", ThemedNativeSemanticsAndFailure},
+        {"card-and-radio-captions", CardAndRadioGroupProbe},
     };
     try { CHECK(argc == 2); cases.at(argv[1])(); std::cout << argv[1] << ": OK\n"; return 0; }
     catch (const std::exception& e) { std::cerr << argv[1] << ": " << e.what() << '\n'; return 1; }

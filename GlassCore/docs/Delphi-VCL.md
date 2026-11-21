@@ -3261,3 +3261,56 @@ COLOR_HIGHLIGHT, иначе A100. Это уточняет общее «A100» в
 контекст acetate selection и ограничения документированных API сохранены в
 разделе по ссылке выше. Не считать прежнее «TRichEdit ОК» в истории документа
 подтверждением исправления выделения. Новых production-правок Edit нет.
+
+## Тест 90: TCard, TRadioGroup и дочерний TGroupButton
+
+### Данные входящего зонда LogViewer-17
+
+Исходный UTF-8 лог: 29182 байта, 151 строка по splitlines; процесс
+`DelphiControlsSample_Win64.exe`. Не копируется в репозиторий; после сохранения
+выводов удалён из входящих вложений.
+
+| Время | Точный HWND-класс и размер | Наблюдаемый путь |
+| --- | --- | --- |
+| 20:10:00.966 | TButtonGroup, 236×96 | WndCompat BLACKNESS; EXE FillRect COLOR_BTNFACE full-client и три item rect; EXE DrawTextExW One/Two/Three, format=0x8000. |
+| 20:10:36.984 | TCategoryButtons, 236×96 | BLACKNESS; EXE FillRect COLOR_BTNFACE full-client; header DrawTextExW format=0x8100, rect=[19,2,236,17]; Alpha/Beta format=0x8004, item fills COLOR_WINDOW [5,22,27,44] / [29,22,51,44]. Дважды Root SetBkColor COLOR_WINDOW→0. |
+| 20:11:05.540 | TCard, 248×40 | BLACKNESS; EXE DrawThemeTextEx(Edit,1,1), text=TCard, flags=0x40, rect=[0,0,31,15], DTTOPTS size=72 flags=0x801. |
+| 20:11:45.484 | TRadioGroup, 200×68 | BLACKNESS; EXE DrawThemeBackground(Button,BP_GROUPBOX=4,state=1); caption DrawThemeTextEx с той же темой/part/state, flags=0, rect=[8,0,78,15], DTTOPTS flags=1. |
+| 20:11:45.487–491 | TGroupButton, два дочерних окна 190×24 | Parent TRadioGroup рисуется в MEMDC, WindowFromDC=null. COMCTL32 DrawThemeText(Button,BP_RADIOBUTTON=2,state=1/5), Radio Two/One, flags=0x100024; затем uxtheme BitBlt SRCCOPY 190×24 на DC дочерней кнопки. |
+
+В логе **нет доказательства конкретного API и RGB цветного фона категории**:
+нет ни custom-RGB FillRect, ни GradientFill. В `DebugDetourHooks.cpp` и
+сессионном VCL-зонде GradientFill вообще не перехватывается — отсутствие записи
+не означает отсутствие API-вызова. Справочный исходник Delphi Berlin:
+[Vcl.CategoryButtons.pas, DrawCategory](https://github.com/bergsteiger/realwork/blob/master/common/components/rtl/external/Embarcadero/DelphiBerlin/vcl/Vcl.CategoryButtons.pas)
+вызывает `GradientFillCanvas`, а
+[Vcl.GraphUtil.pas](https://github.com/bergsteiger/realwork/blob/master/common/components/rtl/external/Embarcadero/DelphiBerlin/vcl/Vcl.GraphUtil.pas)
+строит два TRIVERTEX с Alpha=0 и прямоугольный mesh для `msimg32!GradientFill`.
+Это основание для узкого gradient-пути, не подтверждение RGB/версии VCL sample.
+
+### Первый шаг — только captions / классификация
+
+Добавлены точные TCard и TRadioGroup в DelphiContainer и существующий
+сессионный EXE DrawThemeTextEx-путь. Композитор TPanelDraw сохранён:
+исходные theme/part/state/flags/DTTOPTS + DTT_COMPOSITED, прозрачный буфер
+без BPPF_ERASE. Ни TCard, ни TRadioGroup **не добавлены** в panel-background
+predicate: принятая политика заливки панелей/Frame не расширяется.
+Сохраняются проверки owner/DC, Full/backdrop, native measurement/callback,
+reentry и original из установленного EXE IAT-слота.
+
+Точный TGroupButton добавлен в существующий Button-kind, как его базовый
+TRadioButton. Теперь COMCTL32 DrawThemeText получает штатный Button paint/GetDC
+hook-набор; отдельного renderer, обработки BitBlt или подбора иконного фона нет.
+Parent replay в произвольный MEMDC не объявляется caption-DC контейнера.
+
+Portable-проверки расширены фактическими TCard/TRadioGroup rect/part/options
+из зонда; проверяются существующие panels/frames и отказы для похожих классов.
+Это проверка маршрутизации, аргументов и состояния, **не native Windows/MSVC
+сборка и не подтверждение пиксельного исправления**. На Windows проверить
+TCard без чёрного прямоугольника, заголовок TRadioGroup и обе Radio One/Two
+в checked/unchecked, hover/disabled состояниях и после смены Full/backdrop.
+TButtonGroup/TCategoryButtons и их цветной фон — следующий отдельный шаг.
+
+Проверки шага: `delphi_pipeline_contract.py` **69/69**,
+`panel_rendering_test.py` **11/11**, `coolbar_rendering_test.py` **9/9**,
+`input_icons_test.py` **6/6**, UTF-8 и `git diff --check` — PASS.

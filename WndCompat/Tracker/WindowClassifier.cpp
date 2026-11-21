@@ -357,11 +357,13 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
     // ═══════════════════════════════════════════════════════════════════════
 
     // ── Button ───────────────────────────────────────────────────────────────
+    // TGroupButton is TRadioGroup's native TRadioButton descendant (VCL ExtCtrls).
     if (Equals(cls, L"Button") ||
         Equals(cls, L"TButton") ||
         Equals(cls, L"TBitBtn") ||
         Equals(cls, L"TCheckBox") ||
-        Equals(cls, L"TRadioButton"))
+        Equals(cls, L"TRadioButton") ||
+        Equals(cls, L"TGroupButton"))
         return ControlKind::Button;
 
     // ── Static / SysLink ─────────────────────────────────────────────────────
@@ -506,8 +508,9 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
         return ControlKind::ToolBar;
 
     // ── Delphi-контейнеры ────────────────────────────────────────────────────
-    if (Equals(cls, L"TGroupBox") ||
-        Equals(cls, L"TTabSheet") || GlassShared::IsDelphiPanelClassName(cls.c_str()))
+    if (Equals(cls, L"TGroupBox") || Equals(cls, L"TRadioGroup") ||
+        Equals(cls, L"TCard") || Equals(cls, L"TTabSheet") ||
+        GlassShared::IsDelphiPanelClassName(cls.c_str()))
         return ControlKind::DelphiContainer;
 
     // ── Прочие WS_CHILD контейнеры ───────────────────────────────────────────

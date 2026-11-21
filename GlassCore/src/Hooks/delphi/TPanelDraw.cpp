@@ -211,8 +211,10 @@ namespace GlassCore::DelphiPanel
         wchar_t name[64]{};
         if (hwnd) GetClassNameW(hwnd, name, static_cast<int>(_countof(name)));
         const bool container = GlassShared::IsDelphiPanelClassName(name)
-            || _wcsicmp(name, L"TGroupBox") == 0 || _wcsicmp(name, L"TTabSheet") == 0;
-        // The observed path is EXE!DrawThemeTextEx(Edit, 1, 1), not an Edit HWND.
+            || _wcsicmp(name, L"TGroupBox") == 0 || _wcsicmp(name, L"TTabSheet") == 0
+            || _wcsicmp(name, L"TCard") == 0 || _wcsicmp(name, L"TRadioGroup") == 0;
+        // Probe: EXE!DrawThemeTextEx(Edit, 1, 1) for TCard/frames; Button,
+        // BP_GROUPBOX for TRadioGroup. Neither needs a new background policy.
         // Keep measurements, callbacks, arbitrary DCs and all caller options native.
         if (g_shutdown.load(std::memory_order_acquire) || g_inHook
             || !GlassCore::Root::IsFullInjectionMode() || !hwnd || !container

@@ -580,6 +580,7 @@ namespace GlassCore::Root
             // the handler verifies either that bridge's DC or the current paint owner.
             if (instMod == GlassCore::ModuleHandler::g_entryPointModule
                 && (StrEqI(cls, L"TGroupBox") || StrEqI(cls, L"TTabSheet")
+                    || StrEqI(cls, L"TCard") || StrEqI(cls, L"TRadioGroup")
                     || GlassShared::IsDelphiPanelClassName(cls)))
             {
                 PushPaint(instMod, OHK_DELPHI_DRAWTHEMETEXTEX, cache);

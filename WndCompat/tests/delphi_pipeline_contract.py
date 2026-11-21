@@ -17,6 +17,8 @@ class DelphiPipelineContract(unittest.TestCase):
             "TTrackBar": "TrackBar", "TScrollBar": "ScrollBar",
             "TDateTimePicker": "DateTimePicker", "TToolBar": "ToolBar",
             "TGroupBox": "DelphiContainer", "TTabSheet": "DelphiContainer",
+            "TCard": "DelphiContainer", "TRadioGroup": "DelphiContainer",
+            "TGroupButton": "Button",
         }
         for name, kind in expected.items():
             with self.subTest(name=name):
@@ -383,7 +385,7 @@ class DelphiPipelineContract(unittest.TestCase):
                       'options->dwSize != sizeof(DTTOPTS)', 'DTT_CALCRECT | DTT_CALLBACK'):
             self.assertIn(guard, text)
         self.assertIn('GlassShared::IsDelphiPanelClassName(name)', text)
-        for name in ('TGroupBox', 'TTabSheet'):
+        for name in ('TGroupBox', 'TTabSheet', 'TCard', 'TRadioGroup'):
             self.assertIn('L"' + name + '"', gate)
             self.assertIn('L"' + name + '"', text)
         # Keep both existing panels and all three probe classes in the shared gate.
