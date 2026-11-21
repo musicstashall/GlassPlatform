@@ -85,6 +85,92 @@ inline HMODULE PanelGetModuleHandleW(LPCWSTR name)
 }
 using FARPROC = void(*)();
 FARPROC PanelGetProcAddress(HMODULE, LPCSTR);
+// DrawThemeTextEx structures keep the x64 SDK layout/fields used by VCL.
+struct POINT { LONG x{}, y{}; };
+struct DTTOPTS
+{
+    DWORD dwSize{}, dwFlags{};
+    COLORREF crText{}, crBorder{}, crShadow{};
+    int iTextShadowType{};
+    POINT ptShadowOffset{};
+    int iBorderSize{}, iFontPropId{}, iColorPropId{}, iStateId{};
+    BOOL fApplyOverlay{};
+    int iGlowSize{};
+    void* pfnDrawTextCallback{};
+    LPARAM lParam{};
+};
+static_assert(sizeof(DTTOPTS) == 72);
+inline constexpr DWORD DTT_TEXTCOLOR = 1, DTT_CALCRECT = 0x200, DTT_GLOWSIZE = 0x800;
+inline constexpr DWORD DTT_CALLBACK = 0x1000, DTT_COMPOSITED = 0x2000;
+using HPAINTBUFFER = void*;
+struct RGBQUAD { BYTE rgbBlue{}, rgbGreen{}, rgbRed{}, rgbReserved{}; };
+namespace PanelTest
+{
+    inline int themeBuffers = 0, nativeThemeCalls = 0, chainedThemeCalls = 0;
+    inline HMODULE rootOriginalModule{};
+    inline HRESULT bufferResult = S_OK;
+    inline bool failThemeBufferDraw = false;
+    inline HDC themeDc{};
+    inline HTHEME theme{};
+    inline int themePart{}, themeState{}, themeCount{};
+    inline DWORD themeFlags{};
+    inline LPCWSTR themeText{};
+    inline const DTTOPTS* optionsPointer{};
+    inline DTTOPTS themeOptions{};
+    inline RECT themeRect{}, bufferedRect{};
+    inline bool bufferErased = true;
+    inline std::function<void()> duringThemeBuffer;
+}
+inline HRESULT DrawThemeTextEx(HTHEME theme, HDC dc, int part, int state,
+    LPCWSTR text, int count, DWORD flags, LPRECT rect, const DTTOPTS* options)
+{
+    ++PanelTest::nativeThemeCalls;
+    PanelTest::theme = theme; PanelTest::themeDc = dc;
+    PanelTest::themePart = part; PanelTest::themeState = state;
+    PanelTest::themeText = text; PanelTest::themeCount = count; PanelTest::themeFlags = flags;
+    PanelTest::optionsPointer = options;
+    PanelTest::themeOptions = options ? *options : DTTOPTS{};
+    PanelTest::themeRect = rect ? *rect : RECT{};
+    if (rect && ((flags & DT_CALCRECT) || (options && (options->dwFlags & DTT_CALCRECT)))) rect->right += 5;
+    return PanelTest::failThemeBufferDraw && dc && !dc->owner ? E_FAIL : S_OK;
+}
+namespace GlassCore::Root
+{
+    // Only environment doubles for the production snippets included by the
+    // runner: cache storage, root dispatcher lookup and shutdown state.
+    inline constexpr size_t OHK_DELPHI_DRAWTHEMETEXTEX = 0;
+    inline std::atomic<bool> g_shutdown{false};
+    struct RootHookCache { std::vector<HMODULE> paintHooks, dcHooks; };
+    inline bool StrEqI(LPCWSTR a, LPCWSTR b) { return a && b && _wcsicmp(a, b) == 0; }
+    inline void PushPaint(HMODULE module, size_t slot, RootHookCache& cache)
+    { assert(slot == OHK_DELPHI_DRAWTHEMETEXTEX); cache.paintHooks.push_back(module); }
+    inline void PushDc(HMODULE module, size_t slot, RootHookCache& cache)
+    { assert(slot == OHK_DELPHI_DRAWTHEMETEXTEX); cache.dcHooks.push_back(module); }
+    template <size_t Slot, typename Fn> Fn GetRootOrg(HMODULE module)
+    {
+        static_assert(Slot == OHK_DELPHI_DRAWTHEMETEXTEX);
+        PanelTest::rootOriginalModule = module;
+        if (!module || !module->refs["DrawThemeTextEx"]) return nullptr;
+        const auto it = module->originals.find("DrawThemeTextEx");
+        return it == module->originals.end() ? nullptr : reinterpret_cast<Fn>(it->second);
+    }
+}
+namespace GlassCore::Text
+{
+    inline HRESULT DrawThemeContent(HDC dc, const RECT& rect, const RECT*, const RECT*, DWORD,
+        const std::function<void(HDC, HPAINTBUFFER, RGBQUAD*, int)>& callback,
+        BYTE alpha, bool useBlt, bool update, bool erase)
+    {
+        assert(alpha == 255 && !useBlt && update);
+        ++PanelTest::themeBuffers; PanelTest::bufferedRect = rect; PanelTest::bufferErased = erase;
+        if (!SUCCEEDED(PanelTest::bufferResult)) return PanelTest::bufferResult;
+        TestDC memory;
+        static_cast<DcState&>(memory) = *dc;
+        if (PanelTest::duringThemeBuffer) PanelTest::duringThemeBuffer();
+        callback(&memory, nullptr, nullptr, 0);
+        return PanelTest::bufferResult;
+    }
+}
 #define GetSysColor PanelGetSysColor
 #define GetClientRect PanelGetClientRect
 #define GetModuleHandleW PanelGetModuleHandleW

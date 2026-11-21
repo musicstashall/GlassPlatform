@@ -330,18 +330,54 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertRegex(source, r'(?s)case ControlKind::DelphiContainer:\s*case ControlKind::GenericContainer:.*?if \(isFull && allowGlassForHwnd\).*?DispatchRootAttachToOwnerThread\(hWnd\);')
 
     def test_theme_text_is_session_scoped_and_balanced(self):
-        root = read("GlassCore/src/Hooks/RootWindowHooks.cpp")
-        gdi = read("GlassCore/src/Hooks/RootGdiHooks.cpp")
-        header = read("GlassCore/Include/Hooks/RootGdiHooks.h")
-        self.assertIn("OHK_DELPHI_DRAWTHEMETEXTEX,", header)
+        root = read('GlassCore/src/Hooks/RootWindowHooks.cpp')
+        gdi = read('GlassCore/src/Hooks/RootGdiHooks.cpp')
+        panel = read('GlassCore/src/Hooks/delphi/TPanelDraw.cpp')
+        header = read('GlassCore/Include/Hooks/RootGdiHooks.h')
+        self.assertIn('OHK_DELPHI_DRAWTHEMETEXTEX,', header)
         self.assertIn('"DrawThemeTextEx", reinterpret_cast<PVOID>(Root_MyDelphiDrawThemeTextEx)', gdi)
-        self.assertIn("PushPaint(instMod, OHK_DELPHI_DRAWTHEMETEXTEX, cache)", root)
-        self.assertIn("PushDc(instMod, OHK_DELPHI_DRAWTHEMETEXTEX, cache)", root)
-        for guard in ("hwnd != owner", "DT_CALCRECT", "DTT_CALCRECT | DTT_CALLBACK", "DTT_COMPOSITED"):
-            self.assertIn(guard, gdi)
-        for cls in ("TGroupBox", "TTabSheet", "TPanel", "TScrollBox"):
-            self.assertIn('L"' + cls + '"', root)
-            self.assertIn('L"' + cls + '"', gdi)
+        gate = root.split('// VCL paints windowless labels and group captions', 1)[1].split('// VCL-таблицы', 1)[0]
+        self.assertIn('instMod == GlassCore::ModuleHandler::g_entryPointModule', gate)
+        self.assertIn('GlassShared::IsDelphiPanelClassName(cls)', gate)
+        self.assertIn('PushPaint(instMod, OHK_DELPHI_DRAWTHEMETEXTEX, cache)', gate)
+        self.assertIn('PushDc(instMod, OHK_DELPHI_DRAWTHEMETEXTEX, cache)', gate)
+        text = panel.split('HRESULT DrawContainerThemeTextEx(', 1)[1].split('bool BeginPaint(', 1)[0]
+        for guard in ('hwnd != owner', 'IsPanelDc(dc)', 'GlassIsBackdropAllowedForHwnd(hwnd)',
+                      'IsFullInjectionMode()', 'DT_CALCRECT | DT_MODIFYSTRING',
+                      'options->dwSize != sizeof(DTTOPTS)', 'DTT_CALCRECT | DTT_CALLBACK'):
+            self.assertIn(guard, text)
+        self.assertIn('GlassShared::IsDelphiPanelClassName(name)', text)
+        for name in ('TGroupBox', 'TTabSheet'):
+            self.assertIn('L"' + name + '"', gate)
+            self.assertIn('L"' + name + '"', text)
+        # Keep both existing panels and all three probe classes in the shared gate.
+        classes = read('GlassShared/include/GlassDelphiPanel.h')
+        for name in ('TPanel', 'TScrollBox', 'TFrame', 'TSampleFrame', 'TEmbeddedForm'):
+            self.assertIn('_wcsicmp(name, L"' + name + '") == 0', classes)
+
+    def test_panel_theme_text_keeps_options_and_reuses_transparent_compositor(self):
+        code = read('GlassCore/src/Hooks/delphi/TPanelDraw.cpp')
+        text = code.split('HRESULT DrawContainerThemeTextEx(', 1)[1].split('bool BeginPaint(', 1)[0]
+        for marker in ('if (options) work = *options', 'work.dwFlags |= DTT_COMPOSITED',
+                       'RECT drawRect = *rect', 'GlassCore::Text::DrawThemeContent(dc, *rect',
+                       'original(theme, memoryDc, part, state, text, count, flags, &drawRect, &work)',
+                       '0xFF, false, true, false', 'g_inHook = true', 'wil::scope_exit',
+                       'return original(theme, dc, part, state, text, count, flags, rect, options)',
+                       'TakeDiag(2)', '[GlassCore][DelphiPanel] text api=DrawThemeTextEx'):
+            self.assertIn(marker, text)
+        for forbidden in ('PatBlt(', 'FillRect(', 'ExtTextOutWithAlpha', 'DrawTextWithAlpha',
+                          'GetThemeColor(', 'GetWindowTheme(', 'work.crText =', 'work.iGlowSize ='):
+            self.assertNotIn(forbidden, text)
+
+    def test_panel_theme_original_is_resolved_by_the_installed_exe_slot(self):
+        code = read('GlassCore/src/Hooks/RootGdiHooks.cpp')
+        wrapper = code.split('HRESULT WINAPI Root_MyDelphiDrawThemeTextEx(\n', 1)[1].split('BOOL WINAPI Root_MyExtTextOutW(', 1)[0]
+        self.assertIn('GetRootOrg<OHK_DELPHI_DRAWTHEMETEXTEX, decltype(&::DrawThemeTextEx)>', wrapper)
+        self.assertIn('GlassCore::ModuleHandler::g_entryPointModule', wrapper)
+        self.assertIn('GlassCore::DelphiPanel::DrawContainerThemeTextEx(', wrapper)
+        self.assertIn('orig, theme, dc, part, state, text, count, flags, rect, options', wrapper)
+        self.assertNotIn('_ReturnAddress', wrapper)
+        self.assertNotIn('GetCallerModule', wrapper)
 
     def test_vcl_tab_paint_hooks_drawing_modules_symmetrically(self):
         source = read("GlassCore/src/Hooks/TabHooks.cpp")

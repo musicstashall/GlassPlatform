@@ -3,6 +3,7 @@
 #include "panel_test_shim.h"
 #include "../../GlassCore/src/Hooks/delphi/TPanelDraw.cpp"
 #include "../Root/DelphiPanelPaint.h"
+#include <root_panel_theme_test.inc>
 #include <stdexcept>
 
 #define CHECK(expr) do { if (!(expr)) throw std::runtime_error(#expr); } while (false)
@@ -46,7 +47,7 @@ namespace
         }
         ~Context()
         {
-            Test::duringNativePaint = {}; PanelTest::duringBlend = {};
+            Test::duringNativePaint = {}; PanelTest::duringBlend = {}; PanelTest::duringThemeBuffer = {};
             Shutdown();
             assert(PanelTest::liveDcs == 0 && PanelTest::liveBitmaps == 0);
         }
@@ -194,6 +195,199 @@ namespace
         Shutdown(); c.Refs(0); EndPaint(); c.Refs(0);
         CHECK(!c.Message());
     }
+    HRESULT WINAPI ChainedThemeOriginal(HTHEME theme, HDC dc, int part, int state,
+        LPCWSTR text, int count, DWORD flags, LPRECT rect, const DTTOPTS* options)
+    {
+        ++PanelTest::chainedThemeCalls;
+        return ::DrawThemeTextEx(theme, dc, part, state, text, count, flags, rect, options);
+    }
+    void RootThemedClassGateAndOriginal()
+    {
+        Context c;
+        TestModule notTheExe;
+        TestTheme theme;
+        RECT rect{0,0,40,15};
+        DTTOPTS options{}; options.dwSize = sizeof(options); options.dwFlags = 0x801;
+        c.module.originals["DrawThemeTextEx"] = reinterpret_cast<void*>(ChainedThemeOriginal);
+        const GlassCore::Hooks::HookDispatcherDependency<1, 1> dep{{std::tuple{
+            std::array{std::string_view{"uxtheme.dll"}}, "DrawThemeTextEx",
+            reinterpret_cast<void*>(GlassCore::Root::Root_MyDelphiDrawThemeTextEx)}}};
+        GlassCore::Hooks::HookDispatcher<1, 1> rootDispatcher{dep, &c.module};
+        for (const wchar_t* name : {L"TEmbeddedForm", L"TFrame", L"TSampleFrame",
+            L"TPanel", L"TFlowPanel", L"TGridPanel", L"TStackPanel", L"TRelativePanel",
+            L"TCategoryPanel", L"TCategoryPanelGroup", L"TScrollBox", L"TGroupBox", L"TTabSheet", L"tframe"})
+        {
+            c.window.cls = name;
+            wchar_t rawClass[64]{};
+            CHECK(GetClassNameW(&c.window, rawClass, static_cast<int>(_countof(rawClass))) > 0);
+            const auto specs = GlassCore::Root::PanelTextSpecsForTest(&c.module, rawClass);
+            CHECK(specs.paintHooks.size() == 1 && specs.dcHooks.size() == 1);
+            CHECK(specs.paintHooks.front() == &c.module && specs.dcHooks.front() == &c.module);
+            CHECK(rootDispatcher.EnableHook(0, true));
+            const int before = PanelTest::themeBuffers, chained = PanelTest::chainedThemeCalls;
+            CHECK(c.Call("DrawThemeTextEx", &::DrawThemeTextEx, &theme, &c.dc,
+                1, 1, name, -1, 0x40u, &rect, &options) == S_OK);
+            CHECK(PanelTest::themeBuffers == before+1 && PanelTest::chainedThemeCalls == chained+1);
+            CHECK(PanelTest::rootOriginalModule == &c.module);
+            CHECK(rootDispatcher.EnableHook(0, false)); c.Refs(0);
+            const auto foreignSpecs = GlassCore::Root::PanelTextSpecsForTest(&notTheExe, name);
+            CHECK(foreignSpecs.paintHooks.empty() && foreignSpecs.dcHooks.empty());
+        }
+        for (const wchar_t* name : {L"TCoolBar", L"TForm", L"MyTFrame", L"TFrame2", L"TButton", L"Edit", L""})
+        {
+            const auto specs = GlassCore::Root::PanelTextSpecsForTest(&c.module, name);
+            CHECK(specs.paintHooks.empty() && specs.dcHooks.empty());
+        }
+        c.window.cls = L"TFrame";
+        CHECK(rootDispatcher.EnableHook(0, true));
+        const int buffers = PanelTest::themeBuffers, chained = PanelTest::chainedThemeCalls;
+        GlassCore::Root::g_shutdown = true;
+        CHECK(c.Call("DrawThemeTextEx", &::DrawThemeTextEx, &theme, &c.dc,
+            1, 1, L"TFrame", 6, 0x40u, &rect, &options) == S_OK);
+        CHECK(PanelTest::themeBuffers == buffers && PanelTest::chainedThemeCalls == chained+1);
+        GlassCore::Root::g_shutdown = false;
+        Shutdown(); // The panel compositor also becomes native during unload.
+        CHECK(c.Call("DrawThemeTextEx", &::DrawThemeTextEx, &theme, &c.dc,
+            1, 1, L"TFrame", 6, 0x40u, &rect, &options) == S_OK);
+        CHECK(PanelTest::themeBuffers == buffers && PanelTest::chainedThemeCalls == chained+2);
+        CHECK(rootDispatcher.EnableHook(0, false)); c.Refs(0);
+        const int native = PanelTest::nativeThemeCalls;
+        CHECK(GlassCore::Root::Root_MyDelphiDrawThemeTextEx(&theme, &c.dc,
+            1, 1, L"TFrame", 6, 0x40u, &rect, &options) == S_OK);
+        CHECK(PanelTest::nativeThemeCalls == native+1 && PanelTest::chainedThemeCalls == chained+2);
+    }
+
+    void ProbeThemedCaptions()
+    {
+        Context c;
+        TestTheme theme;
+        DTTOPTS options{}; options.dwSize = sizeof(options); options.dwFlags = 0x801;
+        options.crText = RGB(12,23,34); options.crBorder = RGB(45,56,67);
+        options.iGlowSize = 5; options.iFontPropId = 123; options.lParam = 0x2468;
+        const DTTOPTS originalOptions = options;
+        struct Probe { const wchar_t* name; RECT client, text; };
+        const Probe probes[]{
+            {L"TEmbeddedForm", {0,0,498,58}, {0,0,92,15}},
+            {L"TFrame", {0,0,198,58}, {0,0,40,15}},
+            {L"TSampleFrame", {0,0,260,60}, {0,0,79,15}},
+        };
+        for (const auto& p : probes)
+        {
+            c.window.cls = p.name; c.client = p.client;
+            PanelTest::clients[&c.window] = p.client;
+            RECT rect = p.text;
+            // During pre-BeginPaint the dispatcher may still name the parent.
+            // The native message bracket + actual window DC is stronger evidence.
+            Test::host = &c.other;
+            Test::duringNativePaint = [&](HWND w, UINT msg, WPARAM, LPARAM) {
+                CHECK(w == &c.window && msg == WM_PAINT);
+                c.Refs(1);
+                c.Fill(); // The caption must not clear the just-tinted background.
+                const int black = Test::black, blends = PanelTest::blends;
+                CHECK(PanelTest::blendPixel[3] == 100);
+                CHECK(DrawContainerThemeTextEx(&::DrawThemeTextEx, &theme, &c.dc,
+                    1, 1, p.name, std::wcslen(p.name), 0x40, &rect, &options) == S_OK);
+                CHECK(Test::black == black && PanelTest::blends == blends);
+            };
+            const int buffers = PanelTest::themeBuffers, native = PanelTest::nativeThemeCalls;
+            CHECK(c.Message(WM_PAINT)); c.Refs(0);
+            CHECK(PanelTest::themeBuffers == buffers+1 && PanelTest::nativeThemeCalls == native+1);
+            CHECK(!PanelTest::bufferErased);
+            CHECK(PanelTest::themeDc != &c.dc && PanelTest::theme == &theme);
+            CHECK(PanelTest::themePart == 1 && PanelTest::themeState == 1 && PanelTest::themeFlags == 0x40);
+            CHECK(PanelTest::themeText == p.name && PanelTest::themeCount == static_cast<int>(std::wcslen(p.name)));
+            DTTOPTS expected = originalOptions; expected.dwFlags |= DTT_COMPOSITED;
+            CHECK(std::memcmp(&PanelTest::themeOptions, &expected, sizeof(expected)) == 0);
+            CHECK(std::memcmp(&options, &originalOptions, sizeof(options)) == 0);
+            CHECK(rect.left == p.text.left && rect.right == p.text.right && rect.bottom == p.text.bottom);
+        }
+    }
+    void ThemedDcAndLegacyContainers()
+    {
+        Context c;
+        TestTheme theme;
+        RECT rect{0,0,40,15};
+        auto draw = [&](HDC dc) {
+            return DrawContainerThemeTextEx(&::DrawThemeTextEx, &theme, dc,
+                1, 1, L"TFrame", 6, 0x40, &rect, nullptr);
+        };
+        CHECK(draw(&c.dc) == S_OK && PanelTest::themeBuffers == 1);
+        CHECK(PanelTest::themeOptions.dwSize == sizeof(DTTOPTS));
+        CHECK(PanelTest::themeOptions.dwFlags == DTT_COMPOSITED);
+        CHECK(draw(&c.foreign) == S_OK && PanelTest::themeBuffers == 1);
+        CHECK(draw(&c.memory) == S_OK && PanelTest::themeBuffers == 1);
+        Test::host = &c.other;
+        CHECK(draw(&c.dc) == S_OK && PanelTest::themeBuffers == 1);
+        Test::host = &c.window;
+        c.window.backdrop = false;
+        CHECK(draw(&c.dc) == S_OK && PanelTest::themeBuffers == 1);
+        c.window.backdrop = true; Test::full = false;
+        CHECK(draw(&c.dc) == S_OK && PanelTest::themeBuffers == 1); Test::full = true;
+        // The Edit theme alone must never turn an actual TButton into a panel.
+        c.window.cls = L"TButton";
+        CHECK(draw(&c.dc) == S_OK && PanelTest::themeBuffers == 1);
+        for (const wchar_t* name : {L"TGroupBox", L"TTabSheet", L"TPanel", L"TScrollBox"})
+        { c.window.cls = name; CHECK(draw(&c.dc) == S_OK); }
+        CHECK(PanelTest::themeBuffers == 5); // Existing VCL captions stay supported.
+        c.window.cls = L"TFrame";
+        Test::duringNativePaint = [&](HWND, UINT msg, WPARAM wp, LPARAM) {
+            CHECK(msg == WM_PRINTCLIENT && reinterpret_cast<HDC>(wp) == &c.memory);
+            CHECK(draw(&c.memory) == S_OK);
+        };
+        CHECK(c.Message(WM_PRINTCLIENT, &c.memory, 4));
+        CHECK(PanelTest::themeBuffers == 6); c.Refs(0);
+    }
+    void ThemedNativeSemanticsAndFailure()
+    {
+        Context c;
+        TestTheme theme;
+        RECT rect{0,0,40,15};
+        DTTOPTS options{}; options.dwSize = sizeof(options); options.dwFlags = 0x801;
+        auto draw = [&](DWORD flags = 0x40) {
+            return DrawContainerThemeTextEx(&::DrawThemeTextEx, &theme, &c.dc,
+                1, 1, L"TFrame", 6, flags, &rect, &options);
+        };
+        for (const auto& input : std::array{
+            std::tuple{static_cast<HDC>(nullptr), L"TFrame", 6, &rect},
+            std::tuple{&c.dc, static_cast<LPCWSTR>(nullptr), 6, &rect},
+            std::tuple{&c.dc, L"TFrame", 0, &rect},
+            std::tuple{&c.dc, L"TFrame", 6, static_cast<LPRECT>(nullptr)}})
+        {
+            const auto [dc, text, count, area] = input;
+            CHECK(DrawContainerThemeTextEx(&::DrawThemeTextEx, &theme, dc,
+                1, 1, text, count, 0x40, area, &options) == S_OK);
+            CHECK(PanelTest::themeBuffers == 0 && PanelTest::optionsPointer == &options);
+        }
+        RECT empty{};
+        CHECK(DrawContainerThemeTextEx(&::DrawThemeTextEx, &theme, &c.dc,
+            1, 1, L"TFrame", 6, 0x40, &empty, &options) == S_OK);
+        CHECK(PanelTest::themeBuffers == 0);
+        CHECK(draw(DT_CALCRECT) == S_OK && rect.right == 45);
+        CHECK(draw(DT_MODIFYSTRING) == S_OK && PanelTest::optionsPointer == &options);
+        for (DWORD flag : {DTT_CALCRECT, DTT_CALLBACK})
+        {
+            options.dwFlags = flag;
+            CHECK(draw() == S_OK && PanelTest::optionsPointer == &options);
+        }
+        options.dwSize = sizeof(options)-8;
+        CHECK(draw() == S_OK && PanelTest::themeBuffers == 0);
+        options.dwSize = sizeof(options); options.dwFlags = 0x801;
+        PanelTest::bufferResult = E_FAIL;
+        CHECK(draw() == S_OK && PanelTest::themeDc == &c.dc && PanelTest::optionsPointer == &options);
+        CHECK(PanelTest::themeOptions.dwFlags == 0x801);
+        PanelTest::bufferResult = S_OK; PanelTest::failThemeBufferDraw = true;
+        const int native = PanelTest::nativeThemeCalls;
+        CHECK(draw() == S_OK && PanelTest::nativeThemeCalls == native+2);
+        CHECK(PanelTest::themeDc == &c.dc && PanelTest::optionsPointer == &options);
+        PanelTest::failThemeBufferDraw = false;
+        const int buffers = PanelTest::themeBuffers;
+        PanelTest::duringThemeBuffer = [&] { CHECK(draw() == S_OK && PanelTest::themeDc == &c.dc); };
+        CHECK(draw() == S_OK && PanelTest::themeBuffers == buffers+1);
+        PanelTest::duringThemeBuffer = {};
+        CHECK(draw() == S_OK && PanelTest::themeBuffers == buffers+2);
+        CHECK(Test::black == 0 && PanelTest::blends == 0);
+    }
+
     void FailureAndReentry()
     {
         Context c;
@@ -218,6 +412,9 @@ int main(int argc, char** argv)
         {"classes-and-erase", ClassesAndNativeErase}, {"alpha-colors", CustomAlphaAndSystemColors},
         {"apis-and-chrome", NativeBrushApisAndChrome}, {"dc-and-print", DcOwnershipAndPrintClient},
         {"gates-and-sessions", GatesAndBalancedSessions}, {"failures-and-reentry", FailureAndReentry},
+        {"root-themed-route", RootThemedClassGateAndOriginal},
+        {"probe-themed-captions", ProbeThemedCaptions}, {"themed-dc-and-legacy", ThemedDcAndLegacyContainers},
+        {"themed-native-semantics", ThemedNativeSemanticsAndFailure},
     };
     try { CHECK(argc == 2); cases.at(argv[1])(); std::cout << argv[1] << ": OK\n"; return 0; }
     catch (const std::exception& e) { std::cerr << argv[1] << ": " << e.what() << '\n'; return 1; }

@@ -576,11 +576,11 @@ namespace GlassCore::Root
                 cache.winFormsDrawTextEx = true;
 
             // VCL paints windowless labels and group captions directly from the EXE.
-            // Limit the additional IAT slot to the observed container classes; the
-            // hook also verifies the current thread's paint owner and actual window DC.
+            // Share the exact panel/frame classes with the native background bridge;
+            // the handler verifies either that bridge's DC or the current paint owner.
             if (instMod == GlassCore::ModuleHandler::g_entryPointModule
                 && (StrEqI(cls, L"TGroupBox") || StrEqI(cls, L"TTabSheet")
-                    || StrEqI(cls, L"TPanel") || StrEqI(cls, L"TScrollBox")))
+                    || GlassShared::IsDelphiPanelClassName(cls)))
             {
                 PushPaint(instMod, OHK_DELPHI_DRAWTHEMETEXTEX, cache);
                 PushDc(instMod, OHK_DELPHI_DRAWTHEMETEXTEX, cache);

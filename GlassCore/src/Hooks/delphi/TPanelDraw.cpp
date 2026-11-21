@@ -1,11 +1,13 @@
 // VCL panels/frames: preserve native erase so the actual background brush is
 // available. Only client-background fills are replaced; bevels and other
-// controls' DCs are not recoloured. No alpha pattern brushes or GDI+.
+// controls' DCs are not recoloured. The root themed-text slot also shares this
+// session/DC gate and the existing transparent compositor. No alpha pattern brushes.
 #include "CorePch.h"
 #include <Hooks/delphi/TPanelDraw.h>
 #include <Core/Intercept/HookDispatcher.h>
 #include <Module/ModuleHandler.h>
 #include <Subsystems/PaintDispatcher.h>
+#include <Subsystems/RenderText.h>
 #include <Subsystems/RootSwcaGradient.h>
 #include <GlassDelphiPanel.h>
 #include <GlassBackdropMark.h>
@@ -55,8 +57,8 @@ namespace GlassCore::DelphiPanel
 
         bool TakeDiag(size_t channel) noexcept
         {
-            static thread_local ULONGLONG epoch[2]{};
-            static thread_local unsigned budget[2]{};
+            static thread_local ULONGLONG epoch[3]{};
+            static thread_local unsigned budget[3]{};
             const ULONGLONG now = GetTickCount64();
             if (!epoch[channel] || now - epoch[channel] >= 1000)
             { epoch[channel] = now; budget[channel] = 16; }
@@ -195,6 +197,58 @@ namespace GlassCore::DelphiPanel
             return ApplyBackground(dc, *r, GetBkColor(dc), L"ExtTextOutW") ? TRUE
                 : orig(dc, x, y, options, r, text, count, dx);
         }
+    }
+
+    HRESULT DrawContainerThemeTextEx(decltype(&::DrawThemeTextEx) original,
+        HTHEME theme, HDC dc, int part, int state, LPCWSTR text, int count,
+        DWORD flags, LPRECT rect, const DTTOPTS* options)
+    {
+        if (!original) return ::DrawThemeTextEx(theme, dc, part, state, text, count, flags, rect, options);
+        const HWND dcWindow = dc ? WindowFromDC(dc) : nullptr;
+        const HWND owner = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
+        const bool panelDc = IsPanelDc(dc);
+        const HWND hwnd = panelDc ? g_stack.back().hwnd : dcWindow;
+        wchar_t name[64]{};
+        if (hwnd) GetClassNameW(hwnd, name, static_cast<int>(_countof(name)));
+        const bool container = GlassShared::IsDelphiPanelClassName(name)
+            || _wcsicmp(name, L"TGroupBox") == 0 || _wcsicmp(name, L"TTabSheet") == 0;
+        // The observed path is EXE!DrawThemeTextEx(Edit, 1, 1), not an Edit HWND.
+        // Keep measurements, callbacks, arbitrary DCs and all caller options native.
+        if (g_shutdown.load(std::memory_order_acquire) || g_inHook
+            || !GlassCore::Root::IsFullInjectionMode() || !hwnd || !container
+            || (!panelDc && hwnd != owner) || !GlassShared::GlassIsBackdropAllowedForHwnd(hwnd)
+            || !rect || IsRectEmpty(rect) || !text || count == 0
+            || (flags & (DT_CALCRECT | DT_MODIFYSTRING))
+            || (options && (options->dwSize != sizeof(DTTOPTS)
+                || (options->dwFlags & (DTT_CALCRECT | DTT_CALLBACK)))))
+            return original(theme, dc, part, state, text, count, flags, rect, options);
+
+        DTTOPTS work{};
+        if (options) work = *options;
+        else work.dwSize = sizeof(DTTOPTS);
+        work.dwFlags |= DTT_COMPOSITED;
+        RECT drawRect = *rect;
+        HRESULT drawn = E_FAIL;
+        HRESULT buffered = E_FAIL;
+        {
+            g_inHook = true;
+            auto leave = wil::scope_exit([]() noexcept { g_inHook = false; });
+            // Reuse the existing VCL compositor: clear transparent buffer, let
+            // uxtheme render the exact font/colour/glow, then alpha-compose it.
+            // No ETO/glyph interception inside gdi32full and no background erase.
+            buffered = GlassCore::Text::DrawThemeContent(dc, *rect, nullptr, nullptr, 0,
+                [&](HDC memoryDc, HPAINTBUFFER, RGBQUAD*, int) {
+                    drawn = original(theme, memoryDc, part, state, text, count, flags, &drawRect, &work);
+                }, 0xFF, false, true, false);
+        }
+        if (TakeDiag(2))
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiPanel] text api=DrawThemeTextEx hwnd=0x%p class=\"%s\" dc=0x%p dcWnd=0x%p panelDc=%d theme=0x%p part=%d state=%d flags=0x%X options=0x%X bufferHr=0x%08X drawHr=0x%08X",
+                hwnd, name, dc, dcWindow, panelDc ? 1 : 0, theme, part, state, flags, options ? options->dwFlags : 0u,
+                static_cast<unsigned>(buffered), static_cast<unsigned>(drawn));
+        if (!SUCCEEDED(buffered) || !SUCCEEDED(drawn))
+            return original(theme, dc, part, state, text, count, flags, rect, options);
+        return drawn;
     }
 
     bool BeginPaint(HWND hwnd, UINT message, HDC suppliedDc) noexcept
