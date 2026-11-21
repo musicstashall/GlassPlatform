@@ -3522,3 +3522,128 @@ MSVC/Windows-сборка недоступна; Buffered TPanel, TSplitView и �
 BeginBufferedPaint, BufferedPaintSetAlpha, EndBufferedPaint и предшествующие
 заливки/BitBlt. Эти buffered API уже есть в DebugDetour-зонде (номера 30/33/31);
 новый глобальный зонд для запроса не добавлялся.
+
+## Тест 94: Form.DoubleBuffered OFF → ON → OFF — подтверждённая перезапись альфы
+
+### Материал и способ сопоставления
+
+Пользователь переключил Form.DoubleBuffered туда и обратно при активном зонде.
+`LogViewer-19.log`: UTF-8 без BOM, 528873 байта, 2748 записей с timestamp,
+PID 28816 / TID 28916, 21:36:01.730–21:36:06.297. SHA-256:
+`5d612cff13ffd38b8db2a5b51c7ea268c85846ecbcaf2dc6869ef007de73a33b`.
+В glyph-index text есть управляющие символы: `str.splitlines()` даёт ложные
+дополнительные строки. Разбор использует LF и начало timestamp-записи.
+
+Буферы приложения сопоставлены по PID/TID/hbp **в пределах времени жизни**,
+от успешного Begin до End, с target HWND/DC, buffer DC и прямоугольником.
+У всех этих вызовов outerCaller и retAddrMod — DelphiControlsSample_Win64.exe.
+Внутренние буферы uxtheme не смешиваются с ними; прямые вызовы из GlassCore
+диагностический hook намеренно не выводит. Поэтому остальные 36 Begin и 155 End
+от uxtheme не являются сами по себе доказательством утечки или нарушения пар.
+
+| API приложения | Количество | Результат полной корреляции |
+| --- | --- | --- |
+| BeginBufferedPaint | 40 | 34 успешных; 6 с пустым target=[0,0,0,0], hbp=NULL и buffer DC=NULL. У всех format=2 (BPBF_COMPOSITED), flags=0, pBlend=NULL. |
+| BufferedPaintSetAlpha | 34 | Ровно один на каждый успешный hbp: alpha=255, rect совпадает с target Begin, hr=0x00000000. |
+| EndBufferedPaint | 34 | Ровно один на каждый успешный hbp: fUpdate=1, hr=0x00000000; незакрытых/несопоставленных EXE-буферов нет. |
+| BufferedPaintClear | 0 | Нет зарегистрированных вызовов; это не означает отсутствия очисток GlassCore. |
+
+Для **каждого из 34** между SetAlpha и записью End найден BitBlt от uxtheme:
+source DC равен buffer DC данного Begin, destination DC равен его target DC,
+координаты/размер совпадают с target, ROP=SRCCOPY (0x00CC0020). End зонд
+логирует после true API, поэтому внутреннее копирование появляется раньше
+его строки. Это не подбор похожих handles из разных repaint.
+
+Успешные циклы охватывают **19 точных классов**: TPanel ×10, TGroupBox ×6,
+TControlBar ×2; по одному TPageControl, TScrollBox, TCardPanel, TCard,
+TStackPanel, TRelativePanel, TCategoryButtons, TButtonGroup, TCategoryPanelGroup,
+TCategoryPanel, TCategoryPanelSurface, TRadioGroup, TGridPanel, TFlowPanel,
+TMemo и TStatusBar. Это объясняет массовый характер симптома, а не дефект
+одной panel-кисти. Поддержка всех этих buffered-классов **не заявляется**.
+
+### Переходы ON / OFF
+
+- В начале caption Form.DoubleBuffered рисуется как checkbox part=3,
+  state=1/2 (unchecked). При включении идёт массовый repaint:
+  21:36:02.321–02.426 — 39 Begin, 33 успешных цикла с SetAlpha255/End.
+  Checkbox в 02.422 уже checked (state=6), в 03.025 — checked normal (5).
+- В 05.658 виден checked pressed (7); при обратном переключении панельные
+  фоны снова рисуются на оконные DC без массовых EXE-буферов. Например, тот же
+  TScrollBox HWND=0x960C5E в 05.764 получает alpha=0/ok=1 непосредственно
+  на DC=0xFFFFFFFFC6012C7B вместо memory DC=0x7A011C60 из ON-кадра.
+  В 05.860 checkbox уже unchecked (2), в 06.049 — unchecked normal (1).
+- Есть одно важное исключение: TControlBar HWND=0x1F1014 в 05.856–05.857
+  всё ещё проходит собственный успешный Begin/SetAlpha255/BitBlt/End.
+  Поэтому утверждение «OFF убрал все buffered вызовы» неверно.
+  Состояния checkbox — ориентиры repaint, не точные timestamps присваивания
+  свойства и не доказательство значения DoubleBuffered каждого потомка.
+
+### Фон правильный до завершающего A255
+
+Ниже — реальные цепочки на одном и том же buffer DC, а не только исходниковая
+гипотеза из теста 93. Во всех строках таблицы финал — SetAlpha255 на весь
+**target данного Begin**, затем соответствующий SRCCOPY и End(update=1), hr=0.
+
+| Начало / точный HWND | hbp / buffer DC | Что зарегистрировано до финала |
+| --- | --- | --- |
+| 02.330 TScrollBox 0x960C5E | 0x7954 / 0x7A011C60 | FillRect 0xF0F0F0, alpha=0, ok=1, [0,0,1092,549]. |
+| 02.342 TPanel 0x7B0560 | 0x1BFC / 0x41012664 | FillRect 0xF0F0F0, alpha=100, ok=1, [0,0,420,78]; caption compositor bufferHr/drawHr=0. |
+| 02.345 TPanel 0x4F0BE4 | 0x42BE / 0x34011A98 | FillRect 0xFFFFFF, alpha=0, ok=1; полный [0,0,288,76] и bevel inset [1,1,287,75]. |
+| 02.350 TCategoryButtons 0x360C32 | 0x388A / 0x44012664 | Full-client alpha=0; gradient 0xFFEAFF → 0xF0F0F0, alpha=100, [2,1,234,44]; оба пути ok=1. |
+| 02.359 TCategoryPanelGroup 0x490AE8 | 0x04F0 / 0x46012664 | FillRect 0xA4A0A0, alpha=100, ok=1, [0,0,481,107]; target буфера частичный: [185,0,481,107]. |
+| 02.387 TPanel 0xD907B0 | 0x3605 / 0x35011C3F | FillRect 0xE8FFE8, alpha=100, ok=1; target=[0,0,199,27], исходные fill rect=[0,0,200,120] и [1,1,199,119] клипуются. |
+
+Для TCategoryPanelGroup перед публикацией зонд дополнительно прочитал
+`px00=pxMid=0x403F3F`. Это соответствует premultiplied каналам 0xA4A0A0
+при A100: round(0xA4×100/255)=0x40, round(0xA0×100/255)=0x3F.
+SetAlpha255 не возвращает исходную яркость RGB. Поэтому механизм объясняет
+не только непрозрачный чёрный вместо очистки, но и тёмную непрозрачную заливку
+вместо полупрозрачного цвета. GetPixel-образцы дают **RGB, не alpha**;
+альфа подтверждена успешным API-вызовом, не измерением пикселей DWM.
+Всего в логе четыре background-диагностики этой группы с 0xA4A0A0:
+02.360, 05.730, 05.735 и 05.754 — все alpha=100/ok=1. При обратном
+переключении HWND группы меняется с 0x490AE8 на 0x4A0AE8; идентичность всех
+дочерних HWND через этот переход не предполагается. Client группы, header
+TCategoryPanel и отдельный TCategoryPanelSurface по-прежнему не смешиваются.
+
+### Границы диагноза и безопасное направление
+
+Теперь успешный **SetAlpha255 перед публикацией** — runtime-факт, а не только
+reference MakeOpaque-гипотеза теста 93. В справочном Winapi.UxTheme.pas
+MakeOpaque inline вызывает именно SetAlpha(...,255); отдельный экспорт
+MakeOpaque для наблюдения этого пути не требуется. Успех фонового A0/A100
+и portable GREEN не означают сохранение этой альфы до конца буферного кадра.
+
+Однако **Begin самой TDelphiControlsForm HWND=0x220410 в 02.321 вернул NULL**:
+target=[0,0,0,0]. Лог не доказывает успешный буфер всей формы и не позволяет
+приписать этому вызову непрозрачность её собственного client/NC. Остальные
+пять пустых Begin — TTabSheet, TCategoryPanel, TCategoryPanelSurface,
+TScrollBox и TStatusBar. Точного класса TSplitView нет: caption
+«WinX: SplitView, стек, карточки» не является установлением владельца HWND.
+Ни исходный default DoubleBuffered=True у reference TSplitView, ни общий
+симптом галереи не закрывают его собственные routing/background gates.
+
+Следующий production-шаг следует ограничить **точным поддержанным панельным
+путём и доказанной связью target HWND/DC → hbp → buffer DC**, в Full и при
+разрешённом backdrop. Цель — сохранить уже сформированную Glass-альфу при
+финализации, не меняя DoubleBuffered приложения. Не подавлять SetAlpha255
+глобально/по одному ambient HWND; не назначать A100 целому буферу; не считать
+любой чёрный прозрачным и не перерисовывать фон поверх готовых caption/значков.
+Одно подавление MakeOpaque ещё не является готовым решением: native GDI
+может нуждаться в нормализации альфы текста, рамок и прочего содержимого.
+Нужны проверки границ/clip/повторного использования и вложенности буферов,
+отказов Begin/SetAlpha/End, чужих DC, режима/backdrop и сохранности текста,
+рамок и ImageList. Расширять на остальные классы — после Windows-проверки,
+а не по общности завершающего API. Для установления самой причины новый
+такой же общий лог переключателя уже не нужен.
+
+В этом шаге изменена только документация: production hooks, renderer/Edit,
+panel policy теста 93, списки классов и диагностический зонд не менялись.
+Проверки без изменения production: contracts **73/73**, panels **12/12**,
+button groups **9/9**, TCoolBar **9/9**, input icons **6/6** — PASS;
+UTF-8 без BOM и `git diff --check` — PASS. Машинная сверка всех 34 циклов,
+шести NULL Begin, временных групп и четырёх цветных заливок — PASS.
+Windows/MSVC и визуальная проверка исправления не выполнялись; исправление
+буферной финализации пока не реализовано. После сохранения выводов исходный
+LogViewer-19 удалён из входящих вложений; копия лога не хранится.
+Временные файлы не создавались.
