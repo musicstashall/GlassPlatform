@@ -11,7 +11,7 @@
 #include <Controls/ButtonSubclass.h>
 #include <Controls/ListViewSubclass.h>
 #include <Controls/RebarSubclass.h>
-#include <Controls/CoolBarSubclass.h>
+#include <Controls/TCoolBarSubclass.h>
 #include <Explorer/ExplorerIslandContainerSubclass.h>
 #include <WinUiBridge/WinUiDesktopBridgeHost.h>
 #include <GlassControlKind.h>

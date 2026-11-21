@@ -13,7 +13,7 @@
 #include <Controls/MonthCalSubclass.h>
 #include <Controls/NetUISubclass.h>
 #include <Controls/RebarSubclass.h>
-#include <Controls/CoolBarSubclass.h>
+#include <Controls/TCoolBarSubclass.h>
 #include <Controls/ScrollBarHost.h>
 #include <Controls/StaticSubclass.h>
 #include <Controls/TabControlSubclass.h>

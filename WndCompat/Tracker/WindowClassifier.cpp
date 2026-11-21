@@ -1,7 +1,7 @@
 #include "WndPch.h"
 #include "Tracker/WindowClassifier.h"
 #include "Tracker/WindowClassUtils.h"
-#include <Controls/CoolBarSubclass.h>
+#include <Controls/TCoolBarSubclass.h>
 #include <GlassDelphiPanel.h>
 #include <ExplorerCompatHostPolicy.h>
 #include <RootBackdropPolicy.h>
@@ -496,8 +496,8 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
 
     // ── CoolBar (Delphi TCoolBar) ────────────────────────────────────────────
     // Зонд GetClassNameW: TCoolBar; нормализатор НЕ снимает префикс T.
-    // Та же точная проверка, что в attach/catch-up/rescan, без подстрок.
-    // Свой путь: CoolBarSubclass + delphi/TCoolBarDraw, не generic rebar.
+    // Общий предикат с attach/catch-up/rescan; CoolBar — прежний алиас.
+    // Свой путь: TCoolBarSubclass + delphi/TCoolBarDraw, не generic rebar.
     if (WndCompat::CoolBar_IsClassName(cls.c_str()))
         return ControlKind::CoolBar;
 
