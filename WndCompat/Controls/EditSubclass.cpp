@@ -115,8 +115,8 @@ namespace WndCompat
         if (GlassGetWindowKind(hWnd) != GlassControlKind::None)
             return;
 
-        // Не меняем EM_SETBKGNDCOLOR приложения. GlassCore композитит исходный
-        // цвет из реальных FillRect/PatBlt/ETO_OPAQUE, без локального getter-сообщения.
+        // Не вызываем EM_SETBKGNDCOLOR(0,0): GlassCore читает EM_GETBKGNDCOLOR для полного клиента;
+        // принудительный чёрный ломает согласование с фоном, заданным приложением (COLOR_WINDOW / свой цвет).
 
         GlassMarkWindow(hWnd, kind);
 
