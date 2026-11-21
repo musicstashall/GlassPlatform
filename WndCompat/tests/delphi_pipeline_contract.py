@@ -880,13 +880,17 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('QueryIconBackgroundColorRemovalContext(', draw)
         self.assertIn('{ L"Root", L"Control", L"ListBox" }', draw)
         self.assertIn('{ L"Root", L"Control", L"ComboBox" }', draw)
-        self.assertIn('PrepareItemIcon(converted.get(), branch)', draw)
-        self.assertIn('RestoreGlyphAlpha(bmp32, bg, 10);', draw)
+        self.assertIn('PrepareItemIcon(converted.get(), branch, iconBg)', draw)
+        # Фон значка вырезается заливкой от края: белые области внутри
+        # (страница в папке) остаются непрозрачными.
+        self.assertIn('CutIconBackground(bmp32, bg, 10)', draw)
+        self.assertIn('bool CutIconBackground(HBITMAP bmp32, COLORREF bg, BYTE threshold)', draw)
+        self.assertIn('RestoreGlyphAlpha(bmp32, bg, threshold);', draw)
         # Маска ImageList — только 1bpp: 4bpp/8bpp здесь цветной значок.
         self.assertIn('const bool maskSource = bm.bmBitsPixel == 1;', draw)
         self.assertNotIn('bm.bmBitsPixel < 8', draw)
         self.assertIn('icon-bypass', draw)
-        self.assertIn('if (!PrepareItemIcon(converted.get(), branch))', draw)
+        self.assertIn('if (!PrepareItemIcon(converted.get(), branch, iconBg))', draw)
         self.assertIn('GdiAlphaBlend(dst, x, y, cx, cy, src, sx, sy, scx, scy, bf)', draw)
 
     def test_delphi_grid_replay_supports_row_only_fixed_area(self):
