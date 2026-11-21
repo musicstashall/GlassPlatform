@@ -843,6 +843,24 @@ class DelphiPipelineContract(unittest.TestCase):
         sub = read("WndCompat/Root/RootSubclass.cpp")
         self.assertIn('WndCompat::IsWindowClass(hWnd, L"TControlList")', sub)
 
+    def test_file_and_directory_list_boxes_use_owner_draw_session(self):
+        cls = read("WndCompat/Tracker/WindowClassifier.cpp")
+        block = cls.split('// ── ListBox ─', 1)[1].split('return ControlKind::ListBox;', 1)[0]
+        for name in ("TFileListBox", "TDirectoryListBox"):
+            self.assertIn('Equals(cls, L"%s")' % name, block)
+        sub = read("WndCompat/Root/RootSubclass.cpp")
+        for name in ("TFileListBox", "TDirectoryListBox"):
+            self.assertIn('IsWindowClass(dis->hwndItem, L"%s")' % name, sub)
+        draw = read("GlassCore/src/Hooks/delphi/TListBoxDraw.cpp")
+        for name in ("TFileListBox", "TDirectoryListBox"):
+            self.assertIn('_wcsicmp(cls, L"%s")' % name, draw)
+        back = read("GlassCore/src/Hooks/delphi/TBackgroundHooks.cpp")
+        for name in ("TFileListBox", "TDirectoryListBox"):
+            self.assertIn('_wcsicmp(cls, L"%s")' % name, back)
+        probe = read("GlassCore/src/Hooks/delphi/TListBoxProbe.cpp")
+        for name in ("TFileListBox", "TDirectoryListBox"):
+            self.assertIn('_wcsicmp(cls, L"%s")' % name, probe)
+
     def test_delphi_grid_replay_supports_row_only_fixed_area(self):
         root = read("GlassCore/src/Hooks/RootGdiHooks.cpp")
         replay = root.split('static void ReplayGridFixedArea(const GridPaintRec& rec)', 1)[1].split(

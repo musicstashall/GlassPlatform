@@ -2348,3 +2348,54 @@ Memory-DC принимается существующим правилом `IsDe
 origin `(0,0)` → `haveRow`/`haveCol` ложны.
 
 Сборка и визуальный результат на Windows не проверены.
+
+## Тест 69: TFileListBox и TDirectoryListBox (owner-draw списки)
+
+Скриншот `image-42.png`: фон прозрачный (color key), но текста строк нет —
+видны только значки и светлый текст выделенной строки. Журнал
+`LogViewer-14.log` (зонд при отображении):
+
+- `TFileListBox` (`hwnd=0x6E0CFE`), DC `0x5B010103` = оконный DC самого списка:
+  `PatBlt caller=WndCompat BLACKNESS (0,0) 279x88` (общее чернение
+  `WM_ERASEBKGND`), затем построчно
+  `FillRect hdc=0x5B010103 rect=[0,0,279,15] color=0x00FFFFFF` +
+  `ExtTextOutW hdc=0x5B010103 x=2 y=0 opt=0x0 rect=- text="bfsvc.exe"`;
+- `TDirectoryListBox` (`hwnd=0xB507B4`), DC `0xA8010A42`:
+  `FillRect [0,16,239,32] color=0x00D77800` (выделение),
+  `StretchBlt` значков 16x15 (`SRCCOPY` + маска `0x00E20746`),
+  `ExtTextOutW x=26 y=16 opt=0x0 rect=- text="Windows"`;
+- ни одной строки `[DelphiListDraw]` и ни одного `WM_DRAWITEM` в журнале нет.
+
+Вывод: это `TCustomListBox`-наследники с owner-draw (`csOwnerDrawFixed`):
+VCL рисует каждую строку сама — `FillRect` + `ExtTextOutW` на DC списка. Для
+`TListBox`/`TCheckListBox`/`TColorListBox` в проекте уже есть ровно этот
+маршрут (`Hooks/delphi/TListBoxDraw` + `GlassCore_BeginDelphiListBoxDraw` из
+`WndCompat`), но `TFileListBox`/`TDirectoryListBox` в трёх его списках классов
+отсутствовали, поэтому: `WM_DRAWITEM` не открывал сессию (её `[DelphiListDraw]`
+в журнале нет), строки остались непрозрачными, а чёрный текст на чёрном
+(color key) исчезал. Светлый текст выделения виден потому, что он белый.
+
+Добавлены `TFileListBox` и `TDirectoryListBox`:
+
+- `WndCompat/Tracker/WindowClassifier.cpp` — ветка `ControlKind::ListBox`
+  (отсюда `ListBox_Attach` и `GlassMarkWindow(ListBox)`, без которого сессия
+  owner-draw не открывается: она требует именно этот kind);
+- `WndCompat/Root/RootSubclass.cpp` — `listOwnerDraw` в `WM_DRAWITEM`
+  (`CtlType == ODT_LISTBOX`), вызов `GlassCore_BeginDelphiListBoxDraw`;
+- `GlassCore/src/Hooks/delphi/TListBoxDraw.cpp` — допуск классов в `BeginDraw`;
+- `GlassCore/src/Hooks/delphi/TBackgroundHooks.cpp` — чернение фона списка;
+- `GlassCore/src/Hooks/delphi/TListBoxProbe.cpp` — пассивный зонд (Debug).
+
+Почему именно этот маршрут, а не «таблица» (как `TValueListEditor`): у списков
+строка рисуется из `WM_DRAWITEM`, и `DRAWITEMSTRUCT` даёт точный `hDC` и
+`rcItem` — сессия ограничена ими, поэтому её заливки/текст можно менять
+безопасно. У таблиц такой границы нет, там нужна реконструкция после paint.
+Сессия также сохраняет `StretchBlt` значков: он не входит в набор
+подменяемых API, значки рисуются как раньше.
+
+Сборка и визуальный результат на Windows не проверены. Признак успеха в
+следующем журнале: строки `[GlassCore][DelphiListDraw] hwnd=… class=TFileListBox`
+(и `TDirectoryListBox`) и `[WndCompat][WinEvent] ListBox_Attach`. Если их нет —
+значит `WM_DRAWITEM` до корневого субкласса не доходит (например, список лежит
+не в том окне, которое субклассировано), и тогда маршрут нужно менять на
+табличный.

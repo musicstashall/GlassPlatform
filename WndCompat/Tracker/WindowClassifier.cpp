@@ -407,7 +407,11 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
     if (Equals(cls, L"ListBox") ||
         Equals(cls, L"TListBox") ||
         Equals(cls, L"TCheckListBox") ||
-        Equals(cls, L"TColorListBox"))
+        Equals(cls, L"TColorListBox") ||
+        // TFileListBox/TDirectoryListBox — тоже TCustomListBox, рисуют строку
+        // сами (owner-draw: значок + имя), поэтому идут тем же маршрутом.
+        Equals(cls, L"TFileListBox") ||
+        Equals(cls, L"TDirectoryListBox"))
         return ControlKind::ListBox;
 
     // ── ComboBox ─────────────────────────────────────────────────────────────

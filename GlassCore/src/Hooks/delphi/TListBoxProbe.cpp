@@ -24,7 +24,9 @@ namespace GlassCore::DelphiListBox
         WCHAR cls[64]{};
         if (!GetClassNameW(dis->hwndItem, cls, _countof(cls))
             || (_wcsicmp(cls, L"TListBox") != 0 && _wcsicmp(cls, L"TCheckListBox") != 0
-                && _wcsicmp(cls, L"TColorListBox") != 0)) return false;
+                && _wcsicmp(cls, L"TColorListBox") != 0
+                && _wcsicmp(cls, L"TFileListBox") != 0
+                && _wcsicmp(cls, L"TDirectoryListBox") != 0)) return false;
         if (!GlassCore::ModuleHandler::g_entryPointModule) return false;
         g_drawStack.push_back(dis->hwndItem);
         GlassCore::Root::BeginVclDrawProbe(dis->hwndItem, true);
