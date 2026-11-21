@@ -473,39 +473,79 @@ namespace GlassCore::DelphiListBox
             return HasOpaquePixels(bmp32);
         }
 
+#if defined(_DEBUG)
+        void IconDiag(const Session& session, const wchar_t* reason, int x, int y,
+            int cx, int cy, LONG bpp, DWORD rop) noexcept
+        {
+            static thread_local ULONGLONG epoch = 0;
+            static thread_local unsigned budget = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (!epoch || now - epoch >= 1000) { epoch = now; budget = 16; }
+            if (!budget)
+                return;
+            --budget;
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiListDraw] icon-bypass hwnd=0x%p reason=%s dst=[%d,%d,%d,%d] bpp=%ld rop=0x%08X",
+                session.hwnd, reason, x, y, cx, cy, bpp, static_cast<unsigned>(rop));
+        }
+#else
+        void IconDiag(const Session&, const wchar_t*, int, int, int, int, LONG, DWORD) noexcept {}
+#endif
+
         IconBlit BlitListItemIcon(const Session& session, HDC dst, int x, int y, int cx, int cy,
             HDC src, int sx, int sy, int scx, int scy, DWORD rop) noexcept
         {
             if (!cx || !cy || !src || !scx || !scy)
+            {
+                IconDiag(session, L"empty", x, y, cx, cy, 0, rop);
                 return IconBlit::PassThrough;
+            }
             const HBITMAP source = static_cast<HBITMAP>(GetCurrentObject(src, OBJ_BITMAP));
             if (!source || Shared::BitmapUtils::IsOemBitmap(source))
                 return IconBlit::PassThrough;
             BITMAP bm{};
             if (!GetObject(source, sizeof(bm), &bm))
                 return IconBlit::PassThrough;
-            const bool maskSource = bm.bmBitsPixel > 0 && bm.bmBitsPixel < 8;
+            // Маска ImageList — всегда 1bpp (монохром). 4bpp/8bpp здесь может
+            // быть цветным значком в 16/256 цветах, его нельзя принимать за
+            // маску: иначе он уходит в оригинал и остаётся белым квадратом.
+            const bool maskSource = bm.bmBitsPixel == 1;
             const bool maskRop = rop == 0x00E20746 || rop == 0x00220326
                 || rop == SRCAND || rop == SRCINVERT;
             if (maskSource || maskRop)
             {
                 if (!session.iconAlphaDone)
+                {
+                    IconDiag(session, L"mask-passthrough", x, y, cx, cy, bm.bmBitsPixel, rop);
                     return IconBlit::PassThrough;
+                }
                 g_stack.back().iconAlphaDone = false;
                 return IconBlit::Skip;
             }
             if (rop != SRCCOPY)
+            {
+                IconDiag(session, L"rop", x, y, cx, cy, bm.bmBitsPixel, rop);
                 return IconBlit::PassThrough;
+            }
             // Значок — небольшое изображение внутри строки, а не её фон и не
             // посторонняя графика (скроллбар, рамка).
             if (cx > 128 || cy > 128)
+            {
+                IconDiag(session, L"size", x, y, cx, cy, bm.bmBitsPixel, rop);
                 return IconBlit::PassThrough;
+            }
             if (x <= session.item.left && y <= session.item.top
                 && x + cx >= session.item.right && y + cy >= session.item.bottom)
+            {
+                IconDiag(session, L"whole-item", x, y, cx, cy, bm.bmBitsPixel, rop);
                 return IconBlit::PassThrough;
+            }
             const POINT center{ x + cx / 2, y + cy / 2 };
             if (!PtInRect(&session.item, center))
+            {
+                IconDiag(session, L"outside-item", x, y, cx, cy, bm.bmBitsPixel, rop);
                 return IconBlit::PassThrough;
+            }
 
             wil::unique_hbitmap converted{ Shared::BitmapUtils::Promise32BPP(source) };
             if (!converted)
