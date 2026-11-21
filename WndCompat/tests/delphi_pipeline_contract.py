@@ -565,8 +565,9 @@ class DelphiPipelineContract(unittest.TestCase):
                       'it->paintDc == dc', 'GetStackOwnerForDc(dc) == hwnd',
                       'IsTopWindowDrawingSession(hwnd)'):
             self.assertIn(guard, gate)
-        for api in ('L"FillRect"', 'L"PatBlt"', 'L"ExtTextOut"'):
+        for api in ('L"FillRect"', 'L"PatBlt"'):
             self.assertRegex(source, r'ApplyRichEditBackgroundRect\([^;]*' + re.escape(api) + r'\)')
+        self.assertIn('L"ExtTextOut", callerMod)', source)
         self.assertIn('GetSysColor(COLOR_HIGHLIGHT)', source)
         self.assertIn('SendMessageW(hwnd, EM_EXGETSEL', source)
         self.assertIn('return selected.cpMin != selected.cpMax', source)
@@ -574,6 +575,35 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('&& !IsRichEditKind(GlassShared::GlassGetWindowKind(hWnd))', source)
         self.assertIn('rop != PATCOPY', source)
         self.assertIn('x > (std::numeric_limits<int>::max)() - width', source)
+
+    def test_richedit_native_text_dc_policy_is_separate_from_standalone_fills(self):
+        source = read('GlassCore/src/Hooks/EditHooks.cpp')
+        text_gate = source.split('static bool IsRichEditTextDrawingDc(', 1)[1].split('// Keep the existing system-selection', 1)[0]
+        for guard in ('IsRichEditDrawingDc(hwnd, dc)', 'IsRichEditKind(GlassShared::GlassGetWindowKind(hwnd))',
+                      'WindowFromDC(dc)', 'GetObjectType(dc) != OBJ_MEMDC',
+                      'GetStackOwnerForDc(dc)', 'IsTopWindowDrawingSession(hwnd)',
+                      'L"riched20.dll"', 'L"msftedit.dll"', 'L"gdi32full.dll"',
+                      'it->paintDc', 'WindowFromDC(it->paintDc) == hwnd',
+                      'IsRichEditDrawingDc(hwnd, it->paintDc)',
+                      'boundScope(g_editSessionStack) || boundScope(g_editDcStack)'):
+            self.assertIn(guard, text_gate)
+        resolve = source.split('static HWND ResolveEditSessionHwndForExtTextOut(', 1)[1].split('// Служебные проходы', 1)[0]
+        self.assertLess(resolve.index('IsRichEditTextDrawingDc(host, hdc, callerMod)'),
+                        resolve.index('HWND s = GetSessionHwnd()'))
+        core = source.split('static BOOL Edit_WorkExtTextOutCore(', 1)[1].split('BOOL WINAPI Edit_MyExtTextOutW(\n', 1)[0]
+        self.assertIn('IsRichEditTextDrawingDc(sessionHwnd, hdc, callerMod)', core)
+        self.assertNotIn('!IsRichEditDrawingDc(sessionHwnd, hdc)', core)
+        self.assertIn('L"ExtTextOut", callerMod)', core)
+        apply = source.split('static bool ApplyRichEditBackgroundRect(', 1)[1].split('//  OVERALL DISPATCHER MAP', 1)[0]
+        self.assertIn('HMODULE nativeTextCaller = nullptr', apply)
+        self.assertIn('IsRichEditTextDrawingDc(hwnd, dc, nativeTextCaller) : IsRichEditDrawingDc(hwnd, dc)', apply)
+        fills = source.split('BOOL WINAPI Edit_MyFillRect(HDC hdc', 1)[1].split('BOOL WINAPI Edit_MyExtTextOutA(\n', 1)[0]
+        self.assertNotIn('IsRichEditTextDrawingDc', fills)
+        self.assertNotIn('L"FillRect", callerMod', fills)
+        self.assertNotIn('L"PatBlt", callerMod', fills)
+        self.assertEqual(source.count('ResolveEditSessionHwndForExtTextOut(hdc, callerMod,'), 2)
+        self.assertIn('[GlassCore][RichEdit] TextDc', core)
+        self.assertIn('budget = 16', core)
 
     def test_richedit_hook_refs_release_exact_saved_acquisitions(self):
         source = read('GlassCore/src/Hooks/EditHooks.cpp')

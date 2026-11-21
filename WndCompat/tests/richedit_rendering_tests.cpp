@@ -301,6 +301,159 @@ namespace
         OnEndPaintEdit(&memo, &c.modules[Exe]);
         CHECK(!g_activeEditBuffer); c.CheckZeroRefs();
     }
+    void CachedNativeTextRows()
+    {
+        for (const auto kind : richKinds)
+        {
+            for (const COLORREF background : {GetSysColor(COLOR_WINDOW), custom})
+            {
+                Context c; c.window.kind = kind;
+                if (kind == Kind::RichEdit50W) c.window.cls = L"TRichEdit";
+                // The native engine can reuse a line DC allocated before this
+                // BeginPaint. WindowFromDC and the current DC registry are both
+                // empty; this is deliberately NOT c.Bind()'s window DC.
+                CHECK(!WindowFromDC(&c.memory) && !RichTest::stackOwners.count(&c.memory));
+                c.memory.background = background;
+                c.Begin();
+                const int native = RichTest::nativeTexts;
+                const UINT opts = ETO_OPAQUE | ETO_CLIPPED | ETO_GLYPH_INDEX;
+                CHECK(c.Text(opts, 6, Full, &c.memory));
+                CHECK(RichTest::inkTexts == 1 && RichTest::nativeTexts == native);
+                CHECK(RichTest::inkDc == &c.memory && RichTest::inkOptions == (opts & ~ETO_OPAQUE));
+                const Pixel row = c.memory.surface.pixels[6*c.memory.surface.width+5];
+                CHECK(row == (background == GetSysColor(COLOR_WINDOW) ? Pixel{} : tint));
+                CHECK(c.At() == Pixel{}); // no window-wide repaint inferred from the row
+
+                // The direct GetDC selection route must not be required to
+                // "repair" normal text. Both selected and unselected draws use
+                // alpha text, with only the selection background opaque.
+                c.Get(); c.window.selected = CHARRANGE{1, 4};
+                c.dc.background = GetSysColor(COLOR_HIGHLIGHT);
+                CHECK(c.Text(opts, 6)); CHECK(RichTest::inkTexts == 2);
+                CHECK(c.At()[3] == 255);
+                c.window.selected = {}; c.Release();
+                CHECK(c.Text(opts, 6, Re50, &c.memory)); CHECK(RichTest::inkTexts == 3);
+                CHECK(c.Call(Re20, "ExtTextOutA", &::ExtTextOutA, &c.memory,
+                    4, 5, opts, &c.rect, reinterpret_cast<LPCSTR>(L"glyphs"), 6u, nullptr));
+                CHECK(RichTest::inkTexts == 4 && RichTest::nativeTexts == native);
+                CHECK(c.memory.surface.pixels[6*c.memory.surface.width+5] == row);
+                c.End(); c.CheckZeroRefs();
+            }
+        }
+    }
+
+    void CachedNativeTextGates()
+    {
+        Context c; TestWindow other;
+        c.foreign.owner = &other;
+        c.Begin(Re50, false);
+        const auto nativeOnly = [&](HDC dc = nullptr) {
+            const int ink = RichTest::inkTexts, native = RichTest::nativeTexts, blends = RichTest::blends;
+            CHECK(c.Text(ETO_OPAQUE | ETO_CLIPPED, 6, Re50, dc ? dc : &c.memory));
+            CHECK(RichTest::inkTexts == ink && RichTest::nativeTexts == native+1);
+            CHECK(RichTest::blends == blends);
+            CHECK(RichTest::nativeOptions == (ETO_OPAQUE | ETO_CLIPPED));
+        };
+        nativeOnly(); // pre/post-BeginPaint interval is not a bound text scope
+        c.Bind();
+        RichTest::host = nullptr; nativeOnly();
+        RichTest::host = &other; nativeOnly();
+        RichTest::host = &c.window;
+        RichTest::topWindow = &other; nativeOnly();
+        RichTest::topWindow = &c.window;
+        nativeOnly(&c.foreign);
+        RichTest::stackOwners[&c.memory] = &other; nativeOnly();
+        RichTest::stackOwners.erase(&c.memory);
+        RichTest::full = false; nativeOnly(); RichTest::full = true;
+        c.window.backdrop = false; nativeOnly(); c.window.backdrop = true;
+        g_shutdown = true; nativeOnly(); g_shutdown = false;
+        g_inRichEditBackground = true; nativeOnly(); g_inRichEditBackground = false;
+        g_inRichEditText = true; nativeOnly(); g_inRichEditText = false;
+        CHECK(!IsRichEditTextDrawingDc(&c.window, &c.memory, &c.modules[Exe]));
+        CHECK(!IsRichEditTextDrawingDc(&c.window, &c.memory, &c.modules[User]));
+        CHECK(!IsRichEditTextDrawingDc(&c.window, &c.memory, nullptr));
+        CHECK(!IsRichEditTextDrawingDc(nullptr, &c.memory, &c.modules[Re50]));
+        CHECK(!IsRichEditTextDrawingDc(&c.window, nullptr, &c.modules[Re50]));
+        CHECK(!c.modules[Exe].hooks.count("ExtTextOutW"));
+
+        // Permission belongs only to this ExtTextOut, not to the DC. Neither
+        // an earlier nor a later text call may loosen FillRect/PatBlt ownership.
+        const auto fillsStayStrict = [&] {
+            const int blends = RichTest::blends, blacks = RichTest::blacks, pats = RichTest::pats;
+            CHECK(c.Fill(Re50, &c.memory) == 7);
+            CHECK(c.Pat(PATCOPY, &c.memory));
+            CHECK(RichTest::blends == blends && RichTest::blacks == blacks && RichTest::pats == pats+1);
+            CHECK(!RichTest::stackOwners.count(&c.memory));
+        };
+        fillsStayStrict();
+        const int native = RichTest::nativeTexts;
+        CHECK(c.Text(ETO_OPAQUE, 6, Re50, &c.memory));
+        CHECK(RichTest::inkTexts == 1 && RichTest::nativeTexts == native);
+        fillsStayStrict();
+        CHECK(c.Text(ETO_CLIPPED, 6, Re20, &c.memory)); // text without a background rectangle
+        CHECK(RichTest::inkTexts == 2 && RichTest::inkOptions == ETO_CLIPPED);
+        CHECK(c.Text(ETO_OPAQUE, 0, Full, &c.memory)); // background-only native text call
+        CHECK(c.memory.surface.pixels[6*c.memory.surface.width+5] == tint);
+        CHECK(RichTest::inkTexts == 2);
+        CHECK(c.Call(Re20, "ExtTextOutA", &::ExtTextOutA, &c.memory,
+            4, 5, UINT(ETO_OPAQUE), &c.rect, "AB", 2u, nullptr));
+        CHECK(RichTest::inkTexts == 3 && RichTest::inkCount == 2);
+
+        // A cached-DC background failure must keep the complete original
+        // operation, not remove ETO_OPAQUE and leave an incomplete row.
+        for (bool* failure : {&RichTest::failDc, &RichTest::failBitmap, &RichTest::failSelect,
+                             &RichTest::failBlacken, &RichTest::failBlend})
+        {
+            *failure = true;
+            const int ink = RichTest::inkTexts;
+            CHECK(c.Text(ETO_OPAQUE | ETO_CLIPPED, 6, Re50, &c.memory));
+            CHECK(RichTest::inkTexts == ink);
+            CHECK(RichTest::nativeOptions == (ETO_OPAQUE | ETO_CLIPPED));
+            CHECK(!g_inRichEditBackground && !g_inRichEditText);
+            CHECK(!RichTest::liveDcs && !RichTest::liveBitmaps && !RichTest::liveBrushes);
+            *failure = false;
+        }
+        c.End(); c.CheckZeroRefs();
+        CHECK(!IsRichEditTextDrawingDc(&c.window, &c.memory, &c.modules[Re50])); // stale host alone
+    }
+    void CachedGetDcAndMemoIsolation()
+    {
+        Context c;
+        c.Get(); // no BeginPaint at all
+        CHECK(g_editSessionStack.empty());
+        CHECK(c.Text(ETO_OPAQUE, 6, Re20, &c.memory));
+        CHECK(RichTest::inkTexts == 1 && RichTest::inkDc == &c.memory);
+        c.Release(); c.CheckZeroRefs();
+
+        TestWindow memo; memo.kind = Kind::Edit; memo.cls = L"TMemo"; memo.style = ES_MULTILINE;
+        TestDC memoDc; memoDc.owner = &memo;
+        OnBeginPaintEdit(&memo, &c.modules[User]);
+        CHECK(!OnEditAfterBeginPaint(&memo, &memoDc, nullptr, &c.modules[User]));
+        RichTest::host = RichTest::topWindow = &memo; RichTest::stackOwners[&memoDc] = &memo;
+        EnsureEditBuffer(&memo, &memoDc);
+        auto* const buffer = g_activeEditBuffer;
+        CHECK(buffer && buffer->delphiMemo);
+        g_sessionBlacknessRects.push_back(c.rect);
+        g_bypassEditBuffer = true;
+        const int native = RichTest::nativeTexts;
+        c.Get();
+        CHECK(c.Text(ETO_OPAQUE, 6, Full, &c.memory));
+        CHECK(RichTest::inkTexts == 2 && RichTest::nativeTexts == native && RichTest::inkDc == &c.memory);
+        CHECK(c.memory.surface.pixels[6*c.memory.surface.width+5] == tint);
+        CHECK(c.Call(Re20, "ExtTextOutA", &::ExtTextOutA, &c.memory,
+            4, 5, UINT(ETO_OPAQUE), &c.rect, "AB", 2u, nullptr));
+        CHECK(RichTest::inkTexts == 3 && RichTest::inkDc == &c.memory);
+        c.Release();
+        CHECK(g_activeEditBuffer == buffer && g_bypassEditBuffer && g_sessionBlacknessRects.size() == 1);
+        c.Begin(); CHECK(c.Text(ETO_OPAQUE, 6, Re50, &c.memory)); c.End();
+        CHECK(RichTest::inkTexts == 4 && RichTest::nativeTexts == native);
+        CHECK(g_activeEditBuffer == buffer && g_bypassEditBuffer && g_sessionBlacknessRects.size() == 1);
+        CHECK(!RichTest::stackOwners.count(&c.memory));
+        RichTest::host = RichTest::topWindow = &memo;
+        OnEndPaintEdit(&memo, &c.modules[Exe]);
+        CHECK(!g_activeEditBuffer); c.CheckZeroRefs();
+    }
+
     void FailuresAndPerModuleOriginals()
     {
         Context c; c.Begin();
@@ -368,6 +521,9 @@ int main(int argc, char** argv)
             {"dc-and-mode-gates", DcOwnershipAndModeGates},
             {"leases-and-nesting", LeasesAndNestedSessions},
             {"getdc-and-memo-isolation", GetDcAndPlainMemoIsolation},
+            {"cached-native-text-rows", CachedNativeTextRows},
+            {"cached-native-text-gates", CachedNativeTextGates},
+            {"cached-getdc-and-memo-isolation", CachedGetDcAndMemoIsolation},
             {"failures-and-originals", FailuresAndPerModuleOriginals},
             {"reentry-and-legacy-edit", ReentryAndLegacyEditBackgrounds},
         };

@@ -752,6 +752,34 @@ namespace GlassCore::EditControl
         return IsRichEditDrawingDc(hwnd, dc) ? hwnd : nullptr;
     }
 
+    // A native text call may reuse a line DC created before BeginPaint and
+    // absent from the current CreateCompatibleDC registry. Keep admission of
+    // text and its ETO_OPAQUE rectangle separate from standalone fill ownership.
+    [[nodiscard]] static bool IsRichEditTextDrawingDc(HWND hwnd, HDC dc, HMODULE callerMod) noexcept
+    {
+        if (IsRichEditDrawingDc(hwnd, dc)) return true;
+        if (!hwnd || !IsRichEditKind(GlassShared::GlassGetWindowKind(hwnd))
+            || !dc || WindowFromDC(dc) || GetObjectType(dc) != OBJ_MEMDC
+            || GlassCore::PaintDispatcher::GetStackOwnerForDc(dc)
+            || !GlassCore::PaintDispatcher::IsTopWindowDrawingSession(hwnd)
+            || !callerMod || (callerMod != GetModuleHandleW(L"riched20.dll")
+                && callerMod != GetModuleHandleW(L"msftedit.dll")
+                && callerMod != GetModuleHandleW(L"gdi32full.dll")))
+            return false;
+
+        // Only an active, successfully bound RichEdit paint/GetDC scope from
+        // its native text modules can use this fallback. Registered foreign
+        // DCs, unbound BeginPaint/NC passes and bare paint-host guesses cannot.
+        const auto boundScope = [hwnd](const auto& stack) noexcept {
+            for (auto it = stack.rbegin(); it != stack.rend(); ++it)
+                if (it->hwnd == hwnd && IsRichEditKind(it->kind) && it->paintDc
+                    && WindowFromDC(it->paintDc) == hwnd
+                    && IsRichEditDrawingDc(hwnd, it->paintDc)) return true;
+            return false;
+        };
+        return boundScope(g_editSessionStack) || boundScope(g_editDcStack);
+    }
+
     // Keep the existing system-selection background path (opaque), not the
     // client's alpha-100 tint. A matching RGB alone is not a selection: an
     // unselected client may deliberately use COLOR_HIGHLIGHT as its own tint.
@@ -792,9 +820,14 @@ namespace GlassCore::EditControl
     // native background rectangle is first cleared, so overlapping operations
     // and repeated paints cannot accumulate alpha. Text uses its own renderer.
     [[nodiscard]] static bool ApplyRichEditBackgroundRect(
-        HDC dc, HWND hwnd, const RECT* rect, COLORREF color, const wchar_t* api) noexcept
+        HDC dc, HWND hwnd, const RECT* rect, COLORREF color, const wchar_t* api,
+        HMODULE nativeTextCaller = nullptr) noexcept
     {
-        if (!rect || color == CLR_INVALID || !IsRichEditDrawingDc(hwnd, dc)) return false;
+        // Only ExtTextOut can opt into its native cached-line-DC policy.
+        // Independent FillRect/PatBlt retain the strict ownership requirement.
+        const bool drawingDc = nativeTextCaller
+            ? IsRichEditTextDrawingDc(hwnd, dc, nativeTextCaller) : IsRichEditDrawingDc(hwnd, dc);
+        if (!rect || color == CLR_INVALID || !drawingDc) return false;
         RECT client{}, r{};
         if (!GetClientRect(hwnd, &client) || !IntersectRect(&r, rect, &client) || IsRectEmpty(&r))
             return false;
@@ -992,7 +1025,8 @@ namespace GlassCore::EditControl
 
     // Резолв HWND для ExtTextOut: стек BeginPaint/GetDC → RAM-превью GlassSettings → оконный DC Edit → MEMDC + хост paint.
     // Единое правило с внешними процессами: не полагаться только на превью-ветку (иначе часть вызовов уходит в orig).
-    [[nodiscard]] static HWND ResolveEditSessionHwndForExtTextOut(HDC hdc, const wchar_t** outResolveTag) noexcept
+    [[nodiscard]] static HWND ResolveEditSessionHwndForExtTextOut(
+        HDC hdc, HMODULE callerMod, const wchar_t** outResolveTag) noexcept
     {
         auto setTag = [outResolveTag](const wchar_t* t) noexcept
             {
@@ -1005,6 +1039,14 @@ namespace GlassCore::EditControl
         {
             setTag(L"richEditDc");
             return rich;
+        }
+        const HWND host = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
+        if (host && IsRichEditTextDrawingDc(host, hdc, callerMod))
+        {
+            // Also wins over an outer plain Edit/TMemo paint when a nested
+            // RichEdit GetDC draws via a cached memory DC.
+            setTag(L"richEditNativeTextDc");
+            return host;
         }
 
         HWND s = GetSessionHwnd();
@@ -1057,8 +1099,29 @@ namespace GlassCore::EditControl
     {
         const GlassShared::GlassControlKind controlKind = GlassShared::GlassGetWindowKind(sessionHwnd);
         const bool richEdit = IsRichEditKind(controlKind);
-        if (richEdit && !IsRichEditDrawingDc(sessionHwnd, hdc))
-            return origW(hdc, x, y, options, lprect, lpString, c, lpDx);
+        const bool richTextDc = !richEdit || IsRichEditTextDrawingDc(sessionHwnd, hdc, callerMod);
+#if defined(_DEBUG)
+        if (richEdit)
+        {
+            static thread_local ULONGLONG epoch = 0;
+            static thread_local unsigned budget = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (!epoch || now - epoch >= 1000) { epoch = now; budget = 16; }
+            if (budget)
+            {
+                --budget;
+                const HWND dcWnd = WindowFromDC(hdc);
+                const wchar_t* route = dcWnd ? L"window"
+                    : (GlassCore::PaintDispatcher::GetStackOwnerForDc(hdc) ? L"registered"
+                        : (richTextDc ? L"native-memdc" : L"unregistered"));
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][RichEdit] TextDc hwnd=0x%p dc=0x%p dcWnd=0x%p obj=%u kind=%d caller=0x%p route=%s accepted=%d options=0x%X count=%u",
+                    sessionHwnd, hdc, dcWnd, static_cast<unsigned>(GetObjectType(hdc)),
+                    static_cast<int>(controlKind), callerMod, route, richTextDc ? 1 : 0, options, c);
+            }
+        }
+#endif
+        if (!richTextDc) return origW(hdc, x, y, options, lprect, lpString, c, lpDx);
 
         // В VCL TMemo BeginPaint может синхронно вызвать WM_NCPAINT и GetDCEx
         // с DCX_WINDOW до того, как вернёт клиентский HDC. Этот временный DC
@@ -1169,7 +1232,7 @@ namespace GlassCore::EditControl
         {
             if (richEdit && !IsRichEditSelectionColor(sessionHwnd, GetBkColor(hdc)))
             {
-                if (!ApplyRichEditBackgroundRect(hdc, sessionHwnd, lprect, GetBkColor(hdc), L"ExtTextOut"))
+                if (!ApplyRichEditBackgroundRect(hdc, sessionHwnd, lprect, GetBkColor(hdc), L"ExtTextOut", callerMod))
                     return origW(hdc, x, y, options, lprect, lpString, c, lpDx);
             }
             else
@@ -1375,7 +1438,7 @@ namespace GlassCore::EditControl
             return orig(hdc, x, y, options, lprect, lpString, c, lpDx);
 
         const wchar_t* resolveTag = L"?";
-        HWND sessionHwnd = ResolveEditSessionHwndForExtTextOut(hdc, &resolveTag);
+        HWND sessionHwnd = ResolveEditSessionHwndForExtTextOut(hdc, callerMod, &resolveTag);
         if (!sessionHwnd)
         {
             DebugLog(DBG_NORMAL, L"[GlassCore][Edit] ExtTextOutW SKIP: resolve=%s mod=0x%p c=%u", resolveTag, callerMod, c);
@@ -1499,7 +1562,7 @@ namespace GlassCore::EditControl
                 GetProcAddress(GetModuleHandleW(L"gdi32.dll"), "ExtTextOutW"));
 
         const wchar_t* resolveTagA = L"?";
-        HWND sessionHwnd = ResolveEditSessionHwndForExtTextOut(hdc, &resolveTagA);
+        HWND sessionHwnd = ResolveEditSessionHwndForExtTextOut(hdc, callerMod, &resolveTagA);
         if (!sessionHwnd)
         {
             DebugLog(DBG_NORMAL, L"[GlassCore][Edit] ExtTextOutA SKIP: resolve=%s mod=0x%p c=%u", resolveTagA, callerMod, c);

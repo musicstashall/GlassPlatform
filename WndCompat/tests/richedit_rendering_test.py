@@ -87,6 +87,15 @@ class RichEditRenderingTest(unittest.TestCase):
     def test_getdc_selection_path_and_nested_rich_paint_leave_outer_memo_intact(self):
         self.run_case('getdc-and-memo-isolation')
 
+    def test_cached_native_line_dc_is_glass_before_and_after_selection(self):
+        self.run_case('cached-native-text-rows')
+
+    def test_cached_text_permission_does_not_relax_fill_or_foreign_dc_guards(self):
+        self.run_case('cached-native-text-gates')
+
+    def test_cached_text_getdc_and_nested_memo_use_the_rich_context_not_outer_buffer(self):
+        self.run_case('cached-getdc-and-memo-isolation')
+
     def test_every_gdi_failure_cleans_up_and_uses_the_callers_original(self):
         self.run_case('failures-and-originals')
 
