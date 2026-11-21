@@ -28,7 +28,7 @@
 #include <Hooks/ListView.h>
 #include <Hooks/ScrollBar.h>
 #include <Hooks/Rebar.h>
-#include <Hooks/CoolBar.h>
+#include <Hooks/delphi/TCoolBarDraw.h>
 #include <Hooks/Tab.h>
 #include <Hooks/Header.h>
 #include <Hooks/Toolbar.h>

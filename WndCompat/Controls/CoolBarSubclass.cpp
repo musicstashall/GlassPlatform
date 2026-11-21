@@ -2,11 +2,13 @@
 //
 // У контрола нет темы: полосу заливает пустой ExtTextOutW(ETO_OPAQUE),
 // текст рисует comctl32 обычным DrawTextExW, рамку — VCL через DrawEdge.
-// Поэтому у CoolBar отдельный набор хуков GlassCore (CoolBarHooks) и своя
+// Поэтому у CoolBar отдельный набор хуков GlassCore (delphi/TCoolBarDraw) и своя
 // сессия отрисовки; rebar-ветка здесь не используется.
 
 #include "WndPch.h"
 #include <Controls/CoolBarSubclass.h>
+#include <Tracker/WinEventHandler.h>
+#include <InjectionMode.h>
 #include <GlassMessages.h>
 #include <GlassControlKind.h>
 #include <GlassBackdropMark.h>

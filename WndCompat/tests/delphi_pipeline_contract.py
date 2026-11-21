@@ -1,5 +1,6 @@
 """Portable source-contract checks; Windows paint/lifecycle tests are still required."""
 from pathlib import Path
+import os
 import re
 import unittest
 
@@ -900,8 +901,19 @@ class DelphiPipelineContract(unittest.TestCase):
         provider = read("WndCompat/Providers/CoolBarEventProvider.cpp")
         self.assertIn('SetCoolBarEventProvider', provider)
 
+        # include'ы WinEventHook_GetMode/_SignalDetachComplete и InjectionMode
+        # (без них WndCompat не собирается: C3861/C2677).
+        self.assertIn('#include <Tracker/WinEventHandler.h>', subclass)
+        self.assertIn('#include <InjectionMode.h>', subclass)
+
+        # Delphi-контрол: код лежит в Hooks/delphi, как TListBoxDraw.
+        self.assertTrue(os.path.exists("GlassCore/src/Hooks/delphi/TCoolBarDraw.cpp"))
+        self.assertTrue(os.path.exists("GlassCore/Include/Hooks/delphi/TCoolBarDraw.h"))
+        self.assertIn('#include <Hooks/delphi/TCoolBarDraw.h>',
+                      read("GlassCore/src/Core/Engine.cpp"))
+
         # GlassCore: своя сессия и свои слоты.
-        hooks = read("GlassCore/src/Hooks/CoolBarHooks.cpp")
+        hooks = read("GlassCore/src/Hooks/delphi/TCoolBarDraw.cpp")
         for marker in ('ExtTextOutSlot', 'FillRectSlot', 'PatBltSlot', 'DrawTextExSlot',
                        'bool IsPaintDc(HDC hdc) noexcept'):
             self.assertIn(marker, hooks)
