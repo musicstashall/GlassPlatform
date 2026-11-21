@@ -406,7 +406,8 @@ namespace GlassCore::EditControl
     {
         if (!dc || !HasConfirmedMemoSolidBackground(buf)) return false;
         wil::unique_hbrush brush{
-            Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(buf.memoSolidBackground, 100) };
+            Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(buf.memoSolidBackground,
+                (buf.memoSolidBackground & 0xFFFFFFu) == (GetSysColor(COLOR_HIGHLIGHT) & 0xFFFFFFu) ? 255 : 100) };
         if (!brush) return false;
         RECT rect{ 0, 0, buf.width, buf.height };
         if (!PatBlt(dc, 0, 0, buf.width, buf.height, BLACKNESS)) return false;
@@ -424,7 +425,8 @@ namespace GlassCore::EditControl
             if (op.fill)
             {
                 wil::unique_hbrush brush{
-                    Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(op.color, 100) };
+                    Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(op.color,
+                        (op.color & 0xFFFFFFu) == (GetSysColor(COLOR_HIGHLIGHT) & 0xFFFFFFu) ? 255 : 100) };
                 if (brush) FillRect(dc, &r, brush.get());
             }
         }
@@ -683,7 +685,8 @@ namespace GlassCore::EditControl
         }
 
         wil::unique_hbrush brush{
-            Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(color, 100) };
+            Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(color,
+                rgb == (GetSysColor(COLOR_HIGHLIGHT) & 0xFFFFFFu) ? 255 : 100) };
         if (!brush) return;
 
         if (!fill)
