@@ -1029,6 +1029,23 @@ namespace GlassCore::Root
             std::vector<GridTextRec> texts;
         };
         static thread_local std::vector<GridPaintRec> g_gridPaints;
+        // Левый верхний угол области данных, запомненный по прошлым отрисовкам:
+        // частичная перерисовка (клик, активация окна) может не содержать ни
+        // одной заливки ячейки, и тогда границы фиксированной области брать неоткуда.
+        static thread_local std::unordered_map<HWND, POINT> g_gridDataOrigins;
+
+        static void RememberGridDataOrigin(HWND wnd, LONG x, LONG y) noexcept
+        {
+            if (!wnd || x <= 0 || y <= 0)
+                return;
+            if (g_gridDataOrigins.size() > 64)
+                g_gridDataOrigins.clear();
+            POINT& p = g_gridDataOrigins[wnd];
+            if (p.x == 0 || x < p.x)
+                p.x = x;
+            if (p.y == 0 || y < p.y)
+                p.y = y;
+        }
 
         static GridPaintRec* FindGridPaint(HDC dc, HWND wnd) noexcept
         {
@@ -1044,13 +1061,22 @@ namespace GlassCore::Root
 
         static void ReplayGridFixedArea(const GridPaintRec& rec) noexcept
         {
-            if (!rec.hwnd || !rec.dc || !rec.haveDataOrigin || rec.texts.empty())
+            if (!rec.hwnd || !rec.dc || rec.texts.empty())
                 return;
             RECT client{};
             if (!GetClientRect(rec.hwnd, &client) || IsRectEmpty(&client))
                 return;
-            const LONG x0 = rec.dataOrigin.x;
-            const LONG y0 = rec.dataOrigin.y;
+            LONG x0 = rec.haveDataOrigin ? rec.dataOrigin.x : 0;
+            LONG y0 = rec.haveDataOrigin ? rec.dataOrigin.y : 0;
+            if ((!x0 || !y0) && !g_gridDataOrigins.empty())
+            {
+                const auto it = g_gridDataOrigins.find(rec.hwnd);
+                if (it != g_gridDataOrigins.end())
+                {
+                    if (!x0) x0 = it->second.x;
+                    if (!y0) y0 = it->second.y;
+                }
+            }
             if (x0 <= client.left || x0 >= client.right || y0 <= client.top || y0 >= client.bottom)
                 return;
             HDC dc = rec.dc;
@@ -1275,7 +1301,9 @@ namespace GlassCore::Root
             if (rect && !IsRectEmpty(rect) && solid
                 && ApplyDelphiGridCellBackground(dc, rect, fillColor))
             {
-                if (auto* rec = FindGridPaint(dc, WindowFromDC(dc)))
+                const HWND fillWnd = WindowFromDC(dc);
+                RememberGridDataOrigin(fillWnd, rect->left, rect->top);
+                if (auto* rec = FindGridPaint(dc, fillWnd))
                 {
                     if (!rec->haveDataOrigin)
                     {

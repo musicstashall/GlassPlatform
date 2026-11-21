@@ -819,6 +819,20 @@ class DelphiPipelineContract(unittest.TestCase):
         win = read("GlassCore/src/Hooks/RootWindowHooks.cpp")
         self.assertIn('GlassCore::Root::RegisterDelphiGridPaintProvider();', win)
 
+    def test_delphi_grid_remembers_data_origin_for_partial_paints(self):
+        root = read("GlassCore/src/Hooks/RootGdiHooks.cpp")
+        self.assertIn('thread_local std::unordered_map<HWND, POINT> g_gridDataOrigins;', root)
+        remember = root.split('static void RememberGridDataOrigin', 1)[1].split(
+            'static GridPaintRec* FindGridPaint', 1)[0]
+        for marker in ('g_gridDataOrigins[wnd]', 'x < p.x', 'y < p.y'):
+            self.assertIn(marker, remember)
+        replay = root.split('static void ReplayGridFixedArea(const GridPaintRec& rec)', 1)[1].split(
+            'static void GridPaintBegin', 1)[0]
+        self.assertIn('g_gridDataOrigins.find(rec.hwnd)', replay)
+        fill = root.split('int WINAPI Root_MyDelphiGridFill(HDC dc', 1)[1].split(
+            'HRESULT WINAPI Root_MyDelphiGridTheme(', 1)[0]
+        self.assertIn('RememberGridDataOrigin(fillWnd, rect->left, rect->top)', fill)
+
     def test_delphi_grid_specs_enabled_on_beginpaint_caller(self):
         win = read("GlassCore/src/Hooks/RootWindowHooks.cpp")
         block = win.split('kGridSessionSpecs[] = {', 1)[1].split('g_rootPaintStack.push_back', 1)[0]
