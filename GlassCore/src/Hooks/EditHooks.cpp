@@ -20,7 +20,13 @@
 //
 // 4. EditBufferedSession: hasHScroll → single-pass; иначе dual-pass (качество).
 //
-// 5. ETO_OPAQUE только в ApplyEditBackgroundRect; в рендер уходит drawOptions без ETO_OPAQUE.
+// 5. ETO_OPAQUE обрабатывается отдельно от текста: ApplyEditBackgroundRect для plain Edit,
+//    ApplyRichEditBackgroundRect для RichEdit. В рендер уходит drawOptions без ETO_OPAQUE.
+//
+// 6. Все RichEdit20/50 (включая WinForms/TRichEdit): несистемный фон — настоящий alpha100
+//    через premultiplied DIB + GdiAlphaBlend, COLOR_WINDOW/COLOR_BTNFACE — BLACKNESS.
+//    Источники — родные ETO_OPAQUE/FillRect/PatBlt, без угадывания цвета всего клиента.
+//    Системное выделение сохраняет прежнюю непрозрачную ветку; параметры ink не меняются.
 //
 // Цена: WS_HSCROLL + выделение снова даёт много ExtTextOut на экран (медленнее, чем буфер на GetDC).
 //
@@ -39,20 +45,19 @@
 #include <Subsystems/TextInkClientRegistry.h>
 #include <GlassControlKind.h>
 #include <GlassDelphiMemoBackground.h>
+#include <GlassBackdropMark.h>
+#include <Subsystems/RootSwcaGradient.h>
 #include <Hooks/delphi/TInputHooks.h>
 #include <WinApiUtils.h>
 #include <wil.h>
+#include <Richedit.h>
 
 #include <string>
 #include <vector>
 #include <cmath>
+#include <limits>
 
-#ifndef EM_GETBKGNDCOLOR
-#define EM_GETBKGNDCOLOR (WM_USER + 109)
-#endif
-#ifndef ECO_AUTOBKGND
-#define ECO_AUTOBKGND 0x80000000
-#endif
+#pragma comment(lib, "msimg32.lib")
 
 using namespace GlassCore::Hooks;
 using namespace std::literals;
@@ -67,6 +72,12 @@ namespace GlassCore::EditControl
     // =========================================================================
     //  LIFO сессий paint
     // =========================================================================
+    struct EditHookLease
+    {
+        HMODULE mod;
+        size_t index;
+    };
+
     struct EditPaintSession
     {
         HWND    hwnd;
@@ -74,9 +85,12 @@ namespace GlassCore::EditControl
         GlassShared::GlassControlKind kind;
         // Заполняется после успешного оригинального BeginPaint, а не при
         // onBegin (внутри BeginPaint может быть вложенный GetDCEx/WM_NCPAINT).
+        // Для RichEdit GetDC — точный HDC из GetCurrentGetDcSessionHdc.
         HDC paintDc = nullptr;
         bool hotKeyFillHook = false;
         bool numberBackgroundCleared = false;
+        // Только фактически взятые refs; при End/Release не перечитываем DLL.
+        std::vector<EditHookLease> richHooks{};
     };
 
     thread_local std::vector<EditPaintSession> g_editSessionStack;  // BeginPaint/EndPaint
@@ -228,10 +242,6 @@ namespace GlassCore::EditControl
         }
     }
 #endif
-
-    // RichEdit20: политика BWM на весь клиент
-    thread_local HWND    g_re20FullClientBgPrimedHwnd = nullptr;
-    thread_local COLORREF g_re20LastAppliedEmBg = CLR_INVALID;
 
     static void PushSessionBlacknessRect(const RECT& rc, int bufW, int bufH) noexcept
     {
@@ -692,46 +702,178 @@ namespace GlassCore::EditControl
         }
     }
 
-    [[nodiscard]] static COLORREF GetRichEdit20BackgroundFromEm(HWND hWnd) noexcept
-    {
-        if (!hWnd) return RGB(0, 0, 0);
-        const LRESULT lr = SendMessageW(hWnd, EM_GETBKGNDCOLOR, 0, 0);
-        if (static_cast<COLORREF>(lr) == static_cast<COLORREF>(ECO_AUTOBKGND))
-            return GetSysColor(COLOR_WINDOW);
-        return static_cast<COLORREF>(lr);
-    }
+    // =========================================================================
+    //  RichEdit backgrounds — one policy for 20/50, native and WinForms
+    // =========================================================================
+    static constexpr BYTE kRichEditBackgroundAlpha = 100;
+    static thread_local bool g_inRichEditBackground = false;
+    static thread_local bool g_inRichEditText = false;
 
-    [[nodiscard]] static COLORREF GetRichEdit20EffectiveBackground(HWND hWnd, HDC hdc) noexcept
-    {
-        if (!hWnd || !hdc) return RGB(0, 0, 0);
-        const COLORREF em = GetRichEdit20BackgroundFromEm(hWnd);
-        const COLORREF dc = GetBkColor(hdc);
-        if ((em & 0xFFFFFFu) == 0 && (dc & 0xFFFFFFu) != 0) return dc;
-        return em;
-    }
-
-    [[nodiscard]] static bool IsRichEdit20Only(GlassShared::GlassControlKind kind) noexcept
+    [[nodiscard]] static bool IsRichEditKind(GlassShared::GlassControlKind kind) noexcept
     {
         using namespace GlassShared;
         return kind == GlassControlKind::RichEdit20W
-            || kind == GlassControlKind::WinForms_RichEdit20W;
+            || kind == GlassControlKind::WinForms_RichEdit20W
+            || kind == GlassControlKind::RichEdit50W
+            || kind == GlassControlKind::WinForms_RichEdit50W;
+    }
+
+    // A paint host alone is not DC ownership. In particular, BeginPaint may
+    // obtain a temporary non-client DC before our post-BeginPaint binding.
+    [[nodiscard]] static bool IsRichEditDrawingDc(HWND hwnd, HDC dc) noexcept
+    {
+        if (!hwnd || !dc || g_shutdown.load(std::memory_order_acquire)
+            || g_inRichEditBackground || g_inRichEditText
+            || !IsRichEditKind(GlassShared::GlassGetWindowKind(hwnd))
+            || !GlassCore::Root::IsFullInjectionMode()
+            || !GlassShared::GlassIsBackdropAllowedForHwnd(hwnd)
+            || GlassCore::PaintDispatcher::GetPaintSessionHostHwnd() != hwnd)
+            return false;
+
+        const HWND owner = WindowFromDC(dc);
+        if (owner && owner != hwnd) return false;
+        const auto boundDc = [hwnd, dc, owner](const auto& stack) noexcept {
+            for (auto it = stack.rbegin(); it != stack.rend(); ++it)
+                if (it->hwnd == hwnd && IsRichEditKind(it->kind) && it->paintDc
+                    && (!owner || it->paintDc == dc)) return true;
+            return false;
+        };
+        if (!boundDc(g_editSessionStack) && !boundDc(g_editDcStack)) return false;
+        if (owner) return true;
+        return GetObjectType(dc) == OBJ_MEMDC
+            && GlassCore::PaintDispatcher::GetStackOwnerForDc(dc) == hwnd
+            && GlassCore::PaintDispatcher::IsTopWindowDrawingSession(hwnd);
+    }
+
+    [[nodiscard]] static HWND RichEditHwndForDrawingDc(HDC dc) noexcept
+    {
+        HWND hwnd = dc ? WindowFromDC(dc) : nullptr;
+        if (!hwnd && dc) hwnd = GlassCore::PaintDispatcher::GetStackOwnerForDc(dc);
+        return IsRichEditDrawingDc(hwnd, dc) ? hwnd : nullptr;
+    }
+
+    // Keep the existing system-selection background path (opaque), not the
+    // client's alpha-100 tint. A matching RGB alone is not a selection: an
+    // unselected client may deliberately use COLOR_HIGHLIGHT as its own tint.
+    [[nodiscard]] static bool IsRichEditSelectionColor(HWND hwnd, COLORREF color) noexcept
+    {
+        if ((color & 0xFFFFFFu) != (GetSysColor(COLOR_HIGHLIGHT) & 0xFFFFFFu)) return false;
+        CHARRANGE selected{};
+        // EM_EXGETSEL is a documented, read-only query shared by RichEdit 2+.
+        // Guard custom wndproc reentry; never change colour/selection to query it.
+        g_inRichEditBackground = true;
+        auto leave = wil::scope_exit([]() noexcept { g_inRichEditBackground = false; });
+        SendMessageW(hwnd, EM_EXGETSEL, 0, reinterpret_cast<LPARAM>(&selected));
+        return selected.cpMin != selected.cpMax;
+    }
+
+    [[nodiscard]] static bool RichEditSolidBrushColor(HDC dc, HBRUSH brush, COLORREF& color) noexcept
+    {
+        // FillRect also accepts (COLOR_* + 1), not an actual GDI handle.
+        const ULONG_PTR value = reinterpret_cast<ULONG_PTR>(brush);
+        if (value && value <= COLOR_MENUBAR + 1u)
+        {
+            color = GetSysColor(static_cast<int>(value - 1));
+            return true;
+        }
+        if (brush && brush == GetStockObject(DC_BRUSH))
+        {
+            color = GetDCBrushColor(dc);
+            return color != CLR_INVALID;
+        }
+        LOGBRUSH lb{};
+        if (!brush || GetObjectW(brush, sizeof(lb), &lb) != sizeof(lb) || lb.lbStyle != BS_SOLID)
+            return false;
+        color = lb.lbColor;
+        return color != CLR_INVALID;
+    }
+
+    // Real alpha composition, not FillRect with an alpha pattern brush. Each
+    // native background rectangle is first cleared, so overlapping operations
+    // and repeated paints cannot accumulate alpha. Text uses its own renderer.
+    [[nodiscard]] static bool ApplyRichEditBackgroundRect(
+        HDC dc, HWND hwnd, const RECT* rect, COLORREF color, const wchar_t* api) noexcept
+    {
+        if (!rect || color == CLR_INVALID || !IsRichEditDrawingDc(hwnd, dc)) return false;
+        RECT client{}, r{};
+        if (!GetClientRect(hwnd, &client) || !IntersectRect(&r, rect, &client) || IsRectEmpty(&r))
+            return false;
+        const COLORREF rgb = color & 0xFFFFFFu;
+        const bool system = rgb == (GetSysColor(COLOR_WINDOW) & 0xFFFFFFu)
+            || rgb == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFFu);
+        g_inRichEditBackground = true;
+        auto leave = wil::scope_exit([]() noexcept { g_inRichEditBackground = false; });
+        const auto blacken = [&]() noexcept {
+            return PatBlt(dc, r.left, r.top, r.right-r.left, r.bottom-r.top, BLACKNESS) != FALSE;
+        };
+        bool ok = false;
+        if (system) ok = blacken();
+        else
+        {
+            BITMAPINFO bi{};
+            bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+            bi.bmiHeader.biWidth = 1; bi.bmiHeader.biHeight = -1;
+            bi.bmiHeader.biPlanes = 1; bi.bmiHeader.biBitCount = 32;
+            bi.bmiHeader.biCompression = BI_RGB;
+            HDC mem = CreateCompatibleDC(dc);
+            if (!mem) return false;
+            void* bits = nullptr;
+            HBITMAP bitmap = CreateDIBSection(mem, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+            if (bitmap && bits)
+            {
+                const HGDIOBJ old = SelectObject(mem, bitmap);
+                if (old && old != HGDI_ERROR)
+                {
+                    const auto premul = [](BYTE c) noexcept {
+                        return static_cast<BYTE>((static_cast<unsigned>(c) * kRichEditBackgroundAlpha + 127) / 255);
+                    };
+                    auto* pixel = static_cast<BYTE*>(bits);
+                    pixel[0] = premul(GetBValue(rgb)); pixel[1] = premul(GetGValue(rgb));
+                    pixel[2] = premul(GetRValue(rgb)); pixel[3] = kRichEditBackgroundAlpha;
+                    const BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+                    ok = blacken() && GdiAlphaBlend(dc, r.left, r.top, r.right-r.left, r.bottom-r.top,
+                        mem, 0, 0, 1, 1, blend) != FALSE;
+                    SelectObject(mem, old);
+                }
+            }
+            if (bitmap) DeleteObject(bitmap);
+            DeleteDC(mem);
+        }
+#if defined(_DEBUG)
+        static thread_local ULONGLONG epoch = 0;
+        static thread_local unsigned budget = 0;
+        const ULONGLONG now = GetTickCount64();
+        if (!epoch || now - epoch >= 1000) { epoch = now; budget = 24; }
+        if (budget)
+        {
+            --budget;
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][RichEdit] Background api=%s hwnd=0x%p dc=0x%p kind=%d color=0x%06X alpha=%u rect=[%ld,%ld,%ld,%ld] ok=%d",
+                api, hwnd, dc, static_cast<int>(GlassShared::GlassGetWindowKind(hwnd)), rgb,
+                system ? 0u : unsigned(kRichEditBackgroundAlpha), r.left, r.top, r.right, r.bottom, ok ? 1 : 0);
+        }
+#else
+        (void)api;
+#endif
+        return ok;
     }
 
     // =========================================================================
     //  OVERALL DISPATCHER MAP
     // =========================================================================
     static bool IsEditKind(GlassShared::GlassControlKind kind);
-    static bool IsRichEditKind(GlassShared::GlassControlKind kind) noexcept;
 
     BOOL WINAPI Edit_MyExtTextOutW(HDC, int, int, UINT, const RECT*, LPCWSTR, UINT, const INT*);
     BOOL WINAPI Edit_MyExtTextOutA(HDC, int, int, UINT, const RECT*, LPCSTR, UINT, const INT*);
     BOOL WINAPI Edit_MyFillRect(HDC, const RECT*, HBRUSH);
+    BOOL WINAPI Edit_MyPatBlt(HDC, int, int, int, int, DWORD);
 
     enum EditHookIndex : size_t
     {
         EHK_FILLRECT = 0,
         EHK_EXTTEXTOUT = 1,
         EHK_EXTTEXTOUTA = 2,
+        EHK_PATBLT = 3,
         EHK_COUNT
     };
 
@@ -739,10 +881,12 @@ namespace GlassCore::EditControl
     { {
         std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv },
             "FillRect", reinterpret_cast<PVOID>(Edit_MyFillRect) },
-        std::tuple{ std::array{ "gdi32.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv, ""sv },
+        std::tuple{ std::array{ "gdi32.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv, "gdi32full.dll"sv },
             "ExtTextOutW", reinterpret_cast<PVOID>(Edit_MyExtTextOutW) },
-        std::tuple{ std::array{ "gdi32.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv, ""sv },
+        std::tuple{ std::array{ "gdi32.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv, "gdi32full.dll"sv },
             "ExtTextOutA", reinterpret_cast<PVOID>(Edit_MyExtTextOutA) },
+        std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv },
+            "PatBlt", reinterpret_cast<PVOID>(Edit_MyPatBlt) },
     } };
 
     using EditDispatcher = HookDispatcher<EHK_COUNT, 3>;
@@ -768,8 +912,10 @@ namespace GlassCore::EditControl
         {
             it->second.moduleAddress = baseAddress;
         }
+        const int before = it->second.GetRef(index);
         it->second.EnableHook(index, enable);
-        return true;
+        const int after = it->second.GetRef(index);
+        return enable ? after > before : after < before;
     }
 
     static void DisableAllOverallHooks()
@@ -853,6 +999,14 @@ namespace GlassCore::EditControl
                 if (outResolveTag) *outResolveTag = t;
             };
 
+        // A nested RichEdit GetDC may be above another Edit's BeginPaint.
+        // Resolve its exact DC before the legacy plain-Edit stack fallback.
+        if (HWND rich = RichEditHwndForDrawingDc(hdc))
+        {
+            setTag(L"richEditDc");
+            return rich;
+        }
+
         HWND s = GetSessionHwnd();
         if (s)
         {
@@ -902,6 +1056,9 @@ namespace GlassCore::EditControl
         HMODULE callerMod, decltype(&ExtTextOutW) origW)
     {
         const GlassShared::GlassControlKind controlKind = GlassShared::GlassGetWindowKind(sessionHwnd);
+        const bool richEdit = IsRichEditKind(controlKind);
+        if (richEdit && !IsRichEditDrawingDc(sessionHwnd, hdc))
+            return origW(hdc, x, y, options, lprect, lpString, c, lpDx);
 
         // В VCL TMemo BeginPaint может синхронно вызвать WM_NCPAINT и GetDCEx
         // с DCX_WINDOW до того, как вернёт клиентский HDC. Этот временный DC
@@ -1004,29 +1161,29 @@ namespace GlassCore::EditControl
         }
 #endif
 
-        // ── RichEdit20: фон на весь клиент (без изменений) ────────────────────
-        if (IsRichEdit20Only(controlKind) && sessionHwnd)
-        {
-            const COLORREF emBg = GetRichEdit20BackgroundFromEm(sessionHwnd);
-            if (g_re20FullClientBgPrimedHwnd != sessionHwnd || g_re20LastAppliedEmBg != emBg)
-            {
-                RECT cr{};
-                GetClientRect(sessionHwnd, &cr);
-                const COLORREF reBgEff = GetRichEdit20EffectiveBackground(sessionHwnd, hdc);
-                ApplyEditBackgroundRect(targetDC, hdc, sessionHwnd, &cr, useSession, &reBgEff);
-                g_re20FullClientBgPrimedHwnd = sessionHwnd;
-                g_re20LastAppliedEmBg = emBg;
-            }
-        }
-
         // ── 1. Фон (ETO_OPAQUE) ────────────────────────────────────────────────
-        // ETO_OPAQUE обрабатывается здесь через PatBlt/FillRect.
-        // В ExtTextOutWithAlpha(ToSession) options приходят уже БЕЗ ETO_OPAQUE (drawOptions).
+        // Only the native rectangle and its actual DC colour. There is no
+        // EM_GETBKGNDCOLOR in the RichEdit SDK; never infer the whole client
+        // from the current selection/run colour or send a made-up message.
         if ((options & ETO_OPAQUE) && lprect)
-            ApplyEditBackgroundRect(targetDC, hdc, sessionHwnd, lprect, useSession);
+        {
+            if (richEdit && !IsRichEditSelectionColor(sessionHwnd, GetBkColor(hdc)))
+            {
+                if (!ApplyRichEditBackgroundRect(hdc, sessionHwnd, lprect, GetBkColor(hdc), L"ExtTextOut"))
+                    return origW(hdc, x, y, options, lprect, lpString, c, lpDx);
+            }
+            else
+                ApplyEditBackgroundRect(targetDC, hdc, sessionHwnd, lprect, useSession);
+        }
 
         // ── 2. Нет символов — фон нарисован, текста нет ───────────────────────
         if (!c) return TRUE;
+
+        // Native ExtTextOut invoked by the alpha text compositor must not be
+        // intercepted again through another RichEdit/gdi32full IAT slot.
+        const bool previousRichText = g_inRichEditText;
+        if (richEdit) g_inRichEditText = true;
+        auto leaveRichText = wil::scope_exit([previousRichText]() noexcept { g_inRichEditText = previousRichText; });
 
         // ── 3. Текст ───────────────────────────────────────────────────────────
 #if 0
@@ -1214,6 +1371,8 @@ namespace GlassCore::EditControl
         auto orig = GetOverallOrigSafe<EHK_EXTTEXTOUT, decltype(&ExtTextOutW)>(callerMod);
         if (!orig)
             return ExtTextOutW(hdc, x, y, options, lprect, lpString, c, lpDx);
+        if (g_inRichEditBackground || g_inRichEditText)
+            return orig(hdc, x, y, options, lprect, lpString, c, lpDx);
 
         const wchar_t* resolveTag = L"?";
         HWND sessionHwnd = ResolveEditSessionHwndForExtTextOut(hdc, &resolveTag);
@@ -1255,6 +1414,17 @@ namespace GlassCore::EditControl
         HMODULE callerMod = GetCallerModule(_ReturnAddress());
         auto orig = GetOverallOrigSafe<EHK_FILLRECT, decltype(&FillRect)>(callerMod);
         if (!orig) return FillRect(hdc, lprc, hbr);
+        if (g_inRichEditBackground || g_inRichEditText)
+            return orig(hdc, lprc, hbr);
+
+        if (HWND rich = RichEditHwndForDrawingDc(hdc))
+        {
+            COLORREF color{};
+            if (lprc && RichEditSolidBrushColor(hdc, hbr, color) && !IsRichEditSelectionColor(rich, color)
+                && ApplyRichEditBackgroundRect(hdc, rich, lprc, color, L"FillRect"))
+                return 1;
+            return orig(hdc, lprc, hbr);
+        }
 
         if (g_editSessionStack.empty() && g_editDcStack.empty())
             return orig(hdc, lprc, hbr);
@@ -1268,6 +1438,12 @@ namespace GlassCore::EditControl
                 && GlassCore::DelphiInput::ClearHotKeyBackground(paint.hwnd, hdc, lprc, hbr))
                 return TRUE;
         }
+
+        // The newly acquired RichEdit FillRect slots must not expose the
+        // legacy scrollbar-corner rule to unrelated or unbound DCs.
+        if ((!g_editSessionStack.empty() && IsRichEditKind(g_editSessionStack.back().kind))
+            || (!g_editDcStack.empty() && IsRichEditKind(g_editDcStack.back().kind)))
+            return orig(hdc, lprc, hbr);
 
         LOGBRUSH lb{};
         if (GetObject(hbr, sizeof(lb), &lb) && lb.lbStyle == BS_SOLID)
@@ -1288,6 +1464,25 @@ namespace GlassCore::EditControl
         return orig(hdc, lprc, hbr);
     }
 
+    BOOL WINAPI Edit_MyPatBlt(HDC hdc, int x, int y, int width, int height, DWORD rop)
+    {
+        const HMODULE callerMod = GetCallerModule(_ReturnAddress());
+        const auto orig = GetOverallOrigSafe<EHK_PATBLT, decltype(&PatBlt)>(callerMod);
+        if (!orig) return PatBlt(hdc, x, y, width, height, rop);
+        const HWND rich = RichEditHwndForDrawingDc(hdc);
+        if (!rich || rop != PATCOPY || width <= 0 || height <= 0
+            || x > (std::numeric_limits<int>::max)() - width
+            || y > (std::numeric_limits<int>::max)() - height)
+            return orig(hdc, x, y, width, height, rop);
+        const RECT r{ x, y, x + width, y + height };
+        COLORREF color{};
+        if (RichEditSolidBrushColor(hdc, static_cast<HBRUSH>(GetCurrentObject(hdc, OBJ_BRUSH)), color)
+            && !IsRichEditSelectionColor(rich, color)
+            && ApplyRichEditBackgroundRect(hdc, rich, &r, color, L"PatBlt"))
+            return TRUE;
+        return orig(hdc, x, y, width, height, rop);
+    }
+
     BOOL WINAPI Edit_MyExtTextOutA(
         HDC hdc, int x, int y, UINT options, const RECT* lprect,
         LPCSTR lpString, UINT c, const INT* lpDx)
@@ -1297,6 +1492,8 @@ namespace GlassCore::EditControl
         auto origW = GetOverallOrigSafe<EHK_EXTTEXTOUT, decltype(&ExtTextOutW)>(callerMod);
 
         if (!origA) return ExtTextOutA(hdc, x, y, options, lprect, lpString, c, lpDx);
+        if (g_inRichEditBackground || g_inRichEditText)
+            return origA(hdc, x, y, options, lprect, lpString, c, lpDx);
         if (!origW)
             origW = reinterpret_cast<decltype(&ExtTextOutW)>(
                 GetProcAddress(GetModuleHandleW(L"gdi32.dll"), "ExtTextOutW"));
@@ -1353,60 +1550,58 @@ namespace GlassCore::EditControl
     }
 
     // =========================================================================
-    //  EnableEditHooksForModule (без изменений)
+    //  Scoped hook sets
     // =========================================================================
+    static void AcquireRichEditHooks(EditPaintSession& session)
+    {
+        // TRichEdit is classified as 50, but its native engine can depend on
+        // the VCL version. Cover both already-loaded RichEdit engines without
+        // class-name guesses or EXE-wide text interception.
+        const HMODULE re20 = GetModuleHandleW(L"riched20.dll");
+        const HMODULE re50 = GetModuleHandleW(L"msftedit.dll");
+        const HMODULE full = GetModuleHandleW(L"gdi32full.dll");
+        const std::array modules{ session.mod, re20, re50, full };
+        session.richHooks.reserve(modules.size() * EHK_COUNT);
+        for (size_t i = 0; i < modules.size(); ++i)
+        {
+            const HMODULE mod = modules[i];
+            if (!mod || std::find(modules.begin(), modules.begin() + i, mod) != modules.begin() + i)
+                continue;
+            const auto acquire = [&](size_t index) {
+                if (EnableHooksOnModule(mod, index, true)) session.richHooks.push_back({ mod, index });
+            };
+            acquire(EHK_FILLRECT);
+            acquire(EHK_PATBLT);
+            if (mod == re20 || mod == re50 || mod == full)
+            {
+                acquire(EHK_EXTTEXTOUT);
+                acquire(EHK_EXTTEXTOUTA);
+            }
+        }
+    }
+
+    static void ReleaseRichEditHooks(const EditPaintSession& session)
+    {
+        for (auto it = session.richHooks.rbegin(); it != session.richHooks.rend(); ++it)
+            EnableHooksOnModule(it->mod, it->index, false);
+    }
+
+    // Plain Edit keeps its accepted text hooks and its own background renderer.
     static void EnableEditHooksForModule(
-        HMODULE callerMod,
+        HMODULE /*callerMod*/,
         GlassShared::GlassControlKind kind,
         bool enable)
     {
         using namespace GlassShared;
-
-        /*auto enableFillRectOnKnownModules = [&](HMODULE preferredTextModule) noexcept
-            {
-                EnableHooksOnModule(callerMod, EHK_FILLRECT, enable);
-                EnableHooksOnModule(GetModuleHandleW(L"user32.dll"), EHK_FILLRECT, enable);
-                EnableHooksOnModule(GlassCore::ModuleHandler::g_comctl32New, EHK_FILLRECT, enable);
-                EnableHooksOnModule(GlassCore::ModuleHandler::g_comctl32Legacy, EHK_FILLRECT, enable);
-                EnableHooksOnModule(preferredTextModule, EHK_FILLRECT, enable);
-            };*/
-
-        switch (kind)
+        if (kind != GlassControlKind::Edit && kind != GlassControlKind::WinForms_Edit) return;
+        // Текст Edit рисуется из user32 (IAT → gdi32); только gdi32full не покрывает все сборки.
+        if (HMODULE user32 = GetModuleHandleW(L"user32.dll"))
         {
-        case GlassControlKind::Edit:
-        case GlassControlKind::WinForms_Edit:
-        {
-            //enableFillRectOnKnownModules(nullptr);
-            // Текст Edit рисуется из user32 (IAT → gdi32); только gdi32full не покрывает все сборки.
-            if (HMODULE user32 = GetModuleHandleW(L"user32.dll"))
-            {
-                EnableHooksOnModule(user32, EHK_EXTTEXTOUT, enable);
-                EnableHooksOnModule(user32, EHK_EXTTEXTOUTA, enable);
-            }
-            if (void* gdi32full = GetModuleHandleW(L"gdi32full.dll"))
-                EnableHooksOnModule(gdi32full, EHK_EXTTEXTOUT, enable);
-            break;
+            EnableHooksOnModule(user32, EHK_EXTTEXTOUT, enable);
+            EnableHooksOnModule(user32, EHK_EXTTEXTOUTA, enable);
         }
-        case GlassControlKind::RichEdit20W:
-        case GlassControlKind::WinForms_RichEdit20W:
-        {
-            void* riched20 = GetModuleHandleW(L"riched20.dll");
-            //enableFillRectOnKnownModules(static_cast<HMODULE>(riched20));
-            EnableHooksOnModule(riched20, EHK_EXTTEXTOUT, enable);
-            EnableHooksOnModule(riched20, EHK_EXTTEXTOUTA, enable);
-            break;
-        }
-        case GlassControlKind::RichEdit50W:
-        case GlassControlKind::WinForms_RichEdit50W:
-        {
-            void* msftedit = GetModuleHandleW(L"msftedit.dll");
-            void* gdi32full = GetModuleHandleW(L"gdi32full.dll");
-            //enableFillRectOnKnownModules(static_cast<HMODULE>(msftedit));
+        if (void* gdi32full = GetModuleHandleW(L"gdi32full.dll"))
             EnableHooksOnModule(gdi32full, EHK_EXTTEXTOUT, enable);
-            break;
-        }
-        default: break;
-        }
     }
 
     // =========================================================================
@@ -1424,36 +1619,27 @@ namespace GlassCore::EditControl
             || kind == GlassControlKind::WinForms_RichEdit50W;
     }
 
-    static bool IsRichEditKind(GlassShared::GlassControlKind kind) noexcept
-    {
-        using namespace GlassShared;
-        return kind == GlassControlKind::RichEdit20W
-            || kind == GlassControlKind::WinForms_RichEdit20W
-            || kind == GlassControlKind::RichEdit50W
-            || kind == GlassControlKind::WinForms_RichEdit50W;
-    }
-
     // ── Канал 1: BeginPaint / EndPaint ────────────────────────────────────────
     static void OnBeginPaintEdit(HWND hWnd, HMODULE callerMod)
     {
+        if (g_shutdown.load(std::memory_order_acquire)) return;
         using namespace GlassShared;
         auto kind = GlassGetWindowKind(hWnd);
         if (!IsEditKind(kind)) return;
 
         GlassCore::TextInk::EnsureTextInkClientRegistered(hWnd);
 
-        g_bypassEditBuffer = false;
-        g_sessionBlacknessRects.clear();
-        if (IsRichEdit20Only(kind))
+        if (!IsRichEditKind(kind))
         {
-            g_re20FullClientBgPrimedHwnd = nullptr;
-            g_re20LastAppliedEmBg = CLR_INVALID;
+            g_bypassEditBuffer = false;
+            g_sessionBlacknessRects.clear();
         }
         g_editSessionStack.push_back({ hWnd, callerMod, kind });
         DebugLog(DBG_NORMAL,
             L"[GlassCore][Edit] BeginPaint: mod=0x%p hWnd=0x%p kind=%d depth=%zu",
             callerMod, hWnd, static_cast<int>(kind), g_editSessionStack.size());
-        EnableEditHooksForModule(callerMod, kind, true);
+        if (IsRichEditKind(kind)) AcquireRichEditHooks(g_editSessionStack.back());
+        else EnableEditHooksForModule(callerMod, kind, true);
         if (callerMod && GlassCore::DelphiInput::IsHotKey(hWnd))
         {
             EnableHooksOnModule(callerMod, EHK_FILLRECT, true);
@@ -1466,7 +1652,8 @@ namespace GlassCore::EditControl
     {
         if (g_shutdown.load(std::memory_order_acquire) || !hdc
             || (!IsDelphiMemo(hWnd) && !GlassCore::DelphiInput::IsSpinEdit(hWnd)
-                && !GlassCore::DelphiInput::IsNumberBox(hWnd) && !GlassCore::DelphiInput::IsHotKey(hWnd))
+                && !GlassCore::DelphiInput::IsNumberBox(hWnd) && !GlassCore::DelphiInput::IsHotKey(hWnd)
+                && !IsRichEditKind(GlassShared::GlassGetWindowKind(hWnd)))
             || g_editSessionStack.empty() || g_editSessionStack.back().hwnd != hWnd)
             return false;
         g_editSessionStack.back().paintDc = hdc;
@@ -1480,18 +1667,18 @@ namespace GlassCore::EditControl
 
     static void OnEndPaintEdit(HWND hWnd, HMODULE /*callerMod*/)
     {
-        using namespace GlassShared;
-        auto kind = GlassGetWindowKind(hWnd);
-        if (!IsEditKind(kind)) return;
-        if (g_editSessionStack.empty()) return;
+        if (g_editSessionStack.empty() || g_editSessionStack.back().hwnd != hWnd) return;
+        if (!IsRichEditKind(g_editSessionStack.back().kind))
+        {
+            FlushEditBuffer();
+            g_bypassEditBuffer = false;
+        }
 
-        FlushEditBuffer();
-        g_bypassEditBuffer = false;
-
-        const EditPaintSession s = g_editSessionStack.back();
+        const EditPaintSession s = std::move(g_editSessionStack.back());
         g_editSessionStack.pop_back();
         if (s.hotKeyFillHook) EnableHooksOnModule(s.mod, EHK_FILLRECT, false);
-        EnableEditHooksForModule(s.mod, s.kind, false);
+        if (IsRichEditKind(s.kind)) ReleaseRichEditHooks(s);
+        else EnableEditHooksForModule(s.mod, s.kind, false);
         DebugLog(DBG_NORMAL, L"[GlassCore][Edit] EndPaint: hWnd=0x%p depth=%zu",
             hWnd, g_editSessionStack.size());
     }
@@ -1514,14 +1701,13 @@ namespace GlassCore::EditControl
             g_bypassEditBuffer = false;
             g_sessionBlacknessRects.clear();
         }
-        if (IsRichEdit20Only(kind) && g_editSessionStack.empty())
-        {
-            g_re20FullClientBgPrimedHwnd = nullptr;
-            g_re20LastAppliedEmBg = CLR_INVALID;
-        }
-
         g_editDcStack.push_back({ hWnd, callerMod, kind });
-        EnableEditHooksForModule(callerMod, kind, true);
+        if (IsRichEditKind(kind))
+        {
+            g_editDcStack.back().paintDc = GlassCore::PaintDispatcher::GetCurrentGetDcSessionHdc();
+            AcquireRichEditHooks(g_editDcStack.back());
+        }
+        else EnableEditHooksForModule(callerMod, kind, true);
 
         DebugLog(DBG_NORMAL,
             L"[GlassCore][Edit] GetDC: hWnd=0x%p kind=%d depth=%zu",
@@ -1530,14 +1716,12 @@ namespace GlassCore::EditControl
 
     static void OnReleaseDCEdit(HWND hWnd, HMODULE /*callerMod*/)
     {
-        using namespace GlassShared;
-        auto kind = GlassGetWindowKind(hWnd);
-        if (!IsEditKind(kind)) return;
-        if (g_editDcStack.empty()) return;
+        if (g_editDcStack.empty() || g_editDcStack.back().hwnd != hWnd) return;
 
-        const EditPaintSession s = g_editDcStack.back();
+        const EditPaintSession s = std::move(g_editDcStack.back());
         g_editDcStack.pop_back();
-        EnableEditHooksForModule(s.mod, s.kind, false);
+        if (IsRichEditKind(s.kind)) ReleaseRichEditHooks(s);
+        else EnableEditHooksForModule(s.mod, s.kind, false);
 
         // Flush только когда завершились все GetDC-сессии И нет BeginPaint-сессии
         if (g_editSessionStack.empty() && g_editDcStack.empty())
