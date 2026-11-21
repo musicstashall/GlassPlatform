@@ -1,4 +1,4 @@
-// Сабкласс Delphi TCoolBar (точный класс окна CoolBar).
+// Сабкласс Delphi TCoolBar (точные классы окна TCoolBar / CoolBar).
 // WM_PAINT / WM_PRINTCLIENT сохраняют native paint внутри отдельной
 // GlassCore-сессии delphi/TCoolBarDraw; generic rebar не используется.
 // WM_ERASEBKGND чистит фон; рамку VCL продолжает рисовать через DrawEdge.
@@ -16,15 +16,13 @@
 
 namespace
 {
-    constexpr wchar_t kCoolBarClass[] = L"CoolBar";
-
     std::vector<HWND> g_coolBarWindows;
 
     [[nodiscard]] bool IsCoolBarClass(HWND hWnd) noexcept
     {
         wchar_t cls[64]{};
         return GetClassNameW(hWnd, cls, static_cast<int>(_countof(cls))) > 0
-            && _wcsicmp(cls, kCoolBarClass) == 0;
+            && WndCompat::CoolBar_IsClassName(cls);
     }
 
     LRESULT CALLBACK CoolBarSubclassProc(
@@ -106,6 +104,14 @@ namespace
 
 namespace WndCompat
 {
+    bool CoolBar_IsClassName(const wchar_t* className) noexcept
+    {
+        // Не тема Rebar, не текст подписи и не подстрока имени окна:
+        // GetClassNameW в зонде возвращает именно TCoolBar.
+        return className && (_wcsicmp(className, L"TCoolBar") == 0
+            || _wcsicmp(className, L"CoolBar") == 0);
+    }
+
     void CoolBar_Attach(HWND hWnd)
     {
         if (WinEventHook_GetMode() != Shared::InjectionMode::Full)
@@ -127,7 +133,9 @@ namespace WndCompat
 
         GlassShared::GlassMarkWindow(hWnd, GlassShared::GlassControlKind::CoolBar);
         g_coolBarWindows.push_back(hWnd);
-        DebugLog(DBG_NORMAL, L"[WndCompat][CoolBar] CoolBar_Attach: субкласс установлен hwnd=0x%p", hWnd);
+        wchar_t cls[64]{};
+        GetClassNameW(hWnd, cls, static_cast<int>(_countof(cls)));
+        DebugLog(DBG_NORMAL, L"[WndCompat][CoolBar] CoolBar_Attach: субкласс установлен hwnd=0x%p class=\"%s\"", hWnd, cls);
     }
 
     void CoolBar_Detach(HWND hWnd)

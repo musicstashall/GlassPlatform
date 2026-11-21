@@ -866,15 +866,15 @@ class DelphiPipelineContract(unittest.TestCase):
         for name in ("TFileListBox", "TDirectoryListBox"):
             self.assertIn('_wcsicmp(cls, L"%s")' % name, probe)
 
-    def test_tcoolbar_uses_rebar_glass_path(self):
+    def test_tcoolbar_uses_its_dedicated_glass_path(self):
         cls = read("WndCompat/Tracker/WindowClassifier.cpp")
         rebar_block = cls.split('// ── ReBar ─', 1)[1].split('return ControlKind::ReBar;', 1)[0]
         self.assertIn('Equals(cls, L"ReBarWindow32")', rebar_block)
         self.assertNotIn('CoolBar', rebar_block)
 
         # CoolBar — отдельный вид контрола и отдельный путь отрисовки.
-        coolbar_block = cls.split('// ── CoolBar (Delphi TCoolBar) ─', 1)[1]
-        self.assertIn('Equals(cls, L"CoolBar")', coolbar_block)
+        coolbar_block = cls.split('// ── CoolBar (Delphi TCoolBar) ─', 1)[1].split('// ── ToolBar', 1)[0]
+        self.assertIn('WndCompat::CoolBar_IsClassName(cls.c_str())', coolbar_block)
         self.assertIn('return ControlKind::CoolBar;', coolbar_block)
 
         handler = read("WndCompat/Tracker/WinEventHandler.cpp")
@@ -885,6 +885,31 @@ class DelphiPipelineContract(unittest.TestCase):
         # Rebar-ветка не должна обрастать особенностями TCoolBar.
         rebar = read("GlassCore/src/Hooks/RebarHooks.cpp")
         self.assertNotIn('CoolBar', rebar)
+
+    def test_coolbar_raw_class_gate_is_shared_by_classifier_attach_and_rescan(self):
+        # The probe reports GetClassNameW == TCoolBar. It is not the caption
+        # or the theme class Rebar, and NormalizeWindowClass keeps the T.
+        code = read('WndCompat/Controls/CoolBarSubclass.cpp')
+        predicate = code.split('bool CoolBar_IsClassName(const wchar_t* className) noexcept', 1)[1].split(
+            'void CoolBar_Attach(HWND hWnd)', 1)[0]
+        self.assertIn('_wcsicmp(className, L"TCoolBar") == 0', predicate)
+        self.assertIn('_wcsicmp(className, L"CoolBar") == 0', predicate)
+        for forbidden in ('wcsstr', 'wcsncmp', 'ContainsSubstr', 'ReBarWindow32', 'SizeableRebar'):
+            self.assertNotIn(forbidden, predicate)
+        window_gate = code.split('bool IsCoolBarClass(HWND hWnd) noexcept', 1)[1].split(
+            'LRESULT CALLBACK CoolBarSubclassProc', 1)[0]
+        self.assertIn('GetClassNameW', window_gate)
+        self.assertIn('WndCompat::CoolBar_IsClassName(cls)', window_gate)
+        self.assertIn('if (!IsCoolBarClass(hWnd))', code)
+        self.assertIn('CoolBar_IsClassName(cls.c_str())', read('WndCompat/Tracker/WindowClassifier.cpp'))
+        rescan = read('WndCompat/Tracker/BackdropPolicyRescan.cpp').split(
+            'void TryRescanControlHwnd(HWND hChild) noexcept', 1)[1]
+        self.assertLess(rescan.index('WndCompat::CoolBar_IsClassName(cls)'),
+                        rescan.index('GlassGetWindowKind(hChild) != GK::None'))
+        normalize = read('WndCompat/Tracker/WindowClassUtils.cpp').split(
+            'std::wstring NormalizeWindowClass(HWND hWnd)', 1)[1].split('bool IsWindowClass', 1)[0]
+        self.assertIn('return cls;', normalize)
+        self.assertNotIn('TCoolBar', normalize)
 
     def test_coolbar_dedicated_path(self):
         # WndCompat: свой сабкласс и провайдер.

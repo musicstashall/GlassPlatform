@@ -1,4 +1,4 @@
-// Отдельный путь Delphi TCoolBar (точный класс окна CoolBar).
+// Отдельный путь Delphi TCoolBar (точные классы окна TCoolBar / CoolBar).
 // Фон и текст — разные операции: ETO_OPAQUE/FillRect/PatBlt против
 // DrawTextW/DrawTextExW/DrawThemeText. Наличие GetWindowTheme(hwnd) не
 // определяет маршрут текста внутри comctl32, поэтому проверяем сами API.

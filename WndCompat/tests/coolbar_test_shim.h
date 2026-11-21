@@ -78,10 +78,13 @@ namespace GlassShared { enum class GlassControlKind { None, CoolBar, Root }; }
 struct TestWindow
 {
     bool valid = true, backdrop = true;
-    GlassShared::GlassControlKind kind = GlassShared::GlassControlKind::CoolBar;
-    std::wstring cls = L"CoolBar";
+    // Raw class from the Windows probe, initially unmarked: tests must attach
+    // through the real class gate, not assume the rendering path is active.
+    GlassShared::GlassControlKind kind = GlassShared::GlassControlKind::None;
+    std::wstring cls = L"TCoolBar";
     SUBCLASSPROC subclass{};
     HTHEME theme{};
+    std::vector<HWND> children;
 };
 struct DcState
 {
@@ -182,7 +185,14 @@ inline LRESULT DefSubclassProc(HWND w, UINT msg, WPARAM wp, LPARAM lp)
 }
 inline LRESULT SendMessageTimeoutW(HWND w, UINT msg, WPARAM wp, LPARAM lp, UINT, UINT, DWORD_PTR*)
 { return w->subclass ? w->subclass(w, msg, wp, lp, 1, 0) : 0; }
-inline BOOL EnumChildWindows(HWND, BOOL(CALLBACK*)(HWND, LPARAM), LPARAM) { return TRUE; }
+inline BOOL EnumChildWindows(HWND root, BOOL(CALLBACK* visit)(HWND, LPARAM), LPARAM data)
+{
+    for (HWND child : root->children)
+    {
+        if (!visit(child, data) || !EnumChildWindows(child, visit, data)) return FALSE;
+    }
+    return TRUE;
+}
 
 namespace Shared { enum class InjectionMode { Full, PopupOnly }; }
 namespace WndCompat

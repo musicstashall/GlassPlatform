@@ -52,7 +52,7 @@ enum class ControlKind
     DateTimePicker,     // SysDateTimePick32, TDateTimePicker
     MonthCal,           // SysMonthCal32
     ReBar,              // ReBarWindow32, SizeableRebar
-    CoolBar,            // CoolBar — окно Delphi TCoolBar (свой путь)
+    CoolBar,            // TCoolBar / CoolBar — Delphi TCoolBar (свой путь)
     ToolBar,            // ToolbarWindow32, TToolBar
     DirectUI,           // DirectUIHWND (DUser.dll/wdc.dll, Windows 10+)
     NetUI,              // NetUIHWND, UIRibbonCommandBar (Office ribbon / UIRibbon.dll)

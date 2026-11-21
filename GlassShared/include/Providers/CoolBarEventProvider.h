@@ -1,7 +1,7 @@
 #pragma once
 #include <windows.h>
 
-// Отдельный путь Delphi TCoolBar (точный класс окна CoolBar).
+// Отдельный путь Delphi TCoolBar (точные классы окна TCoolBar / CoolBar).
 // WM_PAINT и WM_PRINTCLIENT сохраняют native paint; GlassCore заменяет
 // только фон и текст внутри собственной сессии, не generic rebar.
 namespace WndCompat::CoolBar

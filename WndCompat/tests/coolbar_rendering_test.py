@@ -54,6 +54,12 @@ class CoolBarRenderingTest(unittest.TestCase):
         result = subprocess.run([str(self.binary), case], capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_raw_tcoolbar_class_attach_and_recursive_catchup(self):
+        self.run_case('exact-class-attach')
+
+    def test_probe_text_routes_start_at_real_subclass_not_premarked_session(self):
+        self.run_case('probe-through-subclass')
+
     def test_themed_classic_and_glyph_text_routes(self):
         self.run_case('text-routes')
 

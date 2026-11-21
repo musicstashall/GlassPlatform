@@ -1,6 +1,7 @@
 #include "WndPch.h"
 #include "Tracker/WindowClassifier.h"
 #include "Tracker/WindowClassUtils.h"
+#include <Controls/CoolBarSubclass.h>
 #include <ExplorerCompatHostPolicy.h>
 #include <RootBackdropPolicy.h>
 #include <SystemHelper.h>
@@ -493,10 +494,10 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
         return ControlKind::ReBar;
 
     // ── CoolBar (Delphi TCoolBar) ────────────────────────────────────────────
-    // Не rebar: у окна нет темы, фон полосы заливается пустым
-    // ExtTextOutW(ETO_OPAQUE), текст рисует comctl32 через DrawTextExW.
-    // Свой путь отрисовки: CoolBarSubclass + CoolBarHooks.
-    if (Equals(cls, L"CoolBar"))
+    // Зонд GetClassNameW: TCoolBar; нормализатор НЕ снимает префикс T.
+    // Та же точная проверка, что в attach/catch-up/rescan, без подстрок.
+    // Свой путь: CoolBarSubclass + delphi/TCoolBarDraw, не generic rebar.
+    if (WndCompat::CoolBar_IsClassName(cls.c_str()))
         return ControlKind::CoolBar;
 
     // ── ToolBar ──────────────────────────────────────────────────────────────

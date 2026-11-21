@@ -1,7 +1,7 @@
 #pragma once
 #include <windows.h>
 
-// Собственная сессия и набор IAT-хуков Delphi TCoolBar (точный класс CoolBar).
+// Собственная сессия и IAT-хуки Delphi TCoolBar (классы TCoolBar / CoolBar).
 // Рендеринг текста не зависит от GetWindowTheme(hwnd): поддерживаются
 // DrawTextW / DrawTextExW / DrawThemeText. Generic rebar не используется.
 namespace GlassCore::CoolBarControl

@@ -2659,6 +2659,10 @@ alpha-путь).
 
 ## Тест 78: TCoolBar — класс окна `CoolBar`, фон рисуется `ExtTextOutW`
 
+**Уточнение теста 84:** вывод об имени окна здесь был ошибочным. Новый зонд
+`GetClassNameW` подтверждает **`TCoolBar`**, а не только `CoolBar`. Последнее
+сохранено как точный алиас, но не должно быть единственным условием attach.
+
 Принято замечание: подгонять классы по подстрокам (`ReBar`/`Rebar`) не нужно.
 Конкретный класс окна rebar у Delphi `TCoolBar` — **`CoolBar`**; подстрочные
 эвристики и выдуманное правило `vclHostRebar` убраны.
@@ -2891,3 +2895,78 @@ stackOwner, прямоугольник, флаги, text/bk color и BkMode. У�
 Полная MSVC-сборка и новый визуальный результат на Windows пока не проверены.
 Нужно пересобрать **GlassCore и WndCompat вместе**: уточнена сигнатура
 `CoolBarEventProvider::OnPaintBegin`.
+
+## Тест 84: фактический класс TCoolBar не проходил в выделенную ветку
+
+После `6507534` визуальный результат не изменился. Без зонда нет строк
+`[WndCompat][CoolBar]` / `[GlassCore][CoolBar]` при отображении; с темой есть
+лишь `Button InvokeButtonDrawThemeBg ... Skip reason=noSession`. Эта запись
+относится к обработчику фона Button, не подтверждает вход в CoolBar-сессию.
+
+Вставленный пользователем зонд однозначно показывает **реальный класс окна**:
+`hdcWin=0x660DFE cls="TCoolBar"` в обоих режимах. В DebugDetour поле `cls`
+получается через `WindowFromDC → GetClassNameW`, а не из текста подписи и не
+из имени темы. Подтверждены прежние маршруты текста:
+
+```
+14:59:07, с темой:
+COMCTL32 DrawThemeText className="Rebar" part=0 state=0 text="TCoolBar"
+         flags=0x100000 rect=[11,4,59,19] hdcWin=0x660DFE cls="TCoolBar"
+uxtheme  DrawTextExW text="TCoolBar" lpdtp=NULL (тот же HDC)
+gdi32full ExtTextOutW ETO_GLYPH_INDEX c=8
+
+14:59:53, без темы:
+COMCTL32 DrawTextW text="TCoolBar" format=0x100000 rect=[9,4,57,19]
+         hdcWin=0x660DFE cls="TCoolBar"
+gdi32full ExtTextOutW ETO_GLYPH_INDEX c=8
+```
+
+Класс **темы** `Rebar`, текст **подписи** `TCoolBar` и класс **окна**
+`TCoolBar` — разные сущности. Контроль DC здесь не является первой проблемой:
+это оконные DC того же HWND, а не неподтверждённый memory DC.
+
+Причина недостижимости выделенного пути:
+
+1. `NormalizeWindowClass` сохраняет обычное Win32/VCL-имя без изменений,
+   префикс `T` не снимает.
+2. Классификатор, `CoolBarSubclass` и `BackdropPolicyRescan` проверяли только
+   точное `CoolBar`. Поэтому реальное `TCoolBar` получало `ControlKind::Unknown`
+   и попадало в общий `Root_Attach`, а не в `CoolBar_Attach`.
+3. Общий `RootSubclassProc::WM_ERASEBKGND` объясняет `PatBlt caller=WndCompat`
+   и очищенный фон без единой CoolBar paint-сессии. Наличие очистки не
+   доказывало, что перехваты текста выделенного пути вообще включились.
+
+Исправлено **подключение**, алгоритм рендеринга в этом шаге не меняется:
+
+- `WndCompat::CoolBar_IsClassName` — один точный, case-insensitive предикат
+  для **`TCoolBar`** и прежнего алиаса **`CoolBar`**, без подстрок/префиксов;
+- классификатор, attach/catch-up и рескан используют его совместно. В рескане
+  проверка остаётся до early-return для уже маркированных окон, поэтому
+  старый Root-маркер не мешает подключить собственный путь;
+- сообщение успешного attach теперь содержит фактический `class="TCoolBar"`;
+- `DrawThemeText` / `DrawTextExW` / `DrawTextW` сохранены в
+  `delphi/TCoolBarDraw`; generic `RebarHooks`, RenderText, таблицы и списки
+  не менялись. Исправлены устаревшие комментарии об имени класса/«нет темы».
+
+**Ошибка прежних тестов:** fake-окно заранее имело `cls="CoolBar"` и маркер
+`GlassControlKind::CoolBar`, а большинство сценариев открывали Core-сессию
+напрямую. Это не проверяло реальный шлюз подключения. Сначала тестовый вход
+заменён на зондовый `cls="TCoolBar"`, `kind=None` и вызов настоящего attach:
+на старой реализации **7/7 сценариев упали**, воспроизведя дефект до правки.
+После исправления:
+
+- `delphi_pipeline_contract.py` — **59/59**: общий точный предикат обязателен
+  во всех трёх местах, порядок рескана и неизменность нормализатора проверены;
+- `coolbar_rendering_test.py` — **9/9**. Все исходные сценарии теперь начинают
+  с реального attach; добавлены отрицательные имена (`MyCoolBar`, `TCoolBar2`,
+  native rebar и т. п.), рекурсивный catch-up поверх старого Root-маркера и
+  `TCoolBar → attach → WM_PAINT → provider → DrawThemeText/DrawTextW → alpha`
+  по входам нового зонда, без предварительно выставленного маркера;
+- те же 9 сценариев под AddressSanitizer/UndefinedBehaviorSanitizer — OK;
+- `git diff --check` — OK.
+
+MSVC-сборка и пиксельный результат этого шага на Windows пока не проверены.
+Первое подтверждение на Windows — успешный `CoolBar_Attach ... class="TCoolBar"`,
+затем `paint ... began=1` и `text api=DrawThemeText` (либо `DrawTextExW`) с темой,
+`text api=DrawTextW` без темы. До этих строк менять цвет/alpha текста вслепую
+не следует.
