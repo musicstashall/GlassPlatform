@@ -200,6 +200,7 @@
     <ClCompile Include="src\Hooks\ScrollBarThemeHooks.cpp" />
     <ClCompile Include="src\Hooks\ScrollBarDrawTheme.cpp" />
     <ClCompile Include="src\Hooks\HeaderHooks.cpp" />
+    <ClCompile Include="src\Hooks\CoolBarHooks.cpp" />
     <ClCompile Include="src\Hooks\RebarHooks.cpp" />
     <ClCompile Include="src\Hooks\TabHooks.cpp" />
     <ClCompile Include="src\Hooks\ToolbarHooks.cpp" />
@@ -285,6 +286,7 @@
     <ClInclude Include="Include\Hooks\ScrollBarTheme.h" />
     <ClInclude Include="Include\Hooks\ScrollBarDrawTheme.h" />
     <ClInclude Include="Include\Hooks\Header.h" />
+    <ClInclude Include="Include\Hooks\CoolBar.h" />
     <ClInclude Include="Include\Hooks\Rebar.h" />
     <ClInclude Include="Include\Hooks\Tab.h" />
     <ClInclude Include="Include\Hooks\Toolbar.h" />

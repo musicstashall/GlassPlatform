@@ -11,6 +11,7 @@
 #include <Controls/ButtonSubclass.h>
 #include <Controls/ListViewSubclass.h>
 #include <Controls/RebarSubclass.h>
+#include <Controls/CoolBarSubclass.h>
 #include <Explorer/ExplorerIslandContainerSubclass.h>
 #include <WinUiBridge/WinUiDesktopBridgeHost.h>
 #include <GlassControlKind.h>
@@ -148,13 +149,18 @@ namespace
         // Rebar/TCoolBar: свой сабкласс и своя сессия отрисовки.
         {
             wchar_t cls[64]{};
-            if (GetClassNameW(hChild, cls, static_cast<int>(std::size(cls))) > 0
-                && (_wcsicmp(cls, L"ReBarWindow32") == 0
-                    || _wcsicmp(cls, L"SizeableRebar") == 0
-                    || _wcsicmp(cls, L"CoolBar") == 0))
+            if (GetClassNameW(hChild, cls, static_cast<int>(std::size(cls))) > 0)
             {
-                WndCompat::Rebar_Attach(hChild);
-                return;
+                if (_wcsicmp(cls, L"ReBarWindow32") == 0 || _wcsicmp(cls, L"SizeableRebar") == 0)
+                {
+                    WndCompat::Rebar_Attach(hChild);
+                    return;
+                }
+                if (_wcsicmp(cls, L"CoolBar") == 0)
+                {
+                    WndCompat::CoolBar_Attach(hChild);
+                    return;
+                }
             }
         }
 

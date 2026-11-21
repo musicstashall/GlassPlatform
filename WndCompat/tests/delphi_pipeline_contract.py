@@ -867,62 +867,62 @@ class DelphiPipelineContract(unittest.TestCase):
 
     def test_tcoolbar_uses_rebar_glass_path(self):
         cls = read("WndCompat/Tracker/WindowClassifier.cpp")
-        block = cls.split('// ── ReBar ─', 1)[1].split('return ControlKind::ReBar;', 1)[0]
-        # Класс окна rebar у Delphi TCoolBar — ровно CoolBar (API Monitor).
-        self.assertIn('Equals(cls, L"CoolBar")', block)
-        self.assertNotIn('Equals(cls, L"TCoolBar")', block)
+        rebar_block = cls.split('// ── ReBar ─', 1)[1].split('return ControlKind::ReBar;', 1)[0]
+        self.assertIn('Equals(cls, L"ReBarWindow32")', rebar_block)
+        self.assertNotIn('CoolBar', rebar_block)
+
+        # CoolBar — отдельный вид контрола и отдельный путь отрисовки.
+        coolbar_block = cls.split('// ── CoolBar (Delphi TCoolBar) ─', 1)[1]
+        self.assertIn('Equals(cls, L"CoolBar")', coolbar_block)
+        self.assertIn('return ControlKind::CoolBar;', coolbar_block)
+
         handler = read("WndCompat/Tracker/WinEventHandler.cpp")
+        self.assertIn('case ControlKind::CoolBar:', handler)
+        self.assertIn('WndCompat::CoolBar_Attach(hWnd);', handler)
         self.assertIn('shellRebar || topLevelHostRebar', handler)
-        self.assertNotIn('vclHostRebar', handler)
+
+        # Rebar-ветка не должна обрастать особенностями TCoolBar.
         rebar = read("GlassCore/src/Hooks/RebarHooks.cpp")
-        # Полоса: тема в DIB, заливка прозрачна, рамки остаются.
-        self.assertIn('static bool DrawRebarBandWithAlpha(', rebar)
-        self.assertIn('DrawRebarBandWithAlpha(orig, hTheme, hdc, iPartId, iStateId, *pRect, pClipRect)',
-                      rebar)
-        self.assertIn('band edges', rebar)
-        self.assertIn('PatBlt(hdc,', rebar)
-        self.assertIn('BLACKNESS', rebar)
-        # Белая заливка полосы (от comctl32 или от VCL) → прозрачность.
-        self.assertIn('OHK_FILLRECT', rebar)
-        self.assertIn('"FillRect", reinterpret_cast<PVOID>(Overall_MyFillRect)', rebar)
-        self.assertIn('"PatBlt", reinterpret_cast<PVOID>(Overall_MyPatBlt)', rebar)
-        self.assertIn('static bool IsRebarPaintDc(HDC hdc)', rebar)
-        self.assertIn('WindowFromDC(hdc) == sessionHwnd', rebar)
-        self.assertIn('rop != WHITENESS', rebar)
-        # Догоняющий attach: окно создано до инжекции → не было события CREATE.
-        subclass = read("WndCompat/Controls/RebarSubclass.cpp")
-        self.assertIn('void Rebar_CatchUp(HWND hRoot) noexcept', subclass)
-        self.assertIn('EnumChildWindows(hRoot, RebarCatchUpProc', subclass)
-        self.assertIn('WndCompat::Rebar_CatchUp(hRoot);', read("WndCompat/Root/RootSubclass.cpp"))
-        self.assertIn('[WndCompat][Rebar] WM_PAINT hwnd=0x%p', subclass)
-        # Перепись поддерева: «тишина» ≠ «проход не вызывался».
-        self.assertIn('struct RebarCensus', subclass)
-        self.assertIn('Rebar_CatchUp: root=0x%p children=%u rebar=%u classes=%s', subclass)
-        self.assertIn('IsRebarClass', subclass)
-        self.assertNotIn('wcsstr(cls, L"Rebar")', subclass)
-        # Фон полосы = ExtTextOutW(ETO_OPAQUE, "") — его и перехватываем.
-        self.assertIn('OHK_EXTTEXTOUT', rebar)
-        self.assertIn('"ExtTextOutW", reinterpret_cast<PVOID>(Overall_MyExtTextOutW)', rebar)
-        self.assertIn('(options & ETO_OPAQUE) == 0 || cch != 0', rebar)
-        self.assertIn('band-fill hdc=0x%p', rebar)
-        # Две ветки: с темой (DTB + DrawThemeText) и без темы (DrawTextExW).
-        self.assertIn('static bool RebarHasTheme(HWND hWnd) noexcept', rebar)
-        self.assertIn('GetWindowTheme(hWnd) != nullptr', rebar)
-        self.assertIn('if (themed && (!glow || !hUx))', rebar)
-        self.assertIn('EnableHooksOnModule(callerMod, OHK_DRAWTEXTEX, true)', rebar)
-        self.assertIn('themed=%d textHook=%d', rebar)
-        self.assertIn('themed=%d dtb=%d', rebar)
-        # Политика свечения не должна глушить текст полосы.
-        self.assertIn('glow-policy=0 hwnd=0x%p', rebar)
-        # DC сессии приоритетнее PaintDispatcher-хоста, иначе текст уходил в GDI.
-        self.assertIn('if (IsRebarPaintDc(hdc))', rebar)
-        self.assertIn('text-bypass hdc=0x%p reason=%s', rebar)
-        self.assertIn('static thread_local unsigned g_rebarTextDepth = 0;', rebar)
-        self.assertIn('[GlassCore][Rebar] text hdc=0x%p hr=0x%08X', rebar)
-        rescan = read("WndCompat/Tracker/BackdropPolicyRescan.cpp")
-        self.assertIn('WndCompat::Rebar_Attach(hChild);', rescan)
-        handler = read("WndCompat/Tracker/WinEventHandler.cpp")
-        self.assertIn('Rebar_Attach: skip (allow=%d parent=0x%p)', handler)
+        self.assertNotIn('CoolBar', rebar)
+
+    def test_coolbar_dedicated_path(self):
+        # WndCompat: свой сабкласс и провайдер.
+        subclass = read("WndCompat/Controls/CoolBarSubclass.cpp")
+        for marker in ('void CoolBar_Attach(HWND hWnd)',
+                       'void CoolBar_Detach(HWND hWnd)',
+                       'void CoolBar_DetachAll()',
+                       'void CoolBar_CatchUp(HWND hRoot) noexcept',
+                       'GlassMarkWindow(hWnd, GlassShared::GlassControlKind::CoolBar)',
+                       'WndCompat::WM_GLASS_DETACH_COOLBAR',
+                       '[WndCompat][CoolBar] CoolBar_Attach: субкласс установлен'):
+            self.assertIn(marker, subclass)
+
+        provider = read("WndCompat/Providers/CoolBarEventProvider.cpp")
+        self.assertIn('SetCoolBarEventProvider', provider)
+
+        # GlassCore: своя сессия и свои слоты.
+        hooks = read("GlassCore/src/Hooks/CoolBarHooks.cpp")
+        for marker in ('ExtTextOutSlot', 'FillRectSlot', 'PatBltSlot', 'DrawTextExSlot',
+                       'bool IsPaintDc(HDC hdc) noexcept'):
+            self.assertIn(marker, hooks)
+        self.assertIn('return WindowFromDC(hdc) == sessionHwnd;', hooks)
+        self.assertIn('ETO_OPAQUE', hooks)
+        self.assertIn('GlassCore::Text::ExtTextOutWithAlpha', hooks)
+        self.assertIn('GlassCore::Text::DrawTextWithAlpha', hooks)
+        self.assertIn('[GlassCore][CoolBar] OnPaintBegin', hooks)
+        self.assertIn('Diag(L"band-fill", hdc, rc);', hooks)
+        self.assertNotIn('"DrawThemeBackground"', hooks)
+
+        # Прокладка провайдера.
+        exports = read("GlassCore/src/Core/Exports.cpp")
+        self.assertIn('out->coolbar.OnPaintBegin = &GlassCore::CoolBarControl::OnPaintBegin;', exports)
+        engine = read("GlassCore/src/Core/Engine.cpp")
+        self.assertIn('GlassCore::CoolBarControl::Startup();', engine)
+        self.assertIn('GlassCore::CoolBarControl::Shutdown();', engine)
+        wnd = read("WndCompat/WndCompat.cpp")
+        self.assertIn('WndCompat::CoolBar::SetCoolBarEventProvider(providers.coolbar);', wnd)
+        kind = read("GlassShared/include/GlassControlKind.h")
+        self.assertIn('CoolBar                   = 39', kind)
 
     def test_list_item_icons_are_alpha_composited(self):
         draw = read("GlassCore/src/Hooks/delphi/TListBoxDraw.cpp")

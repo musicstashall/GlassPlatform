@@ -26,6 +26,7 @@
 #include <Controls/TrackBarHost.h>
 #include <Controls/DirectUISubclass.h>
 #include <Controls/RebarSubclass.h>
+#include <Controls/CoolBarSubclass.h>
 #include <Controls/ToolbarSubclass.h>
 #include <Explorer/ExplorerIslandContainerSubclass.h>
 #include <Root/ExplorerRootSubclass.h>
@@ -2029,6 +2030,7 @@ namespace WndCompat
         // Rebar/TCoolBar в этом поддереве: догоняющий attach, иначе такие окна
         // остаются без сабкласса (нет Windows-события CREATE после инжекции).
         WndCompat::Rebar_CatchUp(hRoot);
+        WndCompat::CoolBar_CatchUp(hRoot);
 
         WndCompat::BackdropPolicyRescan::ScheduleSubtreeRescanAfterRootAttach(hRoot);
     }

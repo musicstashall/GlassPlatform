@@ -295,6 +295,7 @@ namespace WndCompat
             WndCompat::Menu::SetMenuEventProvider({});
             WndCompat::DirectUI::SetDirectUIEventProvider({});
             WndCompat::Rebar::SetRebarEventProvider({});
+            WndCompat::CoolBar::SetCoolBarEventProvider({});
             WndCompat::Tooltip::SetTooltipEventProvider({});
 
             DebugLog(L"[WndCompat][Core] ExecuteShutdownCore: providers cleared");
@@ -359,6 +360,7 @@ namespace WndCompat
                     WndCompat::Root::SetRootEventProvider(providers.root);
                     WndCompat::DirectUI::SetDirectUIEventProvider(providers.directui);
                     WndCompat::Rebar::SetRebarEventProvider(providers.rebar);
+                    WndCompat::CoolBar::SetCoolBarEventProvider(providers.coolbar);
                     WndCompat::Tooltip::SetTooltipEventProvider(providers.tooltip);
                 }
             }
@@ -740,6 +742,7 @@ namespace WndCompat
         WndCompat::Menu::SetMenuEventProvider({});
         WndCompat::DirectUI::SetDirectUIEventProvider({});
         WndCompat::Rebar::SetRebarEventProvider({});
+        WndCompat::CoolBar::SetCoolBarEventProvider({});
         WndCompat::Tooltip::SetTooltipEventProvider({});
 
         g_shutdownComplete.store(true, std::memory_order_release);

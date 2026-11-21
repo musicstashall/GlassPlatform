@@ -489,11 +489,15 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
         return ControlKind::MonthCal;
 
     // ── ReBar ────────────────────────────────────────────────────────────────
-    // CoolBar — окно rebar у Delphi TCoolBar (API Monitor: BeginPaint из
-    // COMCTL32 на окне класса CoolBar).
-    if (Equals(cls, L"ReBarWindow32") || Equals(cls, L"SizeableRebar")
-        || Equals(cls, L"CoolBar"))
+    if (Equals(cls, L"ReBarWindow32") || Equals(cls, L"SizeableRebar"))
         return ControlKind::ReBar;
+
+    // ── CoolBar (Delphi TCoolBar) ────────────────────────────────────────────
+    // Не rebar: у окна нет темы, фон полосы заливается пустым
+    // ExtTextOutW(ETO_OPAQUE), текст рисует comctl32 через DrawTextExW.
+    // Свой путь отрисовки: CoolBarSubclass + CoolBarHooks.
+    if (Equals(cls, L"CoolBar"))
+        return ControlKind::CoolBar;
 
     // ── ToolBar ──────────────────────────────────────────────────────────────
     if (Equals(cls, L"ToolbarWindow32") || Equals(cls, L"TToolBar"))

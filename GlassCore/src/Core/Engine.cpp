@@ -28,6 +28,7 @@
 #include <Hooks/ListView.h>
 #include <Hooks/ScrollBar.h>
 #include <Hooks/Rebar.h>
+#include <Hooks/CoolBar.h>
 #include <Hooks/Tab.h>
 #include <Hooks/Header.h>
 #include <Hooks/Toolbar.h>
@@ -141,6 +142,7 @@ namespace GlassCore::Engine
         GlassCore::ListViewControl::Prepare();
         GlassCore::ScrollBar::Prepare();
         GlassCore::RebarControl::Prepare();
+        GlassCore::CoolBarControl::Prepare();
         GlassCore::TabControl::Prepare();
         GlassCore::HeaderControl::Prepare();
         GlassCore::ToolbarControl::Prepare();
@@ -173,6 +175,7 @@ namespace GlassCore::Engine
         GlassCore::ListViewControl::Startup();
         GlassCore::ScrollBar::Startup();
         GlassCore::RebarControl::Startup();
+        GlassCore::CoolBarControl::Startup();
         GlassCore::TabControl::Startup();
         GlassCore::HeaderControl::Startup();
         GlassCore::ToolbarControl::Startup();
@@ -291,6 +294,7 @@ namespace GlassCore::Engine
         GlassCore::ScrollBar::Shutdown();
         GlassCore::ListViewControl::Shutdown();
         GlassCore::RebarControl::Shutdown();
+        GlassCore::CoolBarControl::Shutdown();
         GlassCore::TabControl::Shutdown();
         GlassCore::HeaderControl::Shutdown();
         GlassCore::ToolbarControl::Shutdown();

@@ -57,6 +57,7 @@ namespace GlassShared
         UpDown                    = 36, // msctls_updown32, TUpDown — UpDownHost + DrawThemeBackground Spin (GlassCore)
         Root                      = 37, // top-level / GA_ROOT в g_rootWindows (WndCompat RootSubclass)
         AMCCustomTab              = 38, // AMCCustomTab — кастомный C#/WinForms таб-контрол mmc.exe (MFC42u.dll), BWM PaintHandler
+        CoolBar                   = 39, // CoolBar — окно Delphi TCoolBar, свой путь (CoolBarSubclass + CoolBarHooks)
     };
 
     // Атом для имени property — создаётся один раз в процессе.

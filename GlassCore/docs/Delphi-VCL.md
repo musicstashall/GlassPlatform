@@ -2747,3 +2747,34 @@ GDI, а не наш alpha. `image-49.png` — с визуальными стил
   и `text-bypass … reason=not-session-dc|dtparams`.
 
 Сборка и визуальный результат на Windows не проверены.
+
+## Тест 81: отдельный путь для TCoolBar (CoolBar)
+
+Замечание принято: у `TCoolBar` нет темы и штатный (rebar) путь для него не
+подходит; наращивать общий путь частными случаями не нужно. Сделана
+**отдельная ветка отрисовки**.
+
+Разделение:
+
+- `ControlKind::CoolBar` (классификатор) — класс окна `CoolBar`;
+  `ReBarWindow32`/`SizeableRebar` остались в `ControlKind::ReBar`, из rebar-ветки
+  `CoolBar` убран полностью (ках-ап, рескан, `Rebar_CatchUp`, `RebarHooks`);
+- `WndCompat/Controls/CoolBarSubclass.cpp` — свой сабкласс: `CoolBar_Attach/
+  Detach/DetachAll/CatchUp`, `WM_GLASS_DETACH_COOLBAR`, `WM_ERASEBKGND`/
+  `WM_PRINTCLIENT` → `PatBlt(BLACKNESS)`, `WM_PAINT` → провайдер
+  `OnPaintBegin/OnPaintEnd`; окно помечается `GlassControlKind::CoolBar`;
+- `GlassCore/src/Hooks/CoolBarHooks.cpp` — своя сессия и свои слоты:
+  - `ExtTextOutW`: `ETO_OPAQUE` → фон полосы в `PatBlt(BLACKNESS)` (это и есть
+    белая полоса из API Monitor), остальные вызовы с текстом → `Text::ExtTextOutWithAlpha`;
+  - `FillRect`/`PatBlt`: заливки клиента и полосы системным цветом/белым/чёрным
+    → прозрачность;
+  - `DrawTextExW`: текст полосы → `Text::DrawTextWithAlpha` (тот же путь, что у
+    Toolbar/списков), с защитой от рекурсии `g_textDepth`;
+  - `DrawThemeBackground` не используется вовсе — у контрола нет темы;
+- прокладка: `CoolBarEventProvider` (GlassShared/WndCompat), `GlassCoreProviders::coolbar`,
+  `Exports.cpp`, `Engine.cpp`, `WndCompat.cpp`, `.vcxproj/.filters`;
+- журнал: `[WndCompat][CoolBar] CoolBar_Attach: субкласс установлен`,
+  `[GlassCore][CoolBar] OnPaintBegin/OnPaintEnd`, `band-fill`, `glyph`, `fill`,
+  `patblt`, `text` (с `color`/`bk` в строке).
+
+Сборка и визуальный результат на Windows не проверены.

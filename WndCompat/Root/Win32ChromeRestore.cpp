@@ -13,6 +13,7 @@
 #include <Controls/MonthCalSubclass.h>
 #include <Controls/NetUISubclass.h>
 #include <Controls/RebarSubclass.h>
+#include <Controls/CoolBarSubclass.h>
 #include <Controls/ScrollBarHost.h>
 #include <Controls/StaticSubclass.h>
 #include <Controls/TabControlSubclass.h>
@@ -189,6 +190,7 @@ namespace WndCompat
         Header_DetachAll();
         ListView_DetachAll();
         Rebar_DetachAll();
+        CoolBar_DetachAll();
         ToolBar_DetachAll();
         Edit_DetachAll();
         RichEdit_DetachAll();

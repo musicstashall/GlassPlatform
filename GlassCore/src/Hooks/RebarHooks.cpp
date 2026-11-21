@@ -25,13 +25,9 @@
 #include <wil.h>
 #include <uxtheme.h>
 #include <vector>
-#include <array>
-#include <cstring>
 
 using namespace GlassCore::Hooks;
 using namespace std::literals;
-
-#pragma comment(lib, "msimg32.lib")
 
 namespace GlassCore::RebarControl
 {
@@ -48,15 +44,8 @@ namespace GlassCore::RebarControl
 
     struct RebarPaintSession
     {
-        HWND          hwnd{};
         HMODULE       comctlMod{};
         RebarTextHook textHook{ RebarTextHook::None };
-        bool          fillHooks{};
-        bool          themed{};
-        bool          textOnComctl{};
-        bool          textOnUx{};
-        bool          textOnTheme{};
-        bool          dtbSeen{};
     };
 
     thread_local std::vector<RebarPaintSession> g_rebarSessionStack;
@@ -70,24 +59,6 @@ namespace GlassCore::RebarControl
     static bool StrEq(LPCWSTR a, LPCWSTR b)
     {
         return _wcsicmp(a, b) == 0;
-    }
-
-    static bool IsRebarPaintDc(HDC hdc) noexcept;
-
-    // Почему текст полосы не пошёл через alpha-путь.
-    static void RebarTextDiag(HDC hdc, int cchText, const RECT* rc, const wchar_t* reason) noexcept
-    {
-        static thread_local ULONGLONG epoch = 0;
-        static thread_local unsigned budget = 0;
-        const ULONGLONG now = GetTickCount64();
-        if (!epoch || now - epoch >= 1000) { epoch = now; budget = 8; }
-        if (!budget)
-            return;
-        --budget;
-        DebugLog(DBG_NORMAL,
-            L"[GlassCore][Rebar] text-bypass hdc=0x%p reason=%s cch=%d rect=[%ld,%ld,%ld,%ld]",
-            hdc, reason, cchText,
-            rc ? rc->left : 0, rc ? rc->top : 0, rc ? rc->right : 0, rc ? rc->bottom : 0);
     }
 
     // vsstyle.h REBARPARTS — gripper/chevron/splitter не затираем PatBlt.
@@ -129,43 +100,14 @@ namespace GlassCore::RebarControl
             return false;
         if (GlassShared::GlassGetWindowKind(hWnd) != GlassShared::GlassControlKind::Rebar)
             return false;
-        // Политика свечения текст не блокирует: без неё текст полосы просто
-        // исчезает (чёрные глифы уходят в прозрачность).
-        if (!GlassCore::TextGlow::IsInkGlowAllowedForWindow(hWnd))
-        {
-            static thread_local ULONGLONG epoch = 0;
-            static thread_local unsigned budget = 0;
-            const ULONGLONG now = GetTickCount64();
-            if (!epoch || now - epoch >= 1000) { epoch = now; budget = 4; }
-            if (budget)
-            {
-                --budget;
-                DebugLog(DBG_NORMAL, L"[GlassCore][Rebar] glow-policy=0 hwnd=0x%p (текст рисуем всё равно)", hWnd);
-            }
-        }
-        return true;
-    }
-
-    // Есть ли у окна rebar тема: у VCL TCoolBar (класс CoolBar) её нет, и тогда
-    // comctl32 рисует классической веткой — без DrawThemeBackground, но с
-    // DrawTextExW для текста полосы. Ветки разные, хуки тоже.
-    [[nodiscard]] static bool RebarHasTheme(HWND hWnd) noexcept
-    {
-        if (!hWnd || !IsThemeActive())
-            return false;
-        return GetWindowTheme(hWnd) != nullptr;
+        return GlassCore::TextGlow::IsInkGlowAllowedForWindow(hWnd);
     }
 
     [[nodiscard]] static bool IsRebarGlassSessionAllowedForHdc(HDC hdc) noexcept
     {
-        // DC самой сессии — основной случай (BeginPaint внутри WM_PAINT).
-        // PaintDispatcher может указывать на корень (форму), и проверка вида
-        // окна по нему отвергала бы rebar: текст уходил в штатный GDI.
-        if (IsRebarPaintDc(hdc))
-            return true;
-        HWND hWnd = WindowFromDC(hdc);
+        HWND hWnd = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
         if (!hWnd)
-            hWnd = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
+            hWnd = WindowFromDC(hdc);
         return IsRebarGlassSessionAllowed(hWnd);
     }
 
@@ -178,187 +120,18 @@ namespace GlassCore::RebarControl
     }
 
     // =========================================================================
-    //  Полоса Rebar с прозрачным фоном, но с рамками
-    // =========================================================================
-
-    static int ChannelDeltaRebar(BYTE a, BYTE b) noexcept
-    {
-        return a > b ? static_cast<int>(a) - static_cast<int>(b)
-                     : static_cast<int>(b) - static_cast<int>(a);
-    }
-
-    // Полное чернение полосы (PatBlt BLACKNESS) убирало её нижнюю линию:
-    // рамки рисует та же тема, что и заливку. Поэтому тема рисуется в 32bpp
-    // DIB, заливка (цвет центра полосы) становится прозрачной, а рамки и
-    // разделители остаются непрозрачными и попадают на экран через
-    // GdiAlphaBlend.
-    static bool DrawRebarBandWithAlpha(
-        decltype(&DrawThemeBackground) orig, HTHEME hTheme, HDC hdc,
-        int iPartId, int iStateId, const RECT& rect, const RECT* clip) noexcept
-    {
-        if (!orig || !hdc)
-            return false;
-        const int w = rect.right - rect.left;
-        const int h = rect.bottom - rect.top;
-        if (w <= 0 || h <= 0 || w > 8192 || h > 1024)
-            return false;
-
-        BITMAPINFO bi{};
-        bi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
-        bi.bmiHeader.biWidth       = w;
-        bi.bmiHeader.biHeight      = -h;
-        bi.bmiHeader.biPlanes      = 1;
-        bi.bmiHeader.biBitCount    = 32;
-        bi.bmiHeader.biCompression = BI_RGB;
-
-        void* bits = nullptr;
-        wil::unique_hbitmap dib{ CreateDIBSection(hdc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0) };
-        if (!dib || !bits)
-            return false;
-        wil::unique_hdc mem{ CreateCompatibleDC(hdc) };
-        if (!mem)
-            return false;
-        const HGDIOBJ oldBmp = SelectObject(mem.get(), dib.get());
-        if (!oldBmp || oldBmp == HGDI_ERROR)
-            return false;
-        auto restoreBmp = wil::scope_exit([&]() noexcept { (void)SelectObject(mem.get(), oldBmp); });
-
-        std::memset(bits, 0, static_cast<size_t>(w) * static_cast<size_t>(h) * 4u);
-
-        RECT memRect{ 0, 0, w, h };
-        RECT clipMem{};
-        LPCRECT pClipMem = nullptr;
-        RECT dst = rect;
-        if (clip)
-        {
-            RECT inter{};
-            if (!IntersectRect(&inter, &rect, clip))
-                return true; // вне клипа: рисовать нечего, но и не ошибка
-            clipMem = RECT{ inter.left - rect.left, inter.top - rect.top,
-                inter.right - rect.left, inter.bottom - rect.top };
-            pClipMem = &clipMem;
-            dst = inter;
-        }
-
-        if (FAILED(orig(hTheme, mem.get(), iPartId, iStateId, &memRect, pClipMem)))
-            return false;
-
-        auto* pixels = static_cast<DWORD*>(bits);
-        const size_t count = static_cast<size_t>(w) * static_cast<size_t>(h);
-
-        // Заливка полосы = самый частый цвет (а не цвет центра: центр может
-        // попасть на разделитель/текст, а заливка может быть не однотонной).
-        // Квантование по 8 оттенков на канал, затем уточнение средним.
-        std::array<unsigned, 32 * 32 * 32> histogram{};
-        for (size_t i = 0; i < count; ++i)
-        {
-            const DWORD c = pixels[i] & 0xFFFFFFu;
-            const size_t bin = static_cast<size_t>((c & 0xF8u) >> 3)
-                | (static_cast<size_t>((c & 0xF800u) >> 8))
-                | (static_cast<size_t>((c & 0xF80000u) >> 13));
-            ++histogram[bin];
-        }
-        size_t bestBin = 0;
-        unsigned bestCount = 0;
-        for (size_t i = 0; i < histogram.size(); ++i)
-        {
-            if (histogram[i] > bestCount)
-            {
-                bestCount = histogram[i];
-                bestBin = i;
-            }
-        }
-        // Средний цвет пикселей выбранного бина — точнее центра бина.
-        unsigned long long sumR = 0, sumG = 0, sumB = 0;
-        for (size_t i = 0; i < count; ++i)
-        {
-            const DWORD c = pixels[i] & 0xFFFFFFu;
-            const size_t bin = static_cast<size_t>((c & 0xF8u) >> 3)
-                | (static_cast<size_t>((c & 0xF800u) >> 8))
-                | (static_cast<size_t>((c & 0xF80000u) >> 13));
-            if (bin != bestBin)
-                continue;
-            sumR += (c & 0xFFu);
-            sumG += (c >> 8) & 0xFFu;
-            sumB += (c >> 16) & 0xFFu;
-        }
-        if (!bestCount)
-            return false;
-        const COLORREF bg = RGB(
-            static_cast<BYTE>(sumR / bestCount),
-            static_cast<BYTE>(sumG / bestCount),
-            static_cast<BYTE>(sumB / bestCount));
-
-        // Наружу выпускаем только рамку полосы, всё остальное — прозрачно.
-        // Так нижняя линия темы сохраняется, а заливка (какой бы она ни была)
-        // на экран не попадает: непрозрачным становится лишь то, что реально
-        // отличается от заливки и лежит в 2px от края.
-        constexpr int kRing = 2;
-        constexpr int kThreshold = 8;
-        size_t kept = 0;
-        size_t keyed = 0;
-        for (int y = 0; y < h; ++y)
-        {
-            DWORD* row = pixels + static_cast<size_t>(y) * static_cast<size_t>(w);
-            for (int x = 0; x < w; ++x)
-            {
-                const COLORREF c = static_cast<COLORREF>(row[x] & 0xFFFFFFu);
-                const bool nearFill =
-                    ChannelDeltaRebar(GetRValue(c), GetRValue(bg)) <= kThreshold
-                    && ChannelDeltaRebar(GetGValue(c), GetGValue(bg)) <= kThreshold
-                    && ChannelDeltaRebar(GetBValue(c), GetBValue(bg)) <= kThreshold;
-                const bool ring = x < kRing || y < kRing || x >= w - kRing || y >= h - kRing;
-                if (ring && !nearFill)
-                {
-                    row[x] |= 0xFF000000u;
-                    ++kept;
-                }
-                else
-                {
-                    row[x] = 0;
-                    ++keyed;
-                }
-            }
-        }
-        // Рамки нет (тема заливает полосу целиком) — пусть вызывающий сделает
-        // BLACKNESS: прозрачно и без белой рамки по краю.
-        if (!kept || kept * 50 < count)
-        {
-            DebugLog(DBG_NORMAL,
-                L"[GlassCore][Rebar] band edges-reject bg=0x%08X kept=%zu of %zu",
-                static_cast<unsigned>(bg), kept, count);
-            return false;
-        }
-
-        DebugLog(DBG_NORMAL,
-            L"[GlassCore][Rebar] band edges bg=0x%08X kept=%zu keyed=%zu of %zu",
-            static_cast<unsigned>(bg), kept, keyed, count);
-
-        BLENDFUNCTION bf{ AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-        return GdiAlphaBlend(hdc, dst.left, dst.top, dst.right - dst.left, dst.bottom - dst.top,
-            mem.get(), dst.left - rect.left, dst.top - rect.top,
-            dst.right - dst.left, dst.bottom - dst.top, bf) != FALSE;
-    }
-
-    // =========================================================================
     //  OVERALL DISPATCHER MAP
     // =========================================================================
 
     int WINAPI Overall_MyDrawThemeBg(HTHEME, HDC, int, int, LPCRECT, LPCRECT);
     HRESULT WINAPI Overall_MyDrawThemeText(HTHEME, HDC, int, int, LPCWSTR, int, DWORD, DWORD, LPCRECT);
     int WINAPI Overall_MyDrawTextExW(HDC, LPWSTR, int, LPRECT, UINT, LPDRAWTEXTPARAMS);
-    int WINAPI Overall_MyFillRect(HDC, const RECT*, HBRUSH);
-    BOOL WINAPI Overall_MyPatBlt(HDC, int, int, int, int, DWORD);
-    int WINAPI Overall_MyExtTextOutW(HDC, int, int, UINT, const RECT*, LPCWSTR, UINT, const INT*);
 
     enum OverallHookIndex : size_t
     {
         OHK_DRAWTHEMEBG = 0,
         OHK_DRAWTHEMETEXT,
         OHK_DRAWTEXTEX,
-        OHK_FILLRECT,
-        OHK_PATBLT,
-        OHK_EXTTEXTOUT,
         OHK_COUNT
     };
 
@@ -373,16 +146,6 @@ namespace GlassCore::RebarControl
         // OHK_DRAWTEXTEX (glow: uxtheme → user32!DrawTextExW)
         std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv },
             "DrawTextExW", reinterpret_cast<PVOID>(Overall_MyDrawTextExW) },
-        // OHK_FILLRECT: заливка полосы системным цветом (белый/face) → чёрный.
-        std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv },
-            "FillRect", reinterpret_cast<PVOID>(Overall_MyFillRect) },
-        // OHK_PATBLT: WHITENESS → BLACKNESS в той же отрисовке.
-        std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv },
-            "PatBlt", reinterpret_cast<PVOID>(Overall_MyPatBlt) },
-        // OHK_EXTTEXTOUT: заливка полосы темой — ExtTextOutW(ETO_OPAQUE, ""),
-        // цвет берётся из SetBkColor. Это и есть белая полоса.
-        std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv },
-            "ExtTextOutW", reinterpret_cast<PVOID>(Overall_MyExtTextOutW) },
     } };
 
     using OverallDispatcher = HookDispatcher<OHK_COUNT, 3>;
@@ -467,8 +230,6 @@ namespace GlassCore::RebarControl
         if (hWnd && !GlassShared::GlassIsBackdropAllowedForHwnd(hWnd))
             return orig(hTheme, hdc, iPartId, iStateId, pRect, pClipRect);
 
-        g_rebarSessionStack.back().dtbSeen = true;
-
         WCHAR themeClass[MAX_PATH + 1]{};
         if (SUCCEEDED(Shared::ThemeHelper::GetThemeClass(hTheme, themeClass, MAX_PATH))
             && StrEq(themeClass, L"Rebar")
@@ -479,24 +240,12 @@ namespace GlassCore::RebarControl
 
             if (IsRebarGlassTransparentFillPart(iPartId))
             {
-                // Сначала пробуем оставить рамки полосы (нижняя линия), вырезав
-                // только заливку; полное чернение — запасной вариант.
-                if (DrawRebarBandWithAlpha(orig, hTheme, hdc, iPartId, iStateId, *pRect, pClipRect))
-                {
-                    DebugLog(DBG_NORMAL,
-                        L"[GlassCore][Rebar] band part=%d state=%d rect=[%ld,%ld,%ld,%ld] alpha-edges",
-                        iPartId, iStateId, pRect->left, pRect->top, pRect->right, pRect->bottom);
-                    return S_OK;
-                }
                 const RECT* clipRect = pClipRect ? pClipRect : pRect;
                 PatBlt(hdc,
                     clipRect->left, clipRect->top,
                     clipRect->right  - clipRect->left,
                     clipRect->bottom - clipRect->top,
                     BLACKNESS);
-                DebugLog(DBG_NORMAL,
-                    L"[GlassCore][Rebar] band part=%d state=%d rect=[%ld,%ld,%ld,%ld] black",
-                    iPartId, iStateId, pRect->left, pRect->top, pRect->right, pRect->bottom);
                 return S_OK;
             }
         }
@@ -532,8 +281,6 @@ namespace GlassCore::RebarControl
             });
     }
 
-    static thread_local unsigned g_rebarTextDepth = 0;
-
     int WINAPI Overall_MyDrawTextExW(
         HDC hdc, LPWSTR lpchText, int cchText,
         LPRECT lprc, UINT format, LPDRAWTEXTPARAMS lpdtp)
@@ -544,141 +291,20 @@ namespace GlassCore::RebarControl
         if (!orig)
             return DrawTextExW(hdc, lpchText, cchText, lprc, format, lpdtp);
 
-        if (g_rebarSessionStack.empty() || g_rebarTextDepth > 0)
+        if (g_rebarSessionStack.empty())
             return orig(hdc, lpchText, cchText, lprc, format, lpdtp);
 
         if (!IsRebarGlassSessionAllowedForHdc(hdc))
-        {
-            RebarTextDiag(hdc, cchText, lprc, L"not-session-dc");
             return orig(hdc, lpchText, cchText, lprc, format, lpdtp);
-        }
 
         if (lpdtp)
-        {
-            RebarTextDiag(hdc, cchText, lprc, L"dtparams");
             return orig(hdc, lpchText, cchText, lprc, format, lpdtp);
-        }
 
-        ++g_rebarTextDepth;
-        auto popDepth = wil::scope_exit([]() noexcept { --g_rebarTextDepth; });
         EnsureRebarTextColorOnDc(hdc);
         int result = 0;
-        const HRESULT hr = GlassCore::Text::DrawTextWithAlpha(hdc, lpchText, cchText, lprc, format, result);
-        {
-            static thread_local ULONGLONG epoch = 0;
-            static thread_local unsigned budget = 0;
-            const ULONGLONG now = GetTickCount64();
-            if (!epoch || now - epoch >= 1000) { epoch = now; budget = 8; }
-            if (budget)
-            {
-                --budget;
-                DebugLog(DBG_NORMAL,
-                    L"[GlassCore][Rebar] text hdc=0x%p hr=0x%08X result=%d color=0x%08X bk=0x%08X rect=[%ld,%ld,%ld,%ld]",
-                    hdc, static_cast<unsigned>(hr), result,
-                    static_cast<unsigned>(GetTextColor(hdc)),
-                    static_cast<unsigned>(GetBkColor(hdc)),
-                    lprc->left, lprc->top, lprc->right, lprc->bottom);
-            }
-        }
-        if (!FAILED(hr))
+        if (!FAILED(GlassCore::Text::DrawTextWithAlpha(hdc, lpchText, cchText, lprc, format, result)))
             return result;
         return orig(hdc, lpchText, cchText, lprc, format, lpdtp);
-    }
-
-    // =========================================================================
-    //  Заливки полосы: белый/face фон → прозрачность (BLACKNESS)
-    // =========================================================================
-
-    static thread_local bool g_inRebarFill = false;
-
-    // DC принадлежит окну текущей сессии: иначе это чужая отрисовка.
-    static bool IsRebarPaintDc(HDC hdc) noexcept
-    {
-        if (!hdc || g_rebarSessionStack.empty())
-            return false;
-        const HWND sessionHwnd = g_rebarSessionStack.back().hwnd;
-        if (!sessionHwnd || !IsWindow(sessionHwnd))
-            return false;
-        return WindowFromDC(hdc) == sessionHwnd;
-    }
-
-    static bool IsRebarBackgroundFill(HDC hdc, HBRUSH brush) noexcept
-    {
-        if (!brush || !IsRebarPaintDc(hdc))
-            return false;
-        LOGBRUSH lb{};
-        if (GetObjectW(brush, sizeof(lb), &lb) != sizeof(lb) || lb.lbStyle != BS_SOLID)
-            return false;
-        const COLORREF color = lb.lbColor & 0xFFFFFF;
-        return color == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF)
-            || color == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFF)
-            || color == (GetSysColor(COLOR_3DFACE) & 0xFFFFFF)
-            || color == RGB(255, 255, 255)
-            || color == RGB(0, 0, 0);
-    }
-
-    int WINAPI Overall_MyFillRect(HDC hdc, const RECT* rc, HBRUSH brush)
-    {
-        HMODULE callerMod = GetCallerModule(_ReturnAddress());
-        auto orig = GetOverallOrigSafe<OHK_FILLRECT, decltype(&FillRect)>(callerMod);
-        if (!orig)
-            return FillRect(hdc, rc, brush);
-        if (g_inRebarFill || !rc || !IsRebarBackgroundFill(hdc, brush))
-            return orig(hdc, rc, brush);
-
-        // Фон полосы/рамки: тот же прямоугольник, но в прозрачность.
-        g_inRebarFill = true;
-        const BOOL ok = PatBlt(hdc, rc->left, rc->top,
-            rc->right - rc->left, rc->bottom - rc->top, BLACKNESS);
-        g_inRebarFill = false;
-        DebugLog(DBG_NORMAL,
-            L"[GlassCore][Rebar] fill hdc=0x%p rect=[%ld,%ld,%ld,%ld] -> BLACKNESS ok=%d",
-            hdc, rc->left, rc->top, rc->right, rc->bottom, ok ? 1 : 0);
-        return ok ? TRUE : 0;
-    }
-
-    BOOL WINAPI Overall_MyPatBlt(HDC hdc, int x, int y, int cx, int cy, DWORD rop)
-    {
-        HMODULE callerMod = GetCallerModule(_ReturnAddress());
-        auto orig = GetOverallOrigSafe<OHK_PATBLT, decltype(&PatBlt)>(callerMod);
-        if (!orig)
-            return PatBlt(hdc, x, y, cx, cy, rop);
-        if (g_inRebarFill || rop != WHITENESS || !IsRebarPaintDc(hdc))
-            return orig(hdc, x, y, cx, cy, rop);
-
-        g_inRebarFill = true;
-        const BOOL ok = orig(hdc, x, y, cx, cy, BLACKNESS);
-        g_inRebarFill = false;
-        DebugLog(DBG_NORMAL,
-            L"[GlassCore][Rebar] patblt hdc=0x%p (%d,%d) %dx%d WHITENESS -> BLACKNESS ok=%d",
-            hdc, x, y, cx, cy, ok ? 1 : 0);
-        return ok;
-    }
-
-    // Тема рисует фон полосы пустым ExtTextOutW с ETO_OPAQUE: цвет берётся из
-    // SetBkColor, глифов нет. Раньше такой вызов проходил мимо всех хуков и
-    // оставлял непрозрачную светлую полосу.
-    int WINAPI Overall_MyExtTextOutW(
-        HDC hdc, int x, int y, UINT options, const RECT* rc,
-        LPCWSTR text, UINT cch, const INT* dx)
-    {
-        HMODULE callerMod = GetCallerModule(_ReturnAddress());
-        auto orig = GetOverallOrigSafe<OHK_EXTTEXTOUT, decltype(&ExtTextOutW)>(callerMod);
-        if (!orig)
-            return ExtTextOutW(hdc, x, y, options, rc, text, cch, dx);
-        if (g_inRebarFill || !rc || (options & ETO_OPAQUE) == 0 || cch != 0
-            || !IsRebarPaintDc(hdc))
-            return orig(hdc, x, y, options, rc, text, cch, dx);
-
-        g_inRebarFill = true;
-        const BOOL ok = PatBlt(hdc, rc->left, rc->top,
-            rc->right - rc->left, rc->bottom - rc->top, BLACKNESS);
-        g_inRebarFill = false;
-        DebugLog(DBG_NORMAL,
-            L"[GlassCore][Rebar] band-fill hdc=0x%p rect=[%ld,%ld,%ld,%ld] bk=0x%08X -> BLACKNESS ok=%d",
-            hdc, rc->left, rc->top, rc->right, rc->bottom,
-            static_cast<unsigned>(GetBkColor(hdc)), ok ? 1 : 0);
-        return ok ? TRUE : 0;
     }
 
     // =========================================================================
@@ -699,51 +325,26 @@ namespace GlassCore::RebarControl
         if (!callerMod) return;
 
         const bool glow = GlassCore::Text::IsInkGlowEffectActiveForPaintSession(hWnd);
-        const bool themed = RebarHasTheme(hWnd);
         HMODULE hUx = GetModuleHandleW(L"uxtheme.dll");
 
-        RebarPaintSession session{ hWnd, callerMod, RebarTextHook::None, false };
+        RebarPaintSession session{ callerMod, RebarTextHook::None };
         g_rebarSessionStack.push_back(session);
-        g_rebarSessionStack.back().themed = themed;
 
-        // Тема есть → DrawThemeBackground полос; темы нет — DTB не вызывается.
-        if (themed)
-            EnableHooksOnModule(callerMod, OHK_DRAWTHEMEBG, true);
+        EnableHooksOnModule(callerMod, OHK_DRAWTHEMEBG, true);
 
-        // Заливку полосы может делать и comctl32, и сама VCL (EXE) — белый или
-        // face-цвет; тогда красим её в прозрачность, иначе полоса остаётся
-        // белой (см. image-46).
-        const bool fillHooks =
-            EnableHooksOnModule(callerMod, OHK_FILLRECT, true)
-            && EnableHooksOnModule(GlassCore::ModuleHandler::g_entryPointModule, OHK_FILLRECT, true);
-        if (EnableHooksOnModule(callerMod, OHK_PATBLT, true))
-            EnableHooksOnModule(GlassCore::ModuleHandler::g_entryPointModule, OHK_PATBLT, true);
-        // Фон полосы рисует uxtheme, поэтому ExtTextOutW вооружается и там.
-        if (EnableHooksOnModule(callerMod, OHK_EXTTEXTOUT, true))
+        if (!glow || !hUx)
         {
-            EnableHooksOnModule(GlassCore::ModuleHandler::g_entryPointModule, OHK_EXTTEXTOUT, true);
-            if (HMODULE hUx = GetModuleHandleW(L"uxtheme.dll"))
-                EnableHooksOnModule(hUx, OHK_EXTTEXTOUT, true);
+            EnableHooksOnModule(callerMod, OHK_DRAWTHEMETEXT, true);
+            g_rebarSessionStack.back().textHook = RebarTextHook::DrawThemeText;
         }
-        g_rebarSessionStack.back().fillHooks = fillHooks;
-
+        else
         {
-            // Текст полосы comctl32 рисует через DrawTextExW и с темой, и без
-            // неё (в теме это внутренний вызов uxtheme) — вооружаем всегда.
-            auto& session0 = g_rebarSessionStack.back();
-            session0.textOnComctl = EnableHooksOnModule(callerMod, OHK_DRAWTEXTEX, true);
-            if (hUx)
-                session0.textOnUx = EnableHooksOnModule(hUx, OHK_DRAWTEXTEX, true);
-            if (themed && (!glow || !hUx))
-                session0.textOnTheme = EnableHooksOnModule(callerMod, OHK_DRAWTHEMETEXT, true);
-            session0.textHook = session0.textOnTheme ? RebarTextHook::DrawThemeText
-                                                    : RebarTextHook::DrawTextExW;
+            EnableHooksOnModule(hUx, OHK_DRAWTEXTEX, true);
+            g_rebarSessionStack.back().textHook = RebarTextHook::DrawTextExW;
         }
 
-        DebugLog(DBG_NORMAL, L"[GlassCore][Rebar] OnPaintBegin: hWnd=0x%p callerMod=0x%p themed=%d textHook=%d fill=%d depth=%zu",
-            hWnd, callerMod, themed ? 1 : 0,
-            static_cast<int>(g_rebarSessionStack.back().textHook),
-            g_rebarSessionStack.back().fillHooks ? 1 : 0, g_rebarSessionStack.size());
+        DebugLog(DBG_NORMAL, L"[GlassCore][Rebar] OnPaintBegin: hWnd=0x%p callerMod=0x%p textHook=%d depth=%zu",
+            hWnd, callerMod, static_cast<int>(g_rebarSessionStack.back().textHook), g_rebarSessionStack.size());
     }
 
     void OnPaintEnd()
@@ -754,32 +355,23 @@ namespace GlassCore::RebarControl
         const RebarPaintSession session = g_rebarSessionStack.back();
         g_rebarSessionStack.pop_back();
 
-        if (session.themed)
-            EnableHooksOnModule(session.comctlMod, OHK_DRAWTHEMEBG, false);
+        EnableHooksOnModule(session.comctlMod, OHK_DRAWTHEMEBG, false);
 
-        if (session.fillHooks)
+        switch (session.textHook)
         {
-            EnableHooksOnModule(session.comctlMod, OHK_FILLRECT, false);
-            EnableHooksOnModule(GlassCore::ModuleHandler::g_entryPointModule, OHK_FILLRECT, false);
-            EnableHooksOnModule(session.comctlMod, OHK_PATBLT, false);
-            EnableHooksOnModule(GlassCore::ModuleHandler::g_entryPointModule, OHK_PATBLT, false);
-            EnableHooksOnModule(session.comctlMod, OHK_EXTTEXTOUT, false);
-            EnableHooksOnModule(GlassCore::ModuleHandler::g_entryPointModule, OHK_EXTTEXTOUT, false);
-            if (HMODULE hUx = GetModuleHandleW(L"uxtheme.dll"))
-                EnableHooksOnModule(hUx, OHK_EXTTEXTOUT, false);
-        }
-
-        if (session.textOnTheme)
+        case RebarTextHook::DrawThemeText:
             EnableHooksOnModule(session.comctlMod, OHK_DRAWTHEMETEXT, false);
-        if (session.textOnComctl)
-            EnableHooksOnModule(session.comctlMod, OHK_DRAWTEXTEX, false);
-        if (session.textOnUx)
+            break;
+        case RebarTextHook::DrawTextExW:
             if (HMODULE hUx = GetModuleHandleW(L"uxtheme.dll"))
                 EnableHooksOnModule(hUx, OHK_DRAWTEXTEX, false);
+            break;
+        case RebarTextHook::None:
+            break;
+        }
 
-        DebugLog(DBG_NORMAL, L"[GlassCore][Rebar] OnPaintEnd: callerMod=0x%p themed=%d dtb=%d depth=%zu",
-            session.comctlMod, session.themed ? 1 : 0, session.dtbSeen ? 1 : 0,
-            g_rebarSessionStack.size());
+        DebugLog(DBG_NORMAL, L"[GlassCore][Rebar] OnPaintEnd: callerMod=0x%p depth=%zu",
+            session.comctlMod, g_rebarSessionStack.size());
     }
 
     void Prepare()  {}

@@ -13,6 +13,7 @@
 #include <Hooks/delphi/TListBoxDraw.h>
 #include <Hooks/Static.h>
 #include <Hooks/Rebar.h>
+#include <Hooks/CoolBar.h>
 #include <GlassCoreProviders.h>
 #include <Core/Engine.h>
 #include <Hooks/RootWindowHooks.h>
@@ -416,6 +417,10 @@ BOOL WINAPI GlassCore_GetProviders(GlassCoreProviders* out)
     // ─── Rebar domain ──────────────────────────────────────────────────────
     out->rebar.OnPaintBegin = &GlassCore::RebarControl::OnPaintBegin;
     out->rebar.OnPaintEnd   = &GlassCore::RebarControl::OnPaintEnd;
+
+    // ─── CoolBar (Delphi TCoolBar) ──────────────────────────────────────────
+    out->coolbar.OnPaintBegin = &GlassCore::CoolBarControl::OnPaintBegin;
+    out->coolbar.OnPaintEnd   = &GlassCore::CoolBarControl::OnPaintEnd;
 
     // ─── Tooltip / KbxLabel ───────────────────────────────────────────────────
     out->tooltip.IsTooltipIatReady = &GlassCore::Tooltip::IsTooltipIatReady;
