@@ -64,6 +64,42 @@ class DelphiPipelineContract(unittest.TestCase):
         for cls in ('TNumberBox', 'THotKey', 'TRichEdit'):
             self.assertIn('L"' + cls + '"', read('GlassCore/src/Hooks/EditHooks.cpp'))
 
+    def test_vcl_input_icons_use_exact_controls_and_proven_destination_dc(self):
+        code = read('GlassCore/src/Hooks/delphi/TInputIcons.cpp')
+        for guard in ('IsFullInjectionMode()', 'GetMapMode(dc) != MM_TEXT',
+                      'WindowFromDC(dc)', 'GetStackOwnerForDc(dc)',
+                      'IsTopWindowDrawingSession(window)', 'bitmap.bmBitsPixel <= 1',
+                      'L"TButtonedEdit"', 'L"TSearchBox"', 'L"TGlyph"', 'GetParent(window)',
+                      'GlassControlKind::Edit', 'GlassIsBackdropAllowedForHwnd(owner)',
+                      'GlassIsBackdropAllowedForHwnd(window)', 'g_inside', 'g_shutdown'):
+            self.assertIn(guard, code)
+        for forbidden in ('wcsstr', 'GetPaintSessionHostHwnd', 'ApplyBlackKeyAlpha',
+                          'ColorTreatAsTransparent', 'ExtTextOut', 'reinterpret_cast<PVOID>(BitBlt)'):
+            self.assertNotIn(forbidden, code)
+        self.assertIn('g_entryPointModule', code)
+        self.assertNotIn('RegisterModulePrewarmHandler', code)  # no IAT writes under loader lock
+
+    def test_vcl_input_icons_keep_native_imagelist_parameters_and_alpha(self):
+        code = read('GlassCore/src/Hooks/delphi/TInputIcons.cpp')
+        for required in ('"ImageList_Draw"', '"ImageList_DrawEx"', '"ImageList_DrawIndirect"',
+                         'ILD_MASK | ILD_ROP | ILD_DPISCALE', 'ILD_TRANSPARENT | ILD_PRESERVEALPHA',
+                         'BPBF_TOPDOWNDIB', 'AC_SRC_OVER, 0, 255, AC_SRC_ALPHA',
+                         'BufferedPaintClear(buffer, nullptr)', 'EndBufferedPaint(buffer, drawn)',
+                         'GetBufferedPaintBits(buffer, &pixels, &stride)', 'if (!hasAlpha) return std::nullopt',
+                         'if (buffer) EndBufferedPaint(buffer, FALSE)', 'auto work = *params',
+                         'work.hdcDst = memory; work.fStyle = flags', 'params->cbSize != sizeof(*params)',
+                         'GetProcAddress(module, "ImageList_GetIconSize")', 'g_dispatcher.DisableAllHooks()'):
+            self.assertIn(required, code)
+        engine = read('GlassCore/src/Core/Engine.cpp')
+        self.assertIn('GlassCore::DelphiInputIcons::Startup()', engine)
+        self.assertIn('GlassCore::DelphiInputIcons::Shutdown()', engine)
+        for path in ('GlassCore/GlassCore.vcxproj', 'GlassCore/GlassCore.vcxproj.filters'):
+            for file in ('TInputIcons.cpp', 'TInputIcons.h'):
+                self.assertIn(file, read(path))
+        runner = read('WndCompat/tests/input_icons_test.py')
+        self.assertIn("for debug in (False, True)", runner)
+        self.assertIn('GlassCore/src/Hooks/delphi/TInputIcons.cpp', runner)
+
     def test_vcl_list_owner_draw_probe_is_passthrough_and_scoped(self):
         code = read('GlassCore/src/Hooks/delphi/TListBoxProbe.cpp')
         root = read('WndCompat/Root/RootSubclass.cpp')

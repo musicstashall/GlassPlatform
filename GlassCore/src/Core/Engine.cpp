@@ -20,6 +20,7 @@
 #include <Hooks/Button.h>
 #include <Hooks/delphi/TToggleSwitchHooks.h>
 #include <Hooks/delphi/TBackgroundHooks.h>
+#include <Hooks/delphi/TInputIcons.h>
 #include <Hooks/delphi/TPanelDraw.h>
 #include <Hooks/UpDown.h>
 #include <Hooks/forms/FormsHooks.h>
@@ -187,6 +188,7 @@ namespace GlassCore::Engine
         GlassCore::ListBoxControl::Startup();
         GlassCore::DateTimePickerControl::Startup();
         GlassCore::EditControl::Startup();
+        GlassCore::DelphiInputIcons::Startup();
         GlassCore::UiRibbon::Startup();
         GlassCore::Root::Startup();
         GlassCore::ExplorerFrameControl::Startup();
@@ -285,6 +287,7 @@ namespace GlassCore::Engine
         GlassCore::ProgressBarControl::Shutdown();
         GlassCore::DirectUI::Shutdown();
         GlassCore::DelphiPanel::Shutdown();
+        GlassCore::DelphiInputIcons::Shutdown();
         GlassCore::DelphiBackground::Shutdown();
         GlassCore::DelphiToggle::Shutdown();
         GlassCore::Button::Shutdown();

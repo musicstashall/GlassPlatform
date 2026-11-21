@@ -3197,3 +3197,49 @@ paint-stack/переданным DC; контрольные panel C++ **10/10**.
 также прошли ASan/UBSan (**9/9 + 10/10**). UTF-8, project XML, отсутствие
 устаревших путей в includes/projects и `git diff --check` — OK. MSVC-сборка
 здесь не выполнялась; новый визуальный алгоритм в этом шаге не вводился.
+
+## Тест 88: TMemo alpha100 и иконки TButtonedEdit/TSearchBox
+
+**TMemo:** как RichEdit, пропускает только RGB `COLOR_WINDOW`; любой другой
+цвет, включая чёрный и `COLOR_BTNFACE`, идёт через существующую кисть A=100.
+Это распространяется на прямой GetDC, отложенные фоны и подтверждённый
+full-client priming. Их порядок, подтверждение property текущей ETO_OPAQUE
+операцией и текстовый DIB сохранены. CTLCOLOR сохраняет исходный RGB только
+для exact TMemo, чтобы не спутать COLOR_WINDOW с настоящим чёрным; у остальных
+Edit прежняя политика. Новый композитор фона/текста не вводился.
+
+**Иконки:** отдельный `Hooks/delphi/TInputIcons` перехватывает импорты EXE
+`ImageList_Draw`, `ImageList_DrawEx`, `ImageList_DrawIndirect`. В обычном VCL
+TButtonedEdit выводит ImageList в дочернем TEditButton.TGlyph (ожидаемый raw
+class `TGlyph`), а TSearchBox — в собственном non-client DC GetWindowDC.
+Поэтому иконки не привязаны к текстовой BeginPaint-сессии. Принимаются только
+точные TButtonedEdit/TSearchBox и TGlyph с непосредственным TButtonedEdit-parent,
+с Edit-mark, Full и разрешённым backdrop. Оконный HDC доказывается через
+WindowFromDC; MEMDC требует регистрации и текущей оконной сессии, одного host
+недостаточно. Нет новых subclass, control-kind или общих BitBlt/MaskBlt хуков.
+
+Native ImageList рисует в прозрачный BPBF_TOPDOWNDIB с
+`ILD_TRANSPARENT | ILD_PRESERVEALPHA`, затем EndBufferedPaint выводит результат
+через `AC_SRC_ALPHA`, constant alpha=255. Index, overlay, цвета, размеры и
+поля Indirect сохраняются; размер запрашивается у того же comctl32, что и
+оригинал IAT. Black-key не применяется: чёрный рисунок иконки не вырезается.
+Mask/ROP/DPI-запросы, неизвестные/монохромные DC, неподдержанный cbSize,
+ошибки буфера и результат без alpha остаются на native fallback. Ошибка
+native draw не коммитит частичный значок. Reentry и shutdown ограждены.
+
+Ограничения: сейчас перехватываются **только импорты EXE**. Выгружаемые BPL,
+кастомные VCL styles с DrawElement вместо ImageList, direct COM IImageList и
+незарегистрированные offscreen DC не объявляются покрытыми. Они сохраняют
+исходный путь. Это не замена штатных ресурсов иконок и не новый пункт настроек.
+
+Проверки: contracts **69/69**; полный production TInputIcons.cpp с Win32/IAT
+заглушками — **6/6 × release/DEBUG**, также ASan/UBSan; контрольные панели
+**10/10**, TCoolBar **9/9**. Полный EditHooks.cpp отдельно с заглушками проверен
+для прямого/буферного TMemo, replay/prime A100, чёрного/COLOR_BTNFACE/системного
+цвета и запрета stale priming в release/DEBUG. Это не MSVC и не настоящий
+Windows ImageList renderer: экранная alpha и фактические классы целевого
+приложения здесь не проверены. На Windows проверить обе кнопки TButtonedEdit,
+TSearchBox search/audio, normal/hot/pressed/disabled, NC repaint, DPI, обычный
+и цветной TMemo с выделением/resize/прокруткой. Ограниченный debug-маркер:
+`[GlassCore][DelphiInputIcon] ... draw=1 commit=0x00000000`. При дефекте —
+скриншот + «Логи при отображении» + «Логи с зондом при отображении элемента».
