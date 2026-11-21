@@ -156,7 +156,7 @@ namespace
                     WndCompat::Rebar_Attach(hChild);
                     return;
                 }
-                if (_wcsicmp(cls, L"CoolBar") == 0)
+                if (WndCompat::CoolBar_IsClassName(cls))
                 {
                     WndCompat::CoolBar_Attach(hChild);
                     return;

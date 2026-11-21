@@ -57,7 +57,11 @@ namespace
                 { (void)name; CHECK(ref == expected); }
         }
         void Start() { Startup(); }
-        void Begin(HDC supplied = nullptr) { CHECK(OnPaintBegin(&window, supplied)); }
+        void Begin(HDC supplied = nullptr)
+        {
+            WndCompat::CoolBar_Attach(&window);
+            CHECK(OnPaintBegin(&window, supplied));
+        }
     };
 
     template <typename Fn, typename... Args>
@@ -68,6 +72,89 @@ namespace
     }
     int WINAPI LegacyDraw(HDC, LPCWSTR, int, LPRECT, UINT)
     { ++Test::nativeText; return 102; }
+
+    void ExactClassAttachAndCatchUp()
+    {
+        Context c; c.Start();
+        CHECK(!WndCompat::CoolBar_IsClassName(nullptr));
+        for (const wchar_t* name : {L"TCoolBar", L"CoolBar", L"tcoolbar", L"COOLBAR"})
+        {
+            c.window.cls = name;
+            CHECK(c.window.kind == GlassShared::GlassControlKind::None);
+            CHECK(WndCompat::CoolBar_IsClassName(name));
+            WndCompat::CoolBar_Attach(&c.window);
+            CHECK(c.window.subclass && WndCompat::CoolBar_IsTracked(&c.window));
+            CHECK(c.window.kind == GlassShared::GlassControlKind::CoolBar);
+            WndCompat::CoolBar_Detach(&c.window);
+        }
+        for (const wchar_t* name : {L"", L"TCustomCoolBar", L"MyCoolBar", L"TCoolBar2",
+            L"CoolBarSuffix", L".TCoolBar", L"ReBarWindow32", L"SizeableRebar", L"Rebar"})
+        {
+            c.window.cls = name;
+            CHECK(!WndCompat::CoolBar_IsClassName(name));
+            WndCompat::CoolBar_Attach(&c.window);
+            CHECK(!c.window.subclass && !WndCompat::CoolBar_IsTracked(&c.window));
+            CHECK(c.window.kind == GlassShared::GlassControlKind::None);
+        }
+        // An existing TCoolBar may already carry the old Unknown -> Root mark.
+        // Catch-up must still find it by the real class and install its own path.
+        c.window.cls = L"TCoolBar";
+        c.window.kind = GlassShared::GlassControlKind::Root;
+        c.parent.cls = L"TForm";
+        TestWindow panel; panel.cls = L"TPanel";
+        c.parent.children = {&panel}; panel.children = {&c.window};
+        WndCompat::CoolBar_CatchUp(&c.parent);
+        CHECK(c.window.subclass && WndCompat::CoolBar_IsTracked(&c.window));
+        CHECK(c.window.kind == GlassShared::GlassControlKind::CoolBar);
+        const auto proc = c.window.subclass;
+        WndCompat::CoolBar_CatchUp(&c.parent);
+        CHECK(c.window.subclass == proc);
+        WndCompat::CoolBar_Detach(&c.window);
+        CHECK(!WndCompat::CoolBar_IsTracked(&c.window));
+    }
+
+    void ProbeTextThroughSubclass()
+    {
+        Context c; c.Start();
+        // Probe evidence: hdcWin class="TCoolBar" in both modes, not "CoolBar".
+        CHECK(c.window.cls == L"TCoolBar");
+        CHECK(c.window.kind == GlassShared::GlassControlKind::None && !c.window.subclass);
+        WndCompat::CoolBar::SetCoolBarEventProvider({&OnPaintBegin, &OnPaintEnd});
+        WndCompat::CoolBar_Attach(&c.window);
+        CHECK(c.window.subclass && c.window.kind == GlassShared::GlassControlKind::CoolBar);
+        TestTheme theme;
+        bool themed = true;
+        Test::duringNativePaint = [&](HWND w, UINT msg, WPARAM wp, LPARAM) {
+            CHECK(w == &c.window && msg == WM_PAINT && wp == 0);
+            c.CheckRefs(1);
+            constexpr UINT hidePrefix = 0x100000;
+            if (themed)
+            {
+                RECT rect{11, 4, 59, 19};
+                CHECK(Call(c.modules[New], "DrawThemeText", &::DrawThemeText,
+                    &theme, &c.dc, 0, 0, c.text, 8, hidePrefix, 0u, &rect) == S_OK);
+            }
+            else
+            {
+                RECT gripper{4, 2, 5, 22}, rect{9, 4, 57, 19};
+                Call(c.modules[New], "ExtTextOutW", &::ExtTextOutW,
+                    &c.dc, 0, 0, ETO_OPAQUE, &gripper, nullptr, 0u, nullptr);
+                CHECK(Call(c.modules[New], "DrawTextW", &::DrawTextW,
+                    &c.dc, c.text, 8, &rect, hidePrefix) == 15);
+            }
+        };
+        const auto proc = c.window.subclass;
+        c.window.theme = &theme;
+        CHECK(proc(&c.window, WM_PAINT, 0, 0, 1, 0) == 777);
+        c.CheckRefs(0);
+        CHECK(Test::alphaText == 1 && Test::nativeTheme == 0);
+        themed = false; c.window.theme = nullptr;
+        CHECK(proc(&c.window, WM_PAINT, 0, 0, 1, 0) == 777);
+        c.CheckRefs(0);
+        CHECK(Test::alphaText == 2 && Test::nativeText == 0 && Test::nativePaint == 2);
+        CHECK(Test::alphaBkMode == TRANSPARENT && c.dc.bkMode == OPAQUE);
+        CHECK(Test::nativeExt == 1 && Test::black == 0); // Native gripper is preserved.
+    }
 
     void TextRoutes()
     {
@@ -271,7 +358,9 @@ int main(int argc, char** argv)
         {"text-routes", TextRoutes}, {"dc-ownership", DcOwnership},
         {"transparent-text-state", TransparentTextState}, {"native-semantics", NativeSemanticsAndReentry},
         {"sessions-and-modules", SessionsAndModules}, {"background-and-chrome", BackgroundAndChrome},
-        {"printclient-bridge", PrintClientBridge}
+        {"printclient-bridge", PrintClientBridge},
+        {"exact-class-attach", ExactClassAttachAndCatchUp},
+        {"probe-through-subclass", ProbeTextThroughSubclass}
     };
     try
     {

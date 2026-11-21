@@ -966,7 +966,7 @@ namespace
 
                 case ControlKind::CoolBar:
                 {
-                    // Delphi TCoolBar (окно CoolBar): свой путь отрисовки.
+                    // Delphi TCoolBar (классы TCoolBar / CoolBar): свой путь отрисовки.
                     if (isFull && allowGlassForHwnd)
                     {
                         DebugLog(L"[WndCompat][WinEvent] CoolBar_Attach: hwnd=0x%p", hWnd);
