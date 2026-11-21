@@ -60,7 +60,7 @@ enum class ControlKind
     AMCCustomTab,       // AMCCustomTab — кастомный C#/WinForms таб-контрол mmc.exe (MFC42u.dll)
 
     // Delphi-контейнеры (WS_CHILD, но не leaf-контролы)
-    DelphiContainer,    // TGroupBox, TTabSheet
+    DelphiContainer,    // TGroupBox, TTabSheet, точные VCL-панели/фреймы (GlassDelphiPanel.h)
 
     // Прочие WS_CHILD контейнеры
     GenericContainer,   // AutoIt v3 GUI, AfxWnd42u

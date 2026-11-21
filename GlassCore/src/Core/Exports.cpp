@@ -11,6 +11,7 @@
 #include <Hooks/delphi/TBitBtnHooks.h>
 #include <Hooks/delphi/TListBoxProbe.h>
 #include <Hooks/delphi/TListBoxDraw.h>
+#include <Hooks/delphi/TPanelDraw.h>
 #include <Hooks/Static.h>
 #include <Hooks/Rebar.h>
 #include <Hooks/delphi/TCoolBarDraw.h>
@@ -326,6 +327,18 @@ extern "C" __declspec(dllexport)
 void WINAPI GlassCore_EndDelphiListBoxProbe() noexcept
 {
     GlassCore::DelphiListBox::EndDrawProbe();
+}
+
+extern "C" __declspec(dllexport)
+BOOL WINAPI GlassCore_BeginDelphiPanelPaint(HWND hwnd, UINT message, HDC suppliedDc) noexcept
+{
+    return GlassCore::DelphiPanel::BeginPaint(hwnd, message, suppliedDc) ? TRUE : FALSE;
+}
+
+extern "C" __declspec(dllexport)
+void WINAPI GlassCore_EndDelphiPanelPaint() noexcept
+{
+    GlassCore::DelphiPanel::EndPaint();
 }
 
 extern "C" __declspec(dllexport)

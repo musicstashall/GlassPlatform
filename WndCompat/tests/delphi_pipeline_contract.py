@@ -1100,6 +1100,65 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('[GlassCore][DelphiGrid] Theme hwnd=0x%p part=%d state=%d', root)
         self.assertIn('[GlassCore][DelphiGrid] PatBltAny hwnd=0x%p rop=0x%08X', root)
 
+    def test_panel_classes_and_native_message_bridge_share_exact_gate(self):
+        classes = read('GlassShared/include/GlassDelphiPanel.h')
+        for name in ('TPanel', 'TFlowPanel', 'TGridPanel', 'TStackPanel', 'TRelativePanel',
+                     'TCategoryPanel', 'TCategoryPanelGroup', 'TScrollBox',
+                     'TFrame', 'TSampleFrame', 'TEmbeddedForm'):
+            self.assertIn('_wcsicmp(name, L"' + name + '") == 0', classes)
+        for forbidden in ('wcsstr', 'wcsncmp', 'find(', 'TCoolBar'):
+            self.assertNotIn(forbidden, classes)
+        self.assertIn('GlassShared::IsDelphiPanelClassName(cls.c_str())',
+                      read('WndCompat/Tracker/WindowClassifier.cpp'))
+        bridge = read('WndCompat/Root/DelphiPanelPaint.h')
+        for guard in ('WM_PAINT', 'WM_ERASEBKGND', 'WM_PRINTCLIENT', 'IsShuttingDown()',
+                      'InjectionMode::Full', 'GlassIsBackdropAllowedForHwnd',
+                      'GlassShared::IsDelphiPanelWindow', '!begin || !end || !begin(',
+                      'wil::scope_exit', 'DefSubclassProc(hwnd, message, wParam, lParam)'):
+            self.assertIn(guard, bridge)
+        root = read('WndCompat/Root/RootSubclass.cpp').split('LRESULT CALLBACK RootSubclassProcShared(', 1)[1]
+        self.assertLess(root.index('WndCompat::TryHandleDelphiPanelPaint('), root.index('case WM_ERASEBKGND:'))
+
+    def test_panel_background_uses_real_alpha_and_only_two_default_colors(self):
+        code = read('GlassCore/src/Hooks/delphi/TPanelDraw.cpp')
+        self.assertIn('kCustomBackgroundAlpha = 100', code)
+        for api in ('"FillRect"', '"PatBlt"', '"ExtTextOutW"', 'GdiAlphaBlend',
+                    'CreateDIBSection', 'AC_SRC_ALPHA', 'Blacken(dc, r)', 'GetObjectW', 'BS_SOLID'):
+            self.assertIn(api, code)
+        self.assertNotIn('CreateSolidColorBrushWithAlpha', code)
+        policy = code.split('bool ApplyBackground(', 1)[1].split('int WINAPI PanelFill(', 1)[0]
+        self.assertEqual(policy.count('GetSysColor('), 2)
+        self.assertIn('GetSysColor(COLOR_WINDOW)', policy)
+        self.assertIn('GetSysColor(COLOR_BTNFACE)', policy)
+        self.assertIn('pixel[3] = kCustomBackgroundAlpha', policy)
+        cache = read('GlassCore/src/Hooks/RootWindowHooks.cpp')
+        self.assertIn('if (!GlassShared::IsDelphiPanelClassName(cls))', cache)
+        self.assertIn('&& !GlassShared::IsDelphiPanelWindow(hWnd)', cache)
+
+    def test_panel_sessions_release_only_acquired_refs_and_isolate_dcs(self):
+        code = read('GlassCore/src/Hooks/delphi/TPanelDraw.cpp')
+        for guard in ('dc == s.suppliedDc', 'owner == s.hwnd', 'IsTopWindowDrawingSession(s.hwnd)',
+                      'IsPaintStackDcForHwnd(s.hwnd, dc)', 'if (g_inHook', 'g_dispatcher.GetRef(i) > before',
+                      'if (s.acquired[i-1])', 'g_dispatcher.DisableAllHooks()', 'if (!mask) return false'):
+            self.assertIn(guard, code)
+        self.assertNotIn('_ReturnAddress', code)
+
+    def test_panel_hook_bridge_and_exact_class_header_are_registered(self):
+        for project in ('GlassCore/GlassCore.vcxproj', 'GlassCore/GlassCore.vcxproj.filters'):
+            self.assertIn(r'src\Hooks\delphi\TPanelDraw.cpp', read(project))
+            self.assertIn(r'Include\Hooks\delphi\TPanelDraw.h', read(project))
+        for project in ('GlassShared/GlassShared.vcxproj', 'GlassShared/GlassShared.vcxproj.filters'):
+            self.assertIn(r'include\GlassDelphiPanel.h', read(project))
+        for project in ('WndCompat/WndCompat.vcxproj', 'WndCompat/WndCompat.vcxproj.filters'):
+            self.assertIn(r'Root\DelphiPanelPaint.h', read(project))
+        for export in ('GlassCore_BeginDelphiPanelPaint', 'GlassCore_EndDelphiPanelPaint'):
+            self.assertIn(export, read('GlassCore/GlassCore.def'))
+            self.assertIn(export, read('GlassCore/src/Core/Exports.cpp'))
+            self.assertIn(export, read('WndCompat/Root/DelphiPanelPaint.h'))
+        engine = read('GlassCore/src/Core/Engine.cpp')
+        self.assertIn('GlassCore::DelphiPanel::Startup();', engine)
+        self.assertIn('GlassCore::DelphiPanel::Shutdown();', engine)
+
     def test_delphi_grid_clears_repaint_area_after_beginpaint(self):
         root = read("GlassCore/src/Hooks/RootWindowHooks.cpp")
         body = root.split('Root_OnDelphiGridAfterBeginPaint(', 1)[1].split('static void EnableSpecs', 1)[0]

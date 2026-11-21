@@ -39,6 +39,7 @@
 
 #include <RootBackdropPolicy.h>
 #include <GlassBackdropMark.h>
+#include <GlassDelphiPanel.h>
 
 #include <string>
 #include <unordered_map>
@@ -611,10 +612,16 @@ namespace GlassCore::Root
             if (instMod == GlassCore::ModuleHandler::g_entryPointModule)
             {
                 void* ep = GlassCore::ModuleHandler::g_entryPointModule;
-                PushPaint(ep, OHK_SETBKCOLOR, cache);
+                // Panels consume the *actual solid brush* in delphi/TPanelDraw.
+                // Generic colour remaps / alpha-pattern brushes would destroy it
+                // before the client fill can apply the requested alpha=100.
+                if (!GlassShared::IsDelphiPanelClassName(cls))
+                {
+                    PushPaint(ep, OHK_SETBKCOLOR, cache);
+                    PushPaint(ep, OHK_GETSYSCOLORBR, cache);
+                    PushPaint(ep, OHK_CREATESOLIDBRUSH, cache);
+                }
                 PushPaint(ep, OHK_DRAWTEXT, cache);
-                PushPaint(ep, OHK_GETSYSCOLORBR, cache);
-                PushPaint(ep, OHK_CREATESOLIDBRUSH, cache);
                 // BWM Paint, ветка «else // window», «callerModule == EntryPointModule»:
                 // «else if (szModuleName == msinfo32.exe)» — там szModuleName это basename
                 // caller-модуля BeginPaint (т.е. имя EXE точки входа), а не модуль окна.
@@ -731,7 +738,8 @@ namespace GlassCore::Root
             // Только Paint-канал, только OHK_SETBKCOLOR (scope задачи).
             bool wantEntrySetBk = false;
             if (callerMod && GlassCore::ModuleHandler::g_entryPointModule
-                && callerMod == GlassCore::ModuleHandler::g_entryPointModule)
+                && callerMod == GlassCore::ModuleHandler::g_entryPointModule
+                && !GlassShared::IsDelphiPanelWindow(hWnd))
             {
                 void* ep = GlassCore::ModuleHandler::g_entryPointModule;
                 bool already = false;

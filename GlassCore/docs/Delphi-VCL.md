@@ -2970,3 +2970,70 @@ MSVC-сборка и пиксельный результат этого шага
 затем `paint ... began=1` и `text api=DrawThemeText` (либо `DrawTextExW`) с темой,
 `text api=DrawTextW` без темы. До этих строк менять цвет/alpha текста вслепую
 не следует.
+
+## Тест 85: цветные панели и фреймы — родное стирание вместо потери Brush.Color
+
+Пользователь закрыл задачу TCoolBar после `5076d5c`. Его путь больше не
+изменяется. Следующие требования: для панелей фон, отличающийся от текущих
+`COLOR_WINDOW` **и** `COLOR_BTNFACE`, сохранять с **alpha=100/255**, системные
+два цвета чернить штатно; у `TFrame`, `TSampleFrame`, `TEmbeddedForm` нет текста.
+
+`LogViewer-16.log` записан при отображении **с визуальными стилями**. PID 31856,
+TID 11116; зонд подтверждает точные оконные классы и родной текстовый маршрут:
+
+| Время | HWND / класс | Операции на том же оконном DC |
+|---|---|---|
+| 15:16:26.687 | `0x3100FE` / `TEmbeddedForm` | WndCompat BLACKNESS `498x58`, EXE DrawThemeTextEx `Edit` part/state=1/1, подпись, rect `[0,0,92,15]` |
+| 15:16:34.588 | `0x240666` / `TFrame` | WndCompat BLACKNESS `198x58`, тот же API/тема, rect `[0,0,40,15]` |
+| 15:17:18.754 | `0x600598` / `TSampleFrame` | WndCompat BLACKNESS `260x60`, тот же API/тема, rect `[0,0,79,15]` |
+
+Во всех трёх случаях `textFlags=0x40` (`DT_EXPANDTABS`),
+`DTTOPTS(size=72 flags=0x801)` (`DTT_TEXTCOLOR | DTT_GLOWSIZE`), затем
+`uxtheme!DrawTextExW(lpdtp=NULL)` и glyph-index `ExtTextOutW`. Это не отсутствие
+родного вывода текста. Новых классов нет в whitelist существующего VCL DTTEx.
+Самих цветных заливок этих окон в журнале нет: `RootSubclassProc` поглощал
+`WM_ERASEBKGND` и возвращал после BLACKNESS, не вызывая VCL. Исходный цвет
+по такому журналу установить нельзя; получать его из имени класса/темы или
+общей кисти класса было бы неверно.
+
+**Шаг 1 — только фон, отдельный коммит:**
+
+- общий точный список `GlassDelphiPanel.h`: `TPanel`, `TFlowPanel`, `TGridPanel`,
+  `TStackPanel`, `TRelativePanel`, `TCategoryPanel`, `TCategoryPanelGroup`,
+  `TScrollBox`, `TFrame`, `TSampleFrame`, `TEmbeddedForm`. Без поиска подстрок
+  и без расширения на произвольные формы/потомки; классификация — DelphiContainer;
+- узкий мост `Root/DelphiPanelPaint.h` до общего WM_ERASEBKGND вызывает родной
+  `DefSubclassProc` в собственной сессии `Hooks/delphi/TPanelDraw`. Сохраняются
+  WM_PAINT, WM_ERASEBKGND и WM_PRINTCLIENT с исходными параметрами/результатом;
+- только сессионные EXE IAT FillRect, PatBlt(PATCOPY), пустой ExtTextOutW(ETO_OPAQUE).
+  Проверяется сплошной цвет **реальной** кисти/фона DC, полная клиентская заливка
+  или стандартный bevel-inset; узкие chrome-полосы и узорные кисти остаются native;
+- сравниваются только два текущих системных COLORREF, без hardcoded белого/чёрного.
+  Цветной фон: BLACKNESS + 1x1 premultiplied BGRA DIB + GdiAlphaBlend(AC_SRC_ALPHA),
+  A=100, SourceConstantAlpha=255. Повторный repaint не накапливает альфу;
+- generic root CreateSolidBrush/GetSysColorBrush/SetBkColor не включаются для
+  этих панелей: иначе цвет мог бы превратиться в BLACK/pattern до проверки;
+- Full + разрешённый backdrop; оконный DC принадлежит текущему HWND, явно
+  переданный DC сообщения принимается напрямую, прочий memory DC требует
+  подтверждения PaintDispatcher. Снимаются только приобретённые refs;
+- необязательные экспорты моста зарегистрированы также в `.def` для x86;
+  ABI GlassCoreProviders не меняется. Startup/Shutdown и projects/filters
+  подключены. У таблиц, списков и принятого TCoolBar код не менялся.
+
+Проверки: source-contract дополнен маршрутами/цветовой политикой/сборочным
+wiring; `panel_rendering_test.py` исполняет production hooks и message bridge,
+а не копию алгоритма. Проверяются точные классы, родной erase, DIB-байты alpha=100,
+изменение системных цветов, повторная заливка, сохранение bevel, чужие DC,
+WM_PRINTCLIENT, отказы GDI, reentry, вложенные сессии, отсутствующие импорты/
+экспорты, Full/backdrop/shutdown. Doubles не проверяют Windows IAT-цепочки,
+реальную композицию и MSVC-сборку. Произвольные BPL/GetProcAddress-рисовальщики
+и нестандартные большие bevel-inset этим EXE IAT-путём не гарантируются.
+
+Проверки шага 1 в Linux: contracts **63/63**, panel C++ **6/6** (также
+ASan/UBSan), контрольный CoolBar C++ **9/9**, UTF-8, XML projects и
+`git diff --check` — OK. Исходный входящий LogViewer-16 после сохранения
+выводов удалён; копии журнала в репозитории нет.
+
+Текст — следующий отдельный шаг. Визуальный результат нового фона на Windows
+пока не проверен; ожидаются `[GlassCore][DelphiPanel] Begin ... class="TFrame"`
+и `background ... color=... alpha=100 ok=1` (для системного фона — `alpha=0`).
