@@ -27,3 +27,52 @@
 Factory dual: в капсуле **1775** ‰ (слайдер) → effective **3550** ‰ при dual-pass; **pseudoGlowEnabled=1**, R/I **610 / 113**.
 
 Константы и clamp: [`GlassShared/include/InkCapsuleQuery.h`](../../GlassShared/include/InkCapsuleQuery.h). Применение в рантайме: `ApplyProfileInkGenerationToGlobals` / `g_ExtTextOutCoverageGamma` в [`RenderText.cpp`](../../GlassCore/src/Subsystems/RenderText.cpp).
+
+## Edit / TMemo / RichEdit: текущая политика фона
+
+**Код:** `GlassCore/src/Hooks/EditHooks.cpp`, `WndCompat/Root/RootSubclass.cpp`.
+Политика относится к существующим фоновым операциям, а не к новой замене
+текстового renderer или распознаванию диапазона выделения.
+
+| Контрол | Когда после BLACKNESS выполняется цветная заливка |
+| --- | --- |
+| Plain Edit и прежние Edit-алиасы, кроме точного `TMemo` | RGB отличен от чёрного, текущего `COLOR_WINDOW` и текущего `COLOR_BTNFACE`. |
+| Точный `TMemo`, RichEdit20W / RICHEDIT50W и их маркированные варианты, включая `TRichEdit` | RGB отличен только от текущего `COLOR_WINDOW`. Чёрный и `COLOR_BTNFACE` также проходят через alpha-кисть. |
+
+Если цветная заливка разрешена этой проверкой, её кисть получает **A=255**, если
+24-битный RGB равен текущему `GetSysColor(COLOR_HIGHLIGHT)`, иначе **A=100**.
+Сравнивается цвет, без selection-range classifier. Правило одинаково для
+прямого `ApplyEditBackgroundRect`, отложенного `ReplayMemoBackgrounds` и
+подтверждённого `PrimeMemoSolidBackground`. Условия priming, порядок очистки,
+clip/inset, текстовый DIB, single/dual-pass и последующий `tblend` не меняются;
+A кисти не является гарантией A итогового оконного пикселя после композиции.
+Для exact TMemo CTLCOLOR сохраняет исходный RGB, чтобы настоящий чёрный фон
+не смешивался с подстановкой прозрачного `COLOR_WINDOW`; у остальных Edit
+прежняя CTLCOLOR-политика.
+
+### Отложенная задача: выделение RICHEDIT50W и TRichEdit
+
+**Не решено; дальнейшая работа — в отдельной сессии по решению пользователя.**
+Выделение RICHEDIT50W (в сообщениях также RichEditW50) и смежного VCL
+`TRichEdit` остаётся полупрозрачным. Смежный RichEdit20W также требует отдельной
+проверки; одинаковый внутренний kind или имя VCL-класса не доказывают версию DLL.
+Дополнительные RichEdit `FillRect`/`PatBlt`-хуки из `f409a21` не дали результата
+и полностью отменены `9acedca`; не возвращать их как принятое исправление.
+
+Пользователь сообщил цвет выделения `#9BCAEF` в текущей светлой теме, отличный
+от системного `COLOR_HIGHLIGHT`. Если это запись RGB, соответствующий GDI
+COLORREF — `0x00EFCA9B`, не `0x009BCAEF`. Microsoft описывает
+[acetate selection](https://learn.microsoft.com/en-us/archive/blogs/murrays/richedit-colors)
+как смешение базового выделения с фоном (типично около 39% COLOR_HIGHLIGHT).
+Это объяснение наблюдаемого оттенка, не универсальная константа для кода.
+
+Для следующей сессии: `EM_GETEDITSTYLEEX` / `SES_EX_NOACETATESELECTION`
+сообщает режим на поддерживающем его движке, но не итоговый RGB;
+`EM_GETCHARFORMAT(SCF_SELECTION)` / `ITextFont::GetBackColor` возвращает
+форматирование текста, не UI-подсветку, а `GetEffectColor` — цвета подчёркивания.
+Прямой документированный getter итогового цвета UI-выделения не найден.
+`GetBkColor(hdc)` в уже существующем ETO_OPAQUE-пути даёт фактический цвет
+операции, но сам по себе не доказывает, что операция — выделение. Не вводить
+хардкод `#9BCAEF`, фиксированный коэффициент смешения, отключение acetate или
+новый classifier без отдельного согласованного решения. В текущем шаге код
+Edit/RichEdit не меняется.

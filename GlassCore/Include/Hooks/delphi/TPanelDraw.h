@@ -14,7 +14,8 @@ namespace GlassCore::DelphiPanel
 
     // Shared VCL themed-caption compositor. The root dispatcher owns the EXE
     // IAT slot and passes its actual original (including the IAT chain).
-    // Also retains the existing TGroupBox/TTabSheet caption path.
+    // TGroupBox/TTabSheet and exact TCard/TRadioGroup share captions only;
+    // this does not enrol them in the panel background/message bridge.
     HRESULT DrawContainerThemeTextEx(decltype(&::DrawThemeTextEx) original,
         HTHEME theme, HDC dc, int part, int state, LPCWSTR text, int count,
         DWORD flags, LPRECT rect, const DTTOPTS* options);

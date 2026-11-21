@@ -40,10 +40,10 @@ class PanelRenderingTest(unittest.TestCase):
         # MMC/Explorer hooks into the Win32 double. Do not duplicate their logic.
         root = (ROOT / 'GlassCore/src/Hooks/RootWindowHooks.cpp').read_text(encoding='utf-8')
         gate = root.split('// VCL paints windowless labels and group captions', 1)[1]
-        gate = gate[gate.index('            if ('):].split('// VCL-таблицы', 1)[0]
+        gate = gate[gate.index('            if ('):].split('// Custom-painted VCL groups:', 1)[0]
         gdi = (ROOT / 'GlassCore/src/Hooks/RootGdiHooks.cpp').read_text(encoding='utf-8')
         handler = '        HRESULT WINAPI Root_MyDelphiDrawThemeTextEx(\n'
-        handler += gdi.split(handler, 1)[1].split('        BOOL WINAPI Root_MyExtTextOutW(', 1)[0]
+        handler += gdi.split(handler, 1)[1].split('        // Dedicated EXE slots:', 1)[0]
         (stubs / 'root_panel_theme_test.inc').write_text(
             'namespace GlassCore::Root {\n'
             'inline RootHookCache PanelTextSpecsForTest(HMODULE instMod, LPCWSTR cls) {\n'
@@ -93,6 +93,9 @@ class PanelRenderingTest(unittest.TestCase):
 
     def test_themed_measurement_callback_failure_and_reentry_are_native(self):
         self.run_case('themed-native-semantics')
+
+    def test_card_and_radio_group_use_probe_options_without_panel_background_changes(self):
+        self.run_case('card-and-radio-captions')
 
 
 if __name__ == '__main__':

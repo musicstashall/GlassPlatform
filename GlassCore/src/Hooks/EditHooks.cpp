@@ -732,14 +732,12 @@ namespace GlassCore::EditControl
     BOOL WINAPI Edit_MyExtTextOutW(HDC, int, int, UINT, const RECT*, LPCWSTR, UINT, const INT*);
     BOOL WINAPI Edit_MyExtTextOutA(HDC, int, int, UINT, const RECT*, LPCSTR, UINT, const INT*);
     BOOL WINAPI Edit_MyFillRect(HDC, const RECT*, HBRUSH);
-    BOOL WINAPI Edit_MyPatBlt(HDC, int, int, int, int, DWORD);
 
     enum EditHookIndex : size_t
     {
         EHK_FILLRECT = 0,
         EHK_EXTTEXTOUT = 1,
         EHK_EXTTEXTOUTA = 2,
-        EHK_PATBLT = 3,
         EHK_COUNT
     };
 
@@ -751,8 +749,6 @@ namespace GlassCore::EditControl
             "ExtTextOutW", reinterpret_cast<PVOID>(Edit_MyExtTextOutW) },
         std::tuple{ std::array{ "gdi32.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv, ""sv },
             "ExtTextOutA", reinterpret_cast<PVOID>(Edit_MyExtTextOutA) },
-        std::tuple{ std::array{ "gdi32.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv, "gdi32full.dll"sv },
-            "PatBlt", reinterpret_cast<PVOID>(Edit_MyPatBlt) },
     } };
 
     using EditDispatcher = HookDispatcher<EHK_COUNT, 3>;
@@ -1260,107 +1256,23 @@ namespace GlassCore::EditControl
         return Edit_WorkExtTextOutCore(sessionHwnd, hdc, x, y, options, lprect, lpString, c, lpDx, callerMod, orig);
     }
 
-    // Standalone native selection fills do not necessarily pass through ETO_OPAQUE.
-    // Keep them on their original DC/clip; never use the text resolver's host-only
-    // MEMDC fallback for a brush operation (font masks/foreign buffers may be live).
-    [[nodiscard]] static HWND ResolveRichEditSelectionDc(HDC hdc) noexcept
-    {
-        if (!hdc || g_shutdown.load(std::memory_order_acquire)) return nullptr;
-        const HWND hwnd = GetSessionHwnd();
-        if (!hwnd || !IsRichEditKind(GlassShared::GlassGetWindowKind(hwnd))) return nullptr;
-        if (const HWND window = WindowFromDC(hdc))
-            return window == hwnd ? hwnd : nullptr;
-        if (GetObjectType(hdc) != OBJ_MEMDC
-            || !GlassCore::PaintDispatcher::IsPaintStackDcForHwnd(hwnd, hdc)
-            || !GlassCore::PaintDispatcher::IsTopWindowDrawingSession(hwnd)) return nullptr;
-        BITMAP bitmap{};
-        return GetObjectW(GetCurrentObject(hdc, OBJ_BITMAP), sizeof(bitmap), &bitmap) == sizeof(bitmap)
-            && bitmap.bmBitsPixel > 1 ? hwnd : nullptr;
-    }
-
-    [[nodiscard]] static bool IsRichEditHighlightBrush(HDC hdc, HBRUSH brush) noexcept
-    {
-        if (!brush) return false;
-        COLORREF color{};
-        const ULONG_PTR systemBrush = reinterpret_cast<ULONG_PTR>(brush);
-        // FillRect also accepts COLOR_* + 1 instead of a real brush handle.
-        if (systemBrush <= COLOR_MENUBAR + 1)
-            color = GetSysColor(static_cast<int>(systemBrush) - 1);
-        else
-        {
-            LOGBRUSH lb{};
-            if (GetObjectW(brush, sizeof(lb), &lb) != sizeof(lb) || lb.lbStyle != BS_SOLID) return false;
-            color = brush == GetStockObject(DC_BRUSH) ? GetDCBrushColor(hdc) : lb.lbColor;
-        }
-        return (color & 0xFFFFFFu) == (GetSysColor(COLOR_HIGHLIGHT) & 0xFFFFFFu);
-    }
-
-#if defined(_DEBUG)
-    static void LogRichEditSelectionFill(HWND hwnd, HDC hdc, const wchar_t* api, int result) noexcept
-    {
-        static thread_local ULONGLONG epoch{};
-        static thread_local unsigned budget{};
-        const ULONGLONG now = GetTickCount64();
-        if (!epoch || now - epoch >= 1000) { epoch = now; budget = 12; }
-        if (!budget) return;
-        --budget;
-        DebugLog(DBG_NORMAL, L"[GlassCore][RichEditSelection] api=%s hwnd=0x%p dc=0x%p alpha=255 result=%d",
-            api, hwnd, hdc, result);
-    }
-#endif
-
     BOOL WINAPI Edit_MyFillRect(HDC hdc, const RECT* lprc, HBRUSH hbr)
     {
-        const DWORD entryError = GetLastError();
         HMODULE callerMod = GetCallerModule(_ReturnAddress());
         auto orig = GetOverallOrigSafe<EHK_FILLRECT, decltype(&FillRect)>(callerMod);
-        if (!orig)
-        {
-            SetLastError(entryError);
-            return FillRect(hdc, lprc, hbr);
-        }
+        if (!orig) return FillRect(hdc, lprc, hbr);
 
-        if ((g_editSessionStack.empty() && g_editDcStack.empty()) || !lprc || !hbr)
-        {
-            SetLastError(entryError);
+        if (g_editSessionStack.empty() && g_editDcStack.empty())
             return orig(hdc, lprc, hbr);
-        }
+        if (!lprc || !hbr)
+            return orig(hdc, lprc, hbr);
 
         if (!g_editSessionStack.empty())
         {
             const auto& paint = g_editSessionStack.back();
-            if (paint.hotKeyFillHook && paint.paintDc == hdc && paint.mod == callerMod
+            if (paint.hotKeyFillHook && paint.paintDc == hdc
                 && GlassCore::DelphiInput::ClearHotKeyBackground(paint.hwnd, hdc, lprc, hbr))
                 return TRUE;
-        }
-
-        const HWND rich = ResolveRichEditSelectionDc(hdc);
-        if (rich && IsRichEditHighlightBrush(hdc, hbr))
-        {
-            wil::unique_hbrush brush{ Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(GetSysColor(COLOR_HIGHLIGHT), 255) };
-            if (brush)
-            {
-                SetLastError(entryError);
-                const int result = orig(hdc, lprc, brush.get());
-                const DWORD error = GetLastError();
-                brush.reset();
-#if defined(_DEBUG)
-                LogRichEditSelectionFill(rich, hdc, L"FillRect", result);
-#endif
-                SetLastError(error);
-                return result;
-            }
-        }
-        // New RichEdit hook refs must not activate the legacy scrollbar-corner
-        // conversion for other colours or foreign DCs. Keep that path only for
-        // modules already armed by the existing HotKey paint provider.
-        bool hotKeyModule = false;
-        for (const auto& paint : g_editSessionStack)
-            if (paint.hotKeyFillHook && paint.mod == callerMod) { hotKeyModule = true; break; }
-        if (!hotKeyModule)
-        {
-            SetLastError(entryError);
-            return orig(hdc, lprc, hbr);
         }
 
         LOGBRUSH lb{};
@@ -1379,44 +1291,7 @@ namespace GlassCore::EditControl
                 return TRUE;
             }
         }
-        SetLastError(entryError);
         return orig(hdc, lprc, hbr);
-    }
-
-    BOOL WINAPI Edit_MyPatBlt(HDC hdc, int x, int y, int cx, int cy, DWORD rop)
-    {
-        const DWORD entryError = GetLastError();
-        const HMODULE callerMod = GetCallerModule(_ReturnAddress());
-        const auto orig = GetOverallOrigSafe<EHK_PATBLT, decltype(&PatBlt)>(callerMod);
-        if (!orig)
-        {
-            SetLastError(entryError);
-            return PatBlt(hdc, x, y, cx, cy, rop);
-        }
-        const HWND rich = rop == PATCOPY && cx > 0 && cy > 0 ? ResolveRichEditSelectionDc(hdc) : nullptr;
-        if (rich && IsRichEditHighlightBrush(hdc, static_cast<HBRUSH>(GetCurrentObject(hdc, OBJ_BRUSH))))
-        {
-            wil::unique_hbrush brush{ Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(GetSysColor(COLOR_HIGHLIGHT), 255) };
-            if (brush)
-            {
-                const HGDIOBJ old = SelectObject(hdc, brush.get());
-                if (old && old != HGDI_ERROR)
-                {
-                    SetLastError(entryError);
-                    const BOOL result = orig(hdc, x, y, cx, cy, rop);
-                    const DWORD error = GetLastError();
-                    SelectObject(hdc, old);
-                    brush.reset();
-#if defined(_DEBUG)
-                    LogRichEditSelectionFill(rich, hdc, L"PatBlt", result);
-#endif
-                    SetLastError(error);
-                    return result;
-                }
-            }
-        }
-        SetLastError(entryError);
-        return orig(hdc, x, y, cx, cy, rop);
     }
 
     BOOL WINAPI Edit_MyExtTextOutA(
@@ -1484,7 +1359,7 @@ namespace GlassCore::EditControl
     }
 
     // =========================================================================
-    //  EnableEditHooksForModule
+    //  EnableEditHooksForModule (без изменений)
     // =========================================================================
     static void EnableEditHooksForModule(
         HMODULE callerMod,
@@ -1492,19 +1367,6 @@ namespace GlassCore::EditControl
         bool enable)
     {
         using namespace GlassShared;
-
-        // A VCL TRichEdit mark does not identify its native RichEdit DLL version.
-        // Arm only the selection brush APIs in both engines and the GDI helper;
-        // ordinary colours/ROPs pass through, and text hooks below stay unchanged.
-        if (IsRichEditKind(kind))
-        {
-            for (HMODULE module : { GetModuleHandleW(L"riched20.dll"), GetModuleHandleW(L"msftedit.dll"),
-                    GetModuleHandleW(L"gdi32full.dll") })
-            {
-                EnableHooksOnModule(module, EHK_FILLRECT, enable);
-                EnableHooksOnModule(module, EHK_PATBLT, enable);
-            }
-        }
 
         /*auto enableFillRectOnKnownModules = [&](HMODULE preferredTextModule) noexcept
             {

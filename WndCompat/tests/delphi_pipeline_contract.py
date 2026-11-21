@@ -17,11 +17,103 @@ class DelphiPipelineContract(unittest.TestCase):
             "TTrackBar": "TrackBar", "TScrollBar": "ScrollBar",
             "TDateTimePicker": "DateTimePicker", "TToolBar": "ToolBar",
             "TGroupBox": "DelphiContainer", "TTabSheet": "DelphiContainer",
+            "TCard": "DelphiContainer", "TRadioGroup": "DelphiContainer",
+            "TGroupButton": "Button",
         }
         for name, kind in expected.items():
             with self.subTest(name=name):
                 self.assertRegex(source, r'(?s)if\s*\([^;{}]*L"' + name +
                                  r'"[^;{}]*\)\s*return ControlKind::' + kind + r'\s*;')
+
+    def test_button_groups_have_shared_exact_gate_and_scoped_exe_slots(self):
+        classes = read('GlassShared/include/GlassDelphiButtonGroups.h')
+        for cls in ('TButtonGroup', 'TCategoryButtons'):
+            self.assertIn('_wcsicmp(name, L"' + cls + '") == 0', classes)
+        for forbidden in ('wcsstr', 'wcsncmp', 'find(', 'TGroupButton', 'TButton"'):
+            self.assertNotIn(forbidden, classes)
+        self.assertIn('GlassShared::IsDelphiButtonGroupsClassName(cls.c_str())',
+                      read('WndCompat/Tracker/WindowClassifier.cpp'))
+        root = read('GlassCore/src/Hooks/RootWindowHooks.cpp')
+        gate = root.split('// Custom-painted VCL groups:', 1)[1].split('// VCL-таблицы', 1)[0]
+        self.assertIn('instMod == GlassCore::ModuleHandler::g_entryPointModule', gate)
+        self.assertIn('GlassShared::IsDelphiButtonGroupsClassName(cls)', gate)
+        for slot in ('TEXT', 'FILL', 'GRADIENT', 'GDIGRADIENT'):
+            self.assertIn('OHK_DELPHI_GROUP_' + slot, gate)
+            self.assertIn('OHK_DELPHI_GROUP_' + slot + ',', read('GlassCore/Include/Hooks/RootGdiHooks.h'))
+        self.assertIn('PushPaint(instMod, slot, cache)', gate)
+        self.assertIn('PushDc(instMod, slot, cache)', gate)
+        self.assertNotIn('PushCompat', gate)
+        code = read('GlassCore/src/Hooks/delphi/TButtonGroupsDraw.cpp')
+        for guard in ('WindowFromDC(dc)', 'GetStackOwnerForDc(dc)', 'IsTopWindowDrawingSession(hwnd)',
+                      'GlassIsBackdropAllowedForHwnd(hwnd)', 'IsFullInjectionMode()',
+                      'GetMapMode(dc) != MM_TEXT', 'g_inside', 'IsDelphiButtonGroupsWindow(hwnd)'):
+            self.assertIn(guard, code)
+        self.assertNotIn('GetPaintSessionHostHwnd', code)
+        self.assertNotIn('TButtonGroup', read('GlassShared/include/GlassDelphiPanel.h'))
+
+    def test_button_group_thunks_resolve_original_from_each_installed_exe_slot(self):
+        code = read('GlassCore/src/Hooks/RootGdiHooks.cpp')
+        wrappers = code.split('// Dedicated EXE slots:', 1)[1].split('BOOL WINAPI Root_MyExtTextOutW(', 1)[0]
+        self.assertEqual(wrappers.count('GlassCore::ModuleHandler::g_entryPointModule'), 3)
+        for marker in ('GetRootOrg<OHK_DELPHI_GROUP_TEXT, decltype(&::DrawTextExW)>',
+                       'GetRootOrg<OHK_DELPHI_GROUP_FILL, decltype(&::FillRect)>',
+                       'GetRootOrg<slot, decltype(&::GdiGradientFill)>', 'g_shutdown.load',
+                       'GlassCore::DelphiButtonGroups::DrawCaptionText', 'GlassCore::DelphiButtonGroups::Fill',
+                       'GlassCore::DelphiButtonGroups::Gradient'):
+            self.assertIn(marker, wrappers)
+        self.assertNotIn('_ReturnAddress', wrappers)
+        self.assertNotIn('GetCallerModule', wrappers)
+        for api, hook in (('DrawTextExW', 'Root_MyDelphiGroupText'), ('FillRect', 'Root_MyDelphiGroupFill'),
+                          ('GradientFill', 'Root_MyDelphiGroupGradient<OHK_DELPHI_GROUP_GRADIENT>'),
+                          ('GdiGradientFill', 'Root_MyDelphiGroupGradient<OHK_DELPHI_GROUP_GDIGRADIENT>')):
+            self.assertIn('"' + api + '", reinterpret_cast<PVOID>(' + hook + ')', code)
+        enum = read('GlassCore/Include/Hooks/RootGdiHooks.h').split('enum RootHookIndex : size_t', 1)[1].split('OHK_COUNT', 1)[0]
+        table = code.split('g_rootHookDep', 1)[1].split('using RootDispatcher', 1)[0]
+        for release in (True, False):
+            names = re.findall(r'\bOHK_\w+', enum.split('#if defined(_DEBUG)', 1)[0] if release else enum)
+            rows = re.findall(r'"([A-Za-z][A-Za-z0-9_]*)",\s*reinterpret_cast<PVOID>',
+                              table.split('#if defined(_DEBUG)', 1)[0] if release else table)
+            self.assertEqual(len(names), len(rows), ('release' if release else 'debug', names, rows))
+            start = names.index('OHK_DELPHI_GROUP_TEXT')
+            self.assertEqual(rows[start:start + 4], ['DrawTextExW', 'FillRect', 'GradientFill', 'GdiGradientFill'])
+
+    def test_button_groups_keep_native_gradient_rgb_and_transparent_text_overlay(self):
+        code = read('GlassCore/src/Hooks/delphi/TButtonGroupsDraw.cpp')
+        for marker in ('kBackgroundAlpha = 100', 'GetSysColor(COLOR_WINDOW)', 'GetSysColor(COLOR_BTNFACE)',
+                       'BS_SOLID', 'COLOR_MENUBAR + 1u', 'Blacken(dc, *rect)',
+                       'DrawTextWithAlpha(dc, text, count, rect, flags, result, true)',
+                       'DT_CALCRECT | DT_MODIFYSTRING', 'count == 0 || params',
+                       'vertexCount != 2 || meshCount != 1',
+                       'GRADIENT_FILL_RECT_H', 'GRADIENT_FILL_RECT_V',
+                       'pair.UpperLeft >= vertexCount', 'pair.LowerRight >= vertexCount',
+                       'original(memory, vertices, vertexCount, mesh, meshCount, mode)',
+                       'BufferedPaintSetAlpha(buffer, nullptr, 255)', 'GdiFlush()',
+                       'kBackgroundAlpha, false, true, false'):
+            self.assertIn(marker, code)
+        for forbidden in ('CreateSolidColorBrushWithAlpha', 'ApplyBlackKeyAlpha', 'vertices[0].Alpha =',
+                          'ColorTreatAsTransparent', 'RegisterPaintProvider', 'RegisterCompatDCProvider'):
+            self.assertNotIn(forbidden, code)
+        for project in ('GlassCore/GlassCore.vcxproj', 'GlassCore/GlassCore.vcxproj.filters'):
+            self.assertIn(r'src\Hooks\delphi\TButtonGroupsDraw.cpp', read(project))
+            self.assertIn(r'Include\Hooks\delphi\TButtonGroupsDraw.h', read(project))
+        for project in ('GlassShared/GlassShared.vcxproj', 'GlassShared/GlassShared.vcxproj.filters'):
+            self.assertIn(r'include\GlassDelphiButtonGroups.h', read(project))
+
+    def test_button_groups_keep_actual_rgb_even_under_nested_generic_root_paint(self):
+        root = read('GlassCore/src/Hooks/RootWindowHooks.cpp')
+        self.assertIn('&& !GlassShared::IsDelphiButtonGroupsClassName(cls)', root)
+        self.assertIn('&& !GlassShared::IsDelphiButtonGroupsWindow(hWnd)', root)
+        gdi = read('GlassCore/src/Hooks/RootGdiHooks.cpp')
+        bk = gdi.split('COLORREF WINAPI Root_MySetBkColor(HDC hdc', 1)[1].split('HBRUSH WINAPI Root_MyGetSysColorBrush(', 1)[0]
+        self.assertIn('GlassShared::IsDelphiButtonGroupsClassName(cls)) return o(hdc, color)', bk)
+        for start, end, passthrough in (
+            ('HBRUSH WINAPI Root_MyGetSysColorBrush(int nIndex)', 'HBRUSH WINAPI Root_MyCreateSolidBrush(COLORREF color)', 'return o(nIndex)'),
+            ('HBRUSH WINAPI Root_MyCreateSolidBrush(COLORREF color)', 'HGDIOBJ WINAPI Root_MySelectObject(', 'return o(color)'),
+        ):
+            body = gdi.split(start, 1)[1].split(end, 1)[0]
+            self.assertIn('caller == GlassCore::ModuleHandler::g_entryPointModule', body)
+            self.assertIn('IsDelphiButtonGroupsWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd())', body)
+            self.assertIn(passthrough, body)
 
     def test_new_vcl_input_and_bitbtn_use_existing_providers(self):
         classifier = read("WndCompat/Tracker/WindowClassifier.cpp")
@@ -383,7 +475,7 @@ class DelphiPipelineContract(unittest.TestCase):
                       'options->dwSize != sizeof(DTTOPTS)', 'DTT_CALCRECT | DTT_CALLBACK'):
             self.assertIn(guard, text)
         self.assertIn('GlassShared::IsDelphiPanelClassName(name)', text)
-        for name in ('TGroupBox', 'TTabSheet'):
+        for name in ('TGroupBox', 'TTabSheet', 'TCard', 'TRadioGroup'):
             self.assertIn('L"' + name + '"', gate)
             self.assertIn('L"' + name + '"', text)
         # Keep both existing panels and all three probe classes in the shared gate.
@@ -570,34 +662,6 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('SetLastError(beforeTraceError)', body)
         self.assertIn('SetLastError(originalError)', body)
         self.assertIn('return result;', body)
-
-    def test_rich_selection_native_brush_paths_are_scoped_and_do_not_rewrite_text(self):
-        code = read('GlassCore/src/Hooks/EditHooks.cpp')
-        self.assertIn('BOOL WINAPI Edit_MyPatBlt(', code)
-        resolver = code.split('static HWND ResolveRichEditSelectionDc(', 1)[1].split('static bool IsRichEditHighlightBrush(', 1)[0]
-        for guard in ('g_shutdown', 'GetSessionHwnd()', 'IsRichEditKind', 'WindowFromDC(hdc)',
-                      'IsPaintStackDcForHwnd', 'IsTopWindowDrawingSession', 'OBJ_MEMDC', 'bitmap.bmBitsPixel > 1'):
-            self.assertIn(guard, resolver)
-        brush = code.split('static bool IsRichEditHighlightBrush(', 1)[1].split('BOOL WINAPI Edit_MyFillRect(', 1)[0]
-        for guard in ('BS_SOLID', 'COLOR_HIGHLIGHT', 'GetDCBrushColor', 'DC_BRUSH', 'COLOR_MENUBAR', '0xFFFFFFu'):
-            self.assertIn(guard, brush)
-        fill = code.split('BOOL WINAPI Edit_MyFillRect(HDC hdc,', 1)[1].split('BOOL WINAPI Edit_MyPatBlt(HDC hdc,', 1)[0]
-        pat = code.split('BOOL WINAPI Edit_MyPatBlt(HDC hdc,', 1)[1].split('BOOL WINAPI Edit_MyExtTextOutA(', 1)[0]
-        for body in (fill, pat):
-            self.assertIn('ResolveRichEditSelectionDc(hdc)', body)
-            self.assertIn('CreateSolidColorBrushWithAlpha(GetSysColor(COLOR_HIGHLIGHT), 255)', body)
-            self.assertIn('SetLastError(error)', body)
-            self.assertNotIn('ApplyEditBackgroundRect(', body)
-            self.assertNotIn('EnsureEditBuffer(', body)
-            self.assertNotIn('ExtTextOutWithAlpha(', body)
-        self.assertIn('rop == PATCOPY', pat)
-        self.assertIn('old != HGDI_ERROR', pat)
-        self.assertIn('paint.hotKeyFillHook && paint.mod == callerMod', fill)
-        self.assertLess(fill.index('if (!hotKeyModule)'), fill.index('COLOR_SCROLLBAR'))
-        hooks = code.split('static void EnableEditHooksForModule(', 1)[1].split('//  PaintDispatcher provider callbacks', 1)[0]
-        for guard in ('IsRichEditKind(kind)', 'L"riched20.dll"', 'L"msftedit.dll"', 'L"gdi32full.dll"', 'EHK_FILLRECT', 'EHK_PATBLT'):
-            self.assertIn(guard, hooks)
-        self.assertIn('[GlassCore][RichEditSelection]', code)
 
     def test_richedit_and_memo_background_use_alpha_brush_for_every_non_window_color(self):
         source = read('GlassCore/src/Hooks/EditHooks.cpp')
@@ -1262,7 +1326,8 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('GetSysColor(COLOR_BTNFACE)', policy)
         self.assertIn('pixel[3] = kCustomBackgroundAlpha', policy)
         cache = read('GlassCore/src/Hooks/RootWindowHooks.cpp')
-        self.assertIn('if (!GlassShared::IsDelphiPanelClassName(cls))', cache)
+        self.assertIn('if (!GlassShared::IsDelphiPanelClassName(cls)\n'
+                      '                    && !GlassShared::IsDelphiButtonGroupsClassName(cls))', cache)
         self.assertIn('&& !GlassShared::IsDelphiPanelWindow(hWnd)', cache)
 
     def test_panel_sessions_release_only_acquired_refs_and_isolate_dcs(self):

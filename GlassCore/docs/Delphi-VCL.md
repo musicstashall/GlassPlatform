@@ -3244,52 +3244,145 @@ TSearchBox search/audio, normal/hot/pressed/disabled, NC repaint, DPI, обыч�
 `[GlassCore][DelphiInputIcon] ... draw=1 commit=0x00000000`. При дефекте —
 скриншот + «Логи при отображении» + «Логи с зондом при отображении элемента».
 
-## Тест 89: пропущенные заливки выделения RichEdit
+## Тест 89: фиксация политики Edit; RichEdit отложен
 
-Принятое правило кисти остаётся простым: 24-битный RGB равен текущему
-`GetSysColor(COLOR_HIGHLIGHT)` → A=255; прочие цвета в существующем
-ETO_OPAQUE/Memo-пути сохраняют A=100 и прежние условия заливки. Без
-selection-range classifier, подложки или изменения текстового композитора.
+Актуальная [политика Edit/TMemo/RichEdit](glasscore-text.md#edit--tmemo--richedit-текущая-политика-фона):
+RichEdit/TMemo пропускают только COLOR_WINDOW, остальные plain Edit сохраняют
+прежние исключения; разрешённая цветная кисть — A255 для RGB текущего
+COLOR_HIGHLIGHT, иначе A100. Это уточняет общее «A100» в тесте 88, не меняя
+порядок рисования или renderer.
 
-Аудит `EditHooks.cpp` обнаружил пробел: обработка ETO_OPAQUE не покрывает
-самостоятельный FillRect, подключение которого было закомментировано, а
-собственного Edit PatBlt-хука не было. Это подтверждённый пробел исходника,
-**не Windows-трасса причины** полупрозрачного выделения. В справочном
-[VCL Berlin CreateParams](https://github.com/bergsteiger/realwork/blob/master/common/components/rtl/external/Embarcadero/DelphiBerlin/vcl/Vcl.ComCtrls.pas)
-UNICODE TRichEdit создаёт subclass RICHEDIT20W; внутренняя метка RichEdit50W
-не доказывает, что конкретный контрол рисует из msftedit.dll.
+Пользователь подтвердил, что дополнительные RichEdit FillRect/PatBlt-пути
+не дали результата и были избыточны. Коммит `f409a21` отменён `9acedca`,
+дерево восстановлено к `47a8aea`. **Полупрозрачное выделение RICHEDIT50W и
+смежного TRichEdit не исправлено. Работа по RichEdit закрыта в этой сессии
+и переносится в отдельную**, включая проверку цвета/режима смежного RichEdit20W.
+Наблюдаемый пользователем светлый RGB #9BCAEF не равен COLOR_HIGHLIGHT;
+контекст acetate selection и ограничения документированных API сохранены в
+разделе по ссылке выше. Не считать прежнее «TRichEdit ОК» в истории документа
+подтверждением исправления выделения. Новых production-правок Edit нет.
 
-Для RichEdit20W/RichEdit50W и их WinForms-вариантов добавлены сессионные IAT
-`FillRect` и `PatBlt` в уже загруженные riched20.dll, msftedit.dll и
-GDI-helper gdi32full.dll. Изменяется только сплошная кисть текущего
-COLOR_HIGHLIGHT (включая системную псевдокисть и DC_BRUSH); PatBlt — только
-PATCOPY с положительными размерами. Требуются активная Edit-сессия и DC
-того же RichEdit: оконный — через WindowFromDC, memory — через paint-stack,
-текущую оконную сессию и немонохромный bitmap. Одного host-fallback нет.
-Исходные RECT, clip, координаты и DC сохраняются; PatBlt восстанавливает
-предыдущую кисть. Возвращаются результат и LastError исходной операции.
+## Тест 90: TCard, TRadioGroup и дочерний TGroupButton
 
-Остальные кисти/ROP передаются исходной цепочке. Новые RichEdit hook refs
-не активируют прежнее правило scrollbar-corner: оно сохраняет контекст
-модуля существующего HotKey-провайдера, как и очистка фона THotKey. Текстовые
-хуки, допуск DC в renderer, буферы, ETO_OPAQUE и ordinary-background policy
-Edit/TMemo не менялись. Динамический GetProcAddress, неизвестные offscreen DC
-и другие растровые операции не объявляются покрытыми новым путём.
+### Данные входящего зонда LogViewer-17
 
-Проверки: contracts **70/70**; production-тела новых обработчиков, resolver,
-brush classifier и hook wiring с Win32-заглушками — **7/7 × release/DEBUG**,
-также ASan/UBSan. Проверены оба движка/четыре RichEdit-kind, BeginPaint/GetDC
-контексты, чужие и монохромные DC, системная/DC-кисть, другие цвета/ROP,
-ошибки создания/выбора кисти/native draw, clip, вложенный вызов, парные refs
-и прежний HotKey/corner. Контрольные иконки **6/6**, панели **10/10**,
-TCoolBar **9/9**. Это не настоящие PE/IAT-цепочки или Win32 renderer;
-MSVC-сборка и визуальная проверка Windows не выполнялись.
+Исходный UTF-8 лог: 29182 байта, 151 строка по splitlines; процесс
+`DelphiControlsSample_Win64.exe`. Не копируется в репозиторий; после сохранения
+выводов удалён из входящих вложений.
 
-На Windows проверить TRichEdit и raw RICHEDIT50W: выделение мышью/клавиатурой,
-пробелы и конец строки, частичное/полное выделение, фокус/его потерю,
-прокрутку, resize и обычный/цветной фон. Проверить отсутствие регрессий
-Edit/TMemo/THotKey. Ограниченный Debug-маркер новых замен:
-`[GlassCore][RichEditSelection] api=FillRect|PatBlt ... alpha=255 result=...`.
-Его отсутствие само по себе не доказывает отсутствие выделения или других
-перехватов. При сохраняющемся дефекте нужны скриншот + «Логи при отображении»
-+ «Логи с зондом при отображении элемента».
+| Время | Точный HWND-класс и размер | Наблюдаемый путь |
+| --- | --- | --- |
+| 20:10:00.966 | TButtonGroup, 236×96 | WndCompat BLACKNESS; EXE FillRect COLOR_BTNFACE full-client и три item rect; EXE DrawTextExW One/Two/Three, format=0x8000. |
+| 20:10:36.984 | TCategoryButtons, 236×96 | BLACKNESS; EXE FillRect COLOR_BTNFACE full-client; header DrawTextExW format=0x8100, rect=[19,2,236,17]; Alpha/Beta format=0x8004, item fills COLOR_WINDOW [5,22,27,44] / [29,22,51,44]. Дважды Root SetBkColor COLOR_WINDOW→0. |
+| 20:11:05.540 | TCard, 248×40 | BLACKNESS; EXE DrawThemeTextEx(Edit,1,1), text=TCard, flags=0x40, rect=[0,0,31,15], DTTOPTS size=72 flags=0x801. |
+| 20:11:45.484 | TRadioGroup, 200×68 | BLACKNESS; EXE DrawThemeBackground(Button,BP_GROUPBOX=4,state=1); caption DrawThemeTextEx с той же темой/part/state, flags=0, rect=[8,0,78,15], DTTOPTS flags=1. |
+| 20:11:45.487–491 | TGroupButton, два дочерних окна 190×24 | Parent TRadioGroup рисуется в MEMDC, WindowFromDC=null. COMCTL32 DrawThemeText(Button,BP_RADIOBUTTON=2,state=1/5), Radio Two/One, flags=0x100024; затем uxtheme BitBlt SRCCOPY 190×24 на DC дочерней кнопки. |
+
+В логе **нет доказательства конкретного API и RGB цветного фона категории**:
+нет ни custom-RGB FillRect, ни GradientFill. В `DebugDetourHooks.cpp` и
+сессионном VCL-зонде GradientFill вообще не перехватывается — отсутствие записи
+не означает отсутствие API-вызова. Справочный исходник Delphi Berlin:
+[Vcl.CategoryButtons.pas, DrawCategory](https://github.com/bergsteiger/realwork/blob/master/common/components/rtl/external/Embarcadero/DelphiBerlin/vcl/Vcl.CategoryButtons.pas)
+вызывает `GradientFillCanvas`, а
+[Vcl.GraphUtil.pas](https://github.com/bergsteiger/realwork/blob/master/common/components/rtl/external/Embarcadero/DelphiBerlin/vcl/Vcl.GraphUtil.pas)
+строит два TRIVERTEX с Alpha=0 и прямоугольный mesh для `msimg32!GradientFill`.
+Это основание для узкого gradient-пути, не подтверждение RGB/версии VCL sample.
+
+### Первый шаг — только captions / классификация
+
+Добавлены точные TCard и TRadioGroup в DelphiContainer и существующий
+сессионный EXE DrawThemeTextEx-путь. Композитор TPanelDraw сохранён:
+исходные theme/part/state/flags/DTTOPTS + DTT_COMPOSITED, прозрачный буфер
+без BPPF_ERASE. Ни TCard, ни TRadioGroup **не добавлены** в panel-background
+predicate: принятая политика заливки панелей/Frame не расширяется.
+Сохраняются проверки owner/DC, Full/backdrop, native measurement/callback,
+reentry и original из установленного EXE IAT-слота.
+
+Точный TGroupButton добавлен в существующий Button-kind, как его базовый
+TRadioButton. Теперь COMCTL32 DrawThemeText получает штатный Button paint/GetDC
+hook-набор; отдельного renderer, обработки BitBlt или подбора иконного фона нет.
+Parent replay в произвольный MEMDC не объявляется caption-DC контейнера.
+
+Portable-проверки расширены фактическими TCard/TRadioGroup rect/part/options
+из зонда; проверяются существующие panels/frames и отказы для похожих классов.
+Это проверка маршрутизации, аргументов и состояния, **не native Windows/MSVC
+сборка и не подтверждение пиксельного исправления**. На Windows проверить
+TCard без чёрного прямоугольника, заголовок TRadioGroup и обе Radio One/Two
+в checked/unchecked, hover/disabled состояниях и после смены Full/backdrop.
+TButtonGroup/TCategoryButtons и их цветной фон — следующий отдельный шаг.
+
+Проверки шага: `delphi_pipeline_contract.py` **69/69**,
+`panel_rendering_test.py` **11/11**, `coolbar_rendering_test.py` **9/9**,
+`input_icons_test.py` **6/6**, UTF-8 и `git diff --check` — PASS.
+
+## Тест 91: отдельный путь TButtonGroup / TCategoryButtons
+
+**Код:** `delphi/TButtonGroupsDraw.cpp`, root IAT/cache,
+`GlassShared/include/GlassDelphiButtonGroups.h` и WindowClassifier.
+Только точные TButtonGroup / TCategoryButtons; это custom-painted контейнеры,
+не native Button, не расширение фонового predicate панелей.
+
+Используется существующий Root lifecycle: четыре EXE IAT-слота
+DrawTextExW / FillRect / msimg32!GradientFill / gdi32!GdiGradientFill в paint и
+GetDC сессиях, парное снятие прежним Root dispatcher. Нет нового Detours,
+сабкласса, экспортируемого bridge, стека сессий или Engine Startup/Shutdown.
+Каждый thunk получает original из **своего установленного EXE-слота**, не по
+адресу возврата; два gradient-импорта не смешивают originals.
+
+### Рисование и границы
+
+- DrawTextExW One/Two/Three, header, Alpha/Beta из зонда идут через существующий
+  DrawTextWithAlpha с `transparentBufferBackground=true`. Исходные font, text
+  color, rect и flags сохраняются; надпись не закрашивает градиент. DT_CALCRECT,
+  DT_MODIFYSTRING, ненулевой DRAWTEXTPARAMS и пустые операции — native.
+- Сплошные client FillRect: фактический RGB, совпадающий с текущим COLOR_WINDOW
+  **или** COLOR_BTNFACE, → BLACKNESS; остальные, включая настоящий чёрный, →
+  **A100**. Это отдельная политика двух групп; прежние контролы не меняются.
+  Custom brush рисует original в буфер с A255, итоговая композиция имеет
+  SourceConstantAlpha=100. Pattern/hatch brushes и узкие chrome/insert strips
+  остаются native. При каждом repaint очистка до композиции, не alpha-over-alpha.
+- Прямоугольный GradientFill: ровно 2 TRIVERTEX + 1 GRADIENT_RECT, H/V, корректные
+  индексы, внутри клиента. Original рисует с **исходными вершинами, RGB, mesh,
+  mode** в буфер, без собственного пересчёта интерполяции. После GdiFlush
+  BufferedPaintSetAlpha задаёт A255 для поверхности, затем композиция A100.
+  Нулевая Alpha исходных TRIVERTEX не удаляет цвет; чёрный endpoint тоже
+  сохраняется как цвет. Градиент не определяется по равенству endpoints
+  системным цветам. Triangles/другие meshes/некорректные bounds — native.
+- Замена разрешена только Full/backdrop, MM_TEXT, известному оконному DC либо
+  MEMDC с подтверждённым owner в PaintDispatcher и текущему paint/GetDC-окну.
+  Одной ambient-сессии недостаточно. Произвольные/чужие DC и похожие имена — native.
+- Generic SetBkColor/CreateSolidBrush/GetSysColorBrush больше не включаются для
+  этих двух классов. Узкие passthrough-guards сохраняют их RGB и при вложенном
+  paint, если generic EXE-hook ещё удерживается внешней Root-сессией.
+- При ошибке буфера/native draw/GdiFlush/SetAlpha буфер не публикуется, целевой
+  DC ещё не очищен; при ошибке очистки — native fallback. Reentry и Root shutdown
+  также остаются native. Текстовый renderer/его собственные fallback не менялись.
+
+Новый ограниченный лог, до 16 строк/сек отдельно для text/fill/gradient:
+`[GlassCore][DelphiButtonGroups] text ... hr=...`, `fill ... rgb=... alpha=... ok=...`,
+`gradient api=GradientFill|GdiGradientFill ... rgb=[..., ...] alpha=100 ... ok=...`.
+В отличие от исходного зонда он даст фактические endpoints/режим пути фона
+категории, **если именно этот поддержанный вызов присутствует**. Глобальный зонд
+не расширяется и не требуется для штатной отрисовки.
+
+### Проверки и что остаётся проверить на Windows
+
+`button_groups_rendering_test.py`: **8/8 × Release/Debug**, повтор с ASan/UBSan —
+PASS. Компилируется целиком production TButtonGroupsDraw.cpp, а root gate,
+четыре dependency-row и EXE-thunks извлекаются непосредственно из production.
+Проверены операции из зонда, font/flags/options, обе gradient-формы H/V,
+неизменность vertices/mesh, black endpoint, current system colors, повторные
+заливки, native passthrough и ошибки/reentry. Двойники не доказывают native
+uxtheme/DWM-пиксели или настоящий IAT chain.
+
+`delphi_pipeline_contract.py` **73/73**; panels/frames **11/11**, TCoolBar **9/9**,
+ImageList input icons **6/6**; регистрация файлов проектов и UTF-8/diff — PASS.
+Код Edit/RichEdit, renderer, grids, TCoolBar и значки не изменялись.
+
+**MSVC/Windows визуальная проверка недоступна в Arena.** Проверить обычные подписи
+обеих групп, collapsed/expanded TCategoryButtons с исходными category colors и
+H/V gradient, hover/selection, partial repaint/resize, Full/backdrop toggle и
+регрессии принятых контролов. Runtime-пакеты BPL, произвольный owner-draw,
+WM_PRINTCLIENT без paint/GetDC-сессии и другие API custom VCL styles этим EXE-путём
+не заявляются как покрытые. Если дефект остался: скриншот + «Логи при отображении»
+(включая новые DelphiButtonGroups-строки) + «Логи с зондом при отображении элемента».

@@ -40,6 +40,7 @@
 #include <RootBackdropPolicy.h>
 #include <GlassBackdropMark.h>
 #include <GlassDelphiPanel.h>
+#include <GlassDelphiButtonGroups.h>
 
 #include <string>
 #include <unordered_map>
@@ -580,10 +581,24 @@ namespace GlassCore::Root
             // the handler verifies either that bridge's DC or the current paint owner.
             if (instMod == GlassCore::ModuleHandler::g_entryPointModule
                 && (StrEqI(cls, L"TGroupBox") || StrEqI(cls, L"TTabSheet")
+                    || StrEqI(cls, L"TCard") || StrEqI(cls, L"TRadioGroup")
                     || GlassShared::IsDelphiPanelClassName(cls)))
             {
                 PushPaint(instMod, OHK_DELPHI_DRAWTHEMETEXTEX, cache);
                 PushDc(instMod, OHK_DELPHI_DRAWTHEMETEXTEX, cache);
+            }
+
+            // Custom-painted VCL groups: one known source, the EXE. Reuse root's
+            // existing balanced paint/GetDC sessions; never hook all Button HWNDs.
+            if (instMod == GlassCore::ModuleHandler::g_entryPointModule
+                && GlassShared::IsDelphiButtonGroupsClassName(cls))
+            {
+                for (const size_t slot : {OHK_DELPHI_GROUP_TEXT, OHK_DELPHI_GROUP_FILL,
+                    OHK_DELPHI_GROUP_GRADIENT, OHK_DELPHI_GROUP_GDIGRADIENT})
+                {
+                    PushPaint(instMod, slot, cache);
+                    PushDc(instMod, slot, cache);
+                }
             }
 
             // VCL-таблицы (TShownValueList, TStringGrid, TDrawGrid) рисуют ячейки
@@ -612,10 +627,11 @@ namespace GlassCore::Root
             if (instMod == GlassCore::ModuleHandler::g_entryPointModule)
             {
                 void* ep = GlassCore::ModuleHandler::g_entryPointModule;
-                // Panels consume the *actual solid brush* in delphi/TPanelDraw.
-                // Generic colour remaps / alpha-pattern brushes would destroy it
+                // Panels and VCL groups consume the *actual solid brush* in
+                // their delphi draw paths. Generic remaps would destroy it
                 // before the client fill can apply the requested alpha=100.
-                if (!GlassShared::IsDelphiPanelClassName(cls))
+                if (!GlassShared::IsDelphiPanelClassName(cls)
+                    && !GlassShared::IsDelphiButtonGroupsClassName(cls))
                 {
                     PushPaint(ep, OHK_SETBKCOLOR, cache);
                     PushPaint(ep, OHK_GETSYSCOLORBR, cache);
@@ -739,7 +755,8 @@ namespace GlassCore::Root
             bool wantEntrySetBk = false;
             if (callerMod && GlassCore::ModuleHandler::g_entryPointModule
                 && callerMod == GlassCore::ModuleHandler::g_entryPointModule
-                && !GlassShared::IsDelphiPanelWindow(hWnd))
+                && !GlassShared::IsDelphiPanelWindow(hWnd)
+                && !GlassShared::IsDelphiButtonGroupsWindow(hWnd))
             {
                 void* ep = GlassCore::ModuleHandler::g_entryPointModule;
                 bool already = false;
