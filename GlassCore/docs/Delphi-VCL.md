@@ -5856,3 +5856,175 @@ Win32/Detours/NLS/stack/logging в этих проверках — **environment
 Платформу не запускали/останавливали, DLL не освобождали. Для пользовательской
 Windows-проверки остаётся именно исправленная TPanel и её неизменная подложка;
 повторной проверки закрытых ComboLBox/SearchBox/TButtonedEdit не требуется.
+
+## Тест 116: Restorator — нативный DrawTextA и отсечение TPage до detour
+
+**Только диагностика после опубликованного 2b1e116. Новая production-правка
+не выполнена; визуальный дефект не объявлен исправленным.** Пользователь
+сообщил, что DrawTextA не виден даже с пробой: два верхних поясняющих абзаца
+исчезают с Glass, подписи двух флажков остаются. Это соответствует изображениям
+`image-64.png` (нативный вид) и `image-65.png` (Glass). По изображению класс HWND
+определить нельзя. Предыдущее согласование касалось exact TPanel, не TPage.
+
+### Входящие данные и границы сопоставления
+
+Полностью разобраны два новых входящих журнала:
+
+| Файл | Размер, байт | SHA256 исходного файла |
+|---|---:|---|
+| `LogViewer-23.log` | 26183 | `fb208f7414e2bfc29286bee9100e3d907a1803dee636aeadaf3f13f5a3f06044` |
+| `API-Monitor-7.log` | 63508 | `638a70b1b4ad9681db9f7204a39eb9a6b20e4ba679362c95141cf6452190a5be` |
+
+Glass-журнал: **16:01:19.220–16:01:21.389**, PID 32728 / TID 20232,
+фрагмент уже работающего процесса, не Startup. Нативный API Monitor:
+**16:06:38.118–16:06:38.171**, **692 последовательные записи**. Это разные
+запуски/захваты: их HWND/HDC нельзя отождествлять. Нативный файл не содержит
+имени класса HWND; принадлежность его первого paint именно TPage этим файлом
+**не доказана**. Совпадение текстов/длин объясняет, какие надписи рисуются каким
+API, но не заменяет сопоставление владельца DC в одном запуске.
+
+### Что установлено в Glass-журнале
+
+- **16:01:21.345**: `EVENT_OBJECT_CREATE`, HWND **0x016F0DDE**,
+  `role=2 kind=0 class=TPage` — это exact **TPage**, не TPanel/TPageControl.
+- **.346–.348**: `Root_Attach (Unknown)`; GlassCore кеширует
+  `class="TPage" paint=4 dc=0 compat=0 winForms=0`; WndCompat успешно
+  устанавливает root subclass. Unknown/kind=0 здесь **не означает отказ attach**.
+- Следом attach двух TCheckBox: **0x00FD0D7E** / **0x00D40B5C**, kind=1.
+  **.380–.389** содержат их Button BeginPaint/DrawTextExW/EndPaint,
+  длины **99/142**, RECT **[16,8,360,34] / [16,2,345,41]**,
+  `format=0x102014`. Это подписи флажков, **не исчезнувшие верхние абзацы**.
+- Во всём файле нет `[DelphiPanel]`, `text-resolve`, `text-detour`, DDH,
+  `[DelphiDrawProbe] Begin/API` или `[DelphiProbeBuild]`. Поскольку Startup
+  отсутствует, из этого нельзя заключить, какой probe build реально загружен.
+
+Пользовательский pasted-фрагмент **15:56:31.495–15:56:31.511** имеет ту же
+Button-картину (HWND **0x00301216 / 0x00C005C4**, 99/142, те же RECT/flags,
+depth 1→0). Его абсолютные caller bases **0x6A780000 / 0x6CB50000** без module
+map не называют DLL и не доказывают, что панельный DrawTextA был перехвачен.
+
+### Что установлено в нативном API Monitor
+
+| Запись | Вызывающий модуль и API | Контекст / результат |
+|---:|---|---|
+| 1 | `Restorator.exe → BeginPaint` | HWND **0x00420266** → HDC **0xa801003f** |
+| 40 | `Restorator.exe → DrawTextA` | первый верхний абзац «Ранние версии Delphi…», **219 байт**, result **52** |
+| 172 | `Restorator.exe → DrawTextA` | второй верхний абзац «Не используйте этот параметр…», **176 байт**, result **39** |
+| 260 | `Restorator.exe → EndPaint` | тот же HWND, завершение EXE paint |
+| 261 / 460 | `comctl32.dll → BeginPaint / EndPaint` | первый флажок, HWND **0x0095086c** |
+| 356 / 391 | `UxTheme.dll → DrawTextExW` | подпись **99**, CALCRECT / draw, result **26** |
+| 461 / 692 | `comctl32.dll → BeginPaint / EndPaint` | второй флажок, HWND **0x007d125e** |
+| 558 / 608 | `UxTheme.dll → DrawTextExW` | подпись **142**, CALCRECT / draw, result **39** |
+
+Оба DrawTextA используют HDC первого BeginPaint и
+**DT_EXPANDTABS | DT_WORDBREAK**; перед ними EXE выставляет
+**SetBkMode(TRANSPARENT)** и clip **361×62 / 361×54**. Внутри первого paint
+USER32/gdi32full разворачивают их в Unicode ExtTextOutW; это не означает,
+что исходный вызов приложения был W. В записях 1–260 нет записанного создания
+промежуточного DC/bitmap или финального BitBlt; это не основание менять
+DoubleBuffered вообще. Для флажков отдельно видны UxTheme memory DC и BitBlt.
+Искажённое представление ANSI-строк в dump не доказывает повреждение текста
+приложения: для чтения русского содержимого представление восстанавливается
+из CP1251 и совпадает с нативным изображением.
+
+### Где разрывается текущая production-цепочка
+
+1. `GlassShared/include/GlassDelphiPanel.h`: общий
+   **IsDelphiPanelClassName/Window не включает TPage**. Этот predicate отвечает
+   не только за текст, но и за фон и root themed-caption routing.
+2. `WndCompat/Root/DelphiPanelPaint.h`: message bridge требует этот predicate;
+   для TPage не вызывает GlassCore Begin/End вокруг DefSubclassProc.
+3. `GlassCore/src/Hooks/delphi/TPanelDraw.cpp`: **BeginPaint повторяет общий
+   panel gate**, а **IsAnsiTextPanel отдельно требует exact TPanel** и
+   WM_PAINT/WM_PRINTCLIENT. Поэтому TPage не получает ANSI export lease;
+   до AcquireAnsiText/Detours::Attach для такой сессии выполнение не доходит.
+4. `RootSubclass.cpp`: при отказе bridge остаётся прежний generic
+   WM_ERASEBKGND Full/backdrop BLACKNESS; специальной TPage WM_PAINT-ветки нет.
+   Это описание текущего маршрута, **не разрешение менять generic erase**.
+5. `RootWindowHooks.cpp`: TPage остаётся в generic EXE cache path с четырьмя
+   paint specs, не в panel themed-caption branch. В Full
+   PaintDispatcher::ShouldInvokeProvidersForHwnd проверяет валидность HWND и
+   backdrop, **не требует известного kind**. Менять WindowClassifier или
+   общий PaintDispatcher из-за одного `kind=0` оснований нет.
+
+Следовательно, **отказ production-допуска TPage доказан по коду**. Это ещё не
+проверка реального Detours failure, ANSI conversion или alpha-compositor:
+они для TPage вообще не достигаются. Возможное исчезновение нативных GDI
+глифов на стекле согласуется с симптомом, но пиксельную причину и владельца
+нативного HWND из разных захватов данный разбор отдельно не доказывает.
+
+### Почему молчание пробы — отдельный вопрос
+
+Нельзя смешивать три механизма:
+
+- **DebugDetourHooks** — настоящие DDH, исправленные в §115, с ANSI bits
+  **34–39**. Автовключение DDH_All в Root::Startup/Shutdown по-прежнему
+  закомментировано; факт включения DDH в пользовательской сборке не записан.
+- **DelphiDrawProbe в RootGdiHooks.cpp** — optional EXE **named-IAT** probe,
+  собирается/регистрируется только при `_DEBUG && GLASS_DELPHI_DRAW_PROBE`.
+  Его BeginVclDrawProbe **уже допускает exact TPage** и пишет Begin даже при
+  **acquired=0**, если пройдены shutdown/HWND/class/entry-point gates и вызван
+  соответствующий Full paint/GetDC provider. Это не production text lease.
+- **DelphiPanel DrawTextA** — production export detour с refcount/trampoline,
+  ныне только exact TPanel. Отказ его panel gate не объясняет автоматически
+  отсутствие optional probe Begin.
+
+В присланном фрагменте нет ни probe Begin, ни startup compiled-marker;
+нельзя утверждать, что optional probe точно активна или что EXE не вызывает
+DrawTextA. Последнее прямо опровергает нативный файл. Без новых данных нельзя
+выбрать между build/registration/runtime gate/отсутствием нужного paint в этом
+фрагменте. Для исправления доказанного production-допуска новый захват
+закрытых контролов не требуется; DDH_All автоматически не включается.
+
+### Донор, диагностическая проверка и предлагаемый scope
+
+Защищённый BWM.txt повторно прочитан без перезаписи. Строки **17058–17096**,
+особенно **17087–17095**, дают exact **TPage/TPanel** в window/EXE paint с
+DrawTextAttach; nested-panel image остаётся отдельным условием. Строки
+**17747–17755 / 17795–17811** подтверждают resolved user32 export и
+refcounted Detours, не требование EXE named import. Это поддерживает локальный
+TPage paint lease, не общий A/W redesign или перенос донорских opaque fills.
+
+Без изменения production выполнен временный C++ driver на существующем
+panel harness, включающем **полный production TPanelDraw.cpp и реальный
+WndCompat message bridge**. В **Release / Debug / Debug+probe — 3/3 PASS**:
+
+- user32 DrawTextA успешно разрешён в environment double;
+- exact TPanel WM_PAINT получает text refs=1 / detour=1 и штатно освобождает их;
+- после смены класса на exact TPage: **backgroundGate=0, coreBegin=0, bridge=0,
+  textRefs=0, detour=0**; native bridge callback не вызывается.
+
+Это исполняемое воспроизведение **текущего отказа допуска**, не новый renderer
+и не прохождение прежних 31×3 сценариев заново. WinAPI/Detours — doubles;
+Windows/MSVC, настоящий export patch и визуальный результат не проверены.
+Определение probe macro в этом driver не исполняет RootGdiHooks probe.
+
+**Предложение на новое согласование, ещё не реализовано:**
+
+- В `GlassDelphiPanel.h` добавить отдельный exact ANSI paint predicate
+  TPanel/TPage + WM_PAINT/WM_PRINTCLIENT, **не расширяя** общий список
+  IsDelphiPanelClassName/Window.
+- В `DelphiPanelPaint.h` и `TPanelDraw.cpp` провести TPage через **text-only**
+  session и существующий export detour. Для TPage не приобретать фоновые/
+  image IAT-слоты, не менять WM_ERASEBKGND/GetDC/themed-caption policy.
+- Отделить background gate от text-only session, в том числе при вложенном
+  TPanel/TPage и уже активных IAT hooks, чтобы одна сессия не авторизовала
+  фон другой. Сохранить существующие DC/TLS/Full/backdrop/reentry gates,
+  font-based ANSI conversion, transparent glyphs и native fallback.
+- Дополнить `WndCompat/tests/panel_rendering_*` и
+  `delphi_pipeline_contract.py`: TPage text admission/print, exact negatives,
+  zero background/image/themed side effects, nested lifetime/isolation;
+  обновить этот документ. DDH/probe/root routing и принятые соседние контролы
+  остаются вне production-scope.
+
+Общий PaintDispatcher, generic background/DoubleBuffered и accepted
+ComboLBox/SearchBox/TButtonedEdit не менялись. Платформу не запускали и не
+останавливали, DLL не освобождали. Это **диагностика, не пользовательская
+проверка готового исправления**; для TPage implementation нужно новое явное
+согласование указанного узкого scope.
+
+После сохранения выводов удалены **только LogViewer-23.log и API-Monitor-7.log**
+из incoming, без копий в репозитории; разовые анализирующие script/driver и
+их binaries удалены. Изображения и прочие вложения сохранены. BWM.txt не
+изменён, SHA256 по-прежнему
+`bf679ce9c8a29e0d6b4ac8e3dce73cad4f52e454de0961a28e9840133f1e547f`.
