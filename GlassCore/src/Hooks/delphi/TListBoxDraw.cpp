@@ -67,6 +67,11 @@ namespace GlassCore::DelphiListBox
             RECT item;
             bool colorList;
             bool checkList;
+            bool plainList{};
+            bool selected{};
+            // Keep the supplied full-row brush colour in this draw only.
+            // A black text DC alone may be Root's COLOR_WINDOW mapping.
+            COLORREF rowBackground{CLR_INVALID};
             // ODT_COMBOBOX field/item session (TColorBox, TDriveComboBox,
             // TFilterComboBox). The bounds cover only the supplied DC area.
             bool combo{};
@@ -222,6 +227,20 @@ namespace GlassCore::DelphiListBox
             c &= 0xFFFFFFu;
             return c == (GetSysColor(COLOR_WINDOW) & 0xFFFFFFu)
                 || c == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFFu);
+        }
+        BYTE BackgroundAlpha(const Session& s, COLORREF color) noexcept
+        {
+            // A100 is a background rule for exact TListBox, not for selection,
+            // swatches, other list classes, glyphs or a final client buffer.
+            return s.plainList && !s.selected
+                && (color & 0xFFFFFFu) != (GetSysColor(COLOR_HIGHLIGHT) & 0xFFFFFFu)
+                ? 100 : 255;
+        }
+        void RememberRowBackground(const Session& s, const RECT& r, COLORREF color, int result) noexcept
+        {
+            if (result && s.plainList && EqualRect(&r, &s.item)
+                && !g_stack.empty() && g_stack.back().serial == s.serial)
+                g_stack.back().rowBackground = color & 0xFFFFFFu;
         }
         bool IsColorSample(const Session& s, const RECT& r) noexcept
         {
@@ -769,10 +788,16 @@ namespace GlassCore::DelphiListBox
 #if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
                 LogCheckFill(s, dc, *r, lb, L"system-background", cleared);
 #endif
-                return cleared ? 1 : orig(dc, r, brush);
+                const int result = cleared ? 1 : orig(dc, r, brush);
+                RememberRowBackground(s, *r, lb.lbColor, result);
+                return result;
             }
-            wil::unique_hbrush alpha{ Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(lb.lbColor, 255) };
+            // A full row is a proven background. Smaller application graphics
+            // keep their existing A255, even in an unselected TListBox row.
+            const BYTE opacity = EqualRect(r, &s.item) ? BackgroundAlpha(s, lb.lbColor) : 255;
+            wil::unique_hbrush alpha{ Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(lb.lbColor, opacity) };
             const int result = alpha ? orig(dc, r, alpha.get()) : orig(dc, r, brush);
+            RememberRowBackground(s, *r, lb.lbColor, result);
 #if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
             LogCheckFill(s, dc, *r, lb, alpha ? L"alpha-brush" : L"original", result);
 #endif
@@ -791,9 +816,9 @@ namespace GlassCore::DelphiListBox
                 // background, which Root maps to black; that fill would erase
                 // the themed selection under the text. Drop only the opaque
                 // fill and render the glyphs once through the alpha pipeline.
-                const Session s = *current;
                 const UINT comboOptions = options & ~static_cast<UINT>(ETO_OPAQUE);
 #if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
+                const Session s = *current;
                 LogComboText(s, dc, options, count, rect, GetBkColor(dc),
                     (options & ETO_OPAQUE) ? L"opaque-stripped" : L"text");
 #endif
@@ -819,18 +844,24 @@ namespace GlassCore::DelphiListBox
             if ((options & ETO_OPAQUE) && rect)
             {
                 const COLORREF bk = GetBkColor(dc);
-                // Root may already map COLOR_WINDOW to black in the text DC.
-                if ((bk & 0xFFFFFFu) == 0 || SystemBackground(bk))
+                // Keep the old mapped-black fallback unless this row actually
+                // supplied a black full-row brush. No HWND/global colour cache.
+                const bool confirmedBlack = s.plainList && s.rowBackground == 0;
+                if (((bk & 0xFFFFFFu) == 0 && !confirmedBlack) || SystemBackground(bk))
                 {
                     if (!PatBlt(dc, rect->left, rect->top, rect->right-rect->left, rect->bottom-rect->top, BLACKNESS))
                         return orig(dc, x, y, options, rect, text, count, dx);
                 }
                 else
                 {
-                    wil::unique_hbrush alpha{ Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(bk, 255) };
+                    wil::unique_hbrush alpha{
+                        Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(bk, BackgroundAlpha(s, bk)) };
                     if (!alpha || !FillRect(dc, rect, alpha.get()))
                         return orig(dc, x, y, options, rect, text, count, dx);
                 }
+                // A later full-row opaque background supersedes the brush
+                // colour, but ambient black must never establish its own proof.
+                if ((bk & 0xFFFFFFu) != 0) RememberRowBackground(s, *rect, bk, 1);
                 drawOptions &= ~static_cast<UINT>(ETO_OPAQUE);
             }
             if (!count) return TRUE;
@@ -851,8 +882,8 @@ namespace GlassCore::DelphiListBox
                 // VCL may paint the field text with DrawTextW on the owner DC.
                 // Composite the glyphs without filling the background so the
                 // selection/theme under the text stays intact.
-                const Session comboSession = *current;
 #if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
+                const Session comboSession = *current;
                 LogComboText(comboSession, dc, format, static_cast<UINT>(count), rect,
                     GetBkColor(dc), L"drawtext");
 #endif
@@ -871,7 +902,10 @@ namespace GlassCore::DelphiListBox
             g_inHook = true;
             auto guard = wil::scope_exit([]() noexcept { g_inHook = false; });
             int result = 0;
-            if (SUCCEEDED(GlassCore::Text::DrawTextWithAlpha(dc, text, count, rect, format, result))) return result;
+            // Exact TListBox already painted its row (A100 or selection A255).
+            // Do not let the text buffer's BPPF_ERASE replace that background.
+            if (SUCCEEDED(GlassCore::Text::DrawTextWithAlpha(
+                    dc, text, count, rect, format, result, s.plainList))) return result;
             return orig(dc, text, count, rect, format);
         }
     }
@@ -947,6 +981,8 @@ namespace GlassCore::DelphiListBox
         HMODULE mod = GlassCore::ModuleHandler::g_entryPointModule;
         if (!mod) return false;
         Session s{dis->hwndItem, dis->hDC, dis->rcItem, color, check};
+        s.plainList = list && _wcsicmp(cls, L"TListBox") == 0;
+        s.selected = (dis->itemState & ODS_SELECTED) != 0;
         s.combo = combo;
         s.field = comboField;
         // A field owner-draw paints its background over the whole client area,

@@ -415,6 +415,65 @@ class DelphiPipelineContract(unittest.TestCase):
             self.assertIn('TListBoxDraw.cpp', read(file))
             self.assertIn('TListBoxDraw.h', read(file))
 
+    def test_tlistbox_a100_is_exact_background_only_not_selection_or_other_lists(self):
+        code = read('GlassCore/src/Hooks/delphi/TListBoxDraw.cpp')
+        self.assertIn('s.plainList = list && _wcsicmp(cls, L"TListBox") == 0', code)
+        self.assertIn('s.selected = (dis->itemState & ODS_SELECTED) != 0', code)
+        alpha = code.split('BYTE BackgroundAlpha(', 1)[1].split('void RememberRowBackground(', 1)[0]
+        for marker in ('s.plainList && !s.selected', 'GetSysColor(COLOR_HIGHLIGHT)', '? 100 : 255'):
+            self.assertIn(marker, alpha)
+        fill = code.split('int WINAPI MyFill(HDC dc', 1)[1].split('BOOL WINAPI MyExtText(HDC dc', 1)[0]
+        self.assertIn('EqualRect(r, &s.item) ? BackgroundAlpha(s, lb.lbColor) : 255', fill)
+        self.assertIn('CreateSolidColorBrushWithAlpha(lb.lbColor, opacity)', fill)
+        self.assertIn('!sample && SystemBackground(lb.lbColor)', fill)
+        combo = fill.split('if (s.combo)', 1)[1].split('const bool sample', 1)[0]
+        self.assertNotIn('BackgroundAlpha', combo)
+        self.assertIn('CreateSolidColorBrushWithAlpha(lb.lbColor, 255)', combo)
+        ext = code.split('BOOL WINAPI MyExtText(HDC dc', 1)[1].split('int WINAPI MyDrawText(', 1)[0]
+        self.assertIn('CreateSolidColorBrushWithAlpha(bk, BackgroundAlpha(s, bk))', ext)
+        self.assertIn('drawOptions &= ~static_cast<UINT>(ETO_OPAQUE)', ext)
+
+    def test_tlistbox_black_evidence_is_local_to_one_successful_full_row_fill(self):
+        code = read('GlassCore/src/Hooks/delphi/TListBoxDraw.cpp')
+        self.assertIn('COLORREF rowBackground{CLR_INVALID}', code)
+        remember = code.split('void RememberRowBackground(', 1)[1].split('bool IsColorSample(', 1)[0]
+        for marker in ('result && s.plainList', 'EqualRect(&r, &s.item)',
+                       '!g_stack.empty()', 'g_stack.back().serial == s.serial',
+                       'g_stack.back().rowBackground = color & 0xFFFFFFu'):
+            self.assertIn(marker, remember)
+        self.assertEqual(code.count('RememberRowBackground(s, *r, lb.lbColor, result)'), 2)
+        self.assertIn('const bool confirmedBlack = s.plainList && s.rowBackground == 0', code)
+        self.assertIn('((bk & 0xFFFFFFu) == 0 && !confirmedBlack) || SystemBackground(bk)', code)
+        self.assertIn('if ((bk & 0xFFFFFFu) != 0) RememberRowBackground(s, *rect, bk, 1)', code)
+        for forbidden in ('SetProp', 'GetProp', 'SetAlpha', 'RegisterCompatDCProvider', 'RegisterGetDCProvider'):
+            self.assertNotIn(forbidden, code)
+
+    def test_tlistbox_drawtext_keeps_the_painted_background_using_existing_glyph_only_mode(self):
+        code = read('GlassCore/src/Hooks/delphi/TListBoxDraw.cpp')
+        draw = code.split('int WINAPI MyDrawText(HDC dc', 1)[1].split('void Startup()', 1)[0]
+        self.assertIn('dc, text, count, rect, format, result, s.plainList)', draw)
+        for guard in ('DT_CALCRECT | DT_MODIFYSTRING', 'const Session s = *current',
+                      'SaveDC(dc)', 'RestoreDC(dc, saved)', 'IntersectClipRect(dc, s.bounds.left',
+                      'return orig(dc, text, count, rect, format)'):
+            self.assertIn(guard, draw)
+        self.assertNotIn('BackgroundAlpha', draw)
+        self.assertIn('bool transparentBufferBackground = false', read('GlassCore/Include/Subsystems/RenderText.h'))
+        shim = read('WndCompat/tests/listbox_background_test_shim.h')
+        self.assertIn('int& result, bool transparent=false)', shim)
+        self.assertIn('#define DrawTextWithAlpha ListDrawTextWithAlpha', shim)
+
+    def test_tlistbox_background_suite_compiles_complete_production_in_both_modes(self):
+        runner = read('WndCompat/tests/listbox_background_rendering_test.py')
+        test = read('WndCompat/tests/listbox_background_rendering_tests.cpp')
+        self.assertIn('#include "../../GlassCore/src/Hooks/delphi/TListBoxDraw.cpp"', test)
+        self.assertIn('BeginDraw(&parent,&dis)', test)
+        self.assertIn('module.hooks.at(name)', test)
+        self.assertIn('#include "vcl_images_test_shim.h"', read('WndCompat/tests/listbox_background_test_shim.h'))
+        for marker in ("'Release'", "'Debug'", "'-D_DEBUG'", "'-DGLASS_DELPHI_DRAW_PROBE'", "'-Werror'"):
+            self.assertIn(marker, runner)
+        for forbidden in ('read_text', 'source.split(', 'code.split(', '-Wno-error'):
+            self.assertNotIn(forbidden, runner)
+
     def test_delphi_input_fixes_are_exact_and_balanced(self):
         edit = read('GlassCore/src/Hooks/EditHooks.cpp')
         code = read('GlassCore/src/Hooks/delphi/TInputHooks.cpp')
