@@ -83,17 +83,94 @@ namespace GlassCore::DelphiInputIcons
             return owner;
         }
 
-#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-        // Observation only. Install at Startup, before paint-session hooks, and
-        // call the dispatcher's effective original, never replace a fill/brush.
-        int WINAPI ProbeFill(HDC, const RECT*, HBRUSH);
-        const HookDispatcherDependency<1, 3> g_fillProbeDep{{
-            std::tuple{std::array{"user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv,
-                "ext-ms-win-ntuser-misc-l1-1-0.dll"sv}, "FillRect", reinterpret_cast<void*>(ProbeFill)},
-        }};
-        HookDispatcher<1, 3> g_fillProbeDispatcher{g_fillProbeDep, nullptr};
-        thread_local bool g_inFillProbe = false;
+        struct BackgroundPatches
+        {
+            std::array<RECT, 2> rects{};
+            size_t count{};
+        };
 
+        bool ReadSolidBrush(HBRUSH brush, COLORREF& color) noexcept
+        {
+            const ULONG_PTR value = reinterpret_cast<ULONG_PTR>(brush);
+            if (value && value <= COLOR_MENUBAR + 1u)
+            { color = GetSysColor(static_cast<int>(value - 1)); return true; }
+            LOGBRUSH lb{};
+            if (!brush || GetObjectW(brush, sizeof(lb), &lb) != sizeof(lb) || lb.lbStyle != BS_SOLID) return false;
+            color = lb.lbColor;
+            return true;
+        }
+
+        bool ButtonRect(HWND child, HWND owner, const RECT& parentClient, POINT parentOrigin, RECT& result) noexcept
+        {
+            if (GetParent(child) != owner || !GlassShared::GlassIsBackdropAllowedForHwnd(child)) return false;
+            RECT screen{}, client{};
+            POINT origin{};
+            if (!GetWindowRect(child, &screen) || !GetClientRect(child, &client) || !ClientToScreen(child, &origin)
+                || client.left || client.top || client.right <= 0 || client.bottom <= 0
+                || client.right > 1024 || client.bottom > 1024
+                || origin.x != screen.left || origin.y != screen.top
+                || static_cast<long long>(screen.right) - screen.left != client.right
+                || static_cast<long long>(screen.bottom) - screen.top != client.bottom) return false;
+            // Checked wide subtraction; no MapWindowPoints ambiguity or mutation
+            // of a DC's origins/clip. Bordered/oversized/foreign children stay native.
+            const long long left = static_cast<long long>(screen.left) - parentOrigin.x;
+            const long long top = static_cast<long long>(screen.top) - parentOrigin.y;
+            const long long right = static_cast<long long>(screen.right) - parentOrigin.x;
+            const long long bottom = static_cast<long long>(screen.bottom) - parentOrigin.y;
+            if (left < parentClient.left || top < parentClient.top || right > parentClient.right
+                || bottom > parentClient.bottom) return false;
+            result = {static_cast<LONG>(left), static_cast<LONG>(top), static_cast<LONG>(right), static_cast<LONG>(bottom)};
+            return !EqualRect(&result, &parentClient); // never blacken the whole field
+        }
+
+        BackgroundPatches PlanButtonBackground(HWND owner, HWND target, HDC dc, const RECT* rect, HBRUSH brush) noexcept
+        {
+            BackgroundPatches patches{};
+            // Only the window-client DCs actually observed in LogViewer-21. Do
+            // not infer a client coordinate space for a registered memory DC.
+            if (!owner || !HasClass(owner, L"TButtonedEdit") || !rect || WindowFromDC(dc) != target
+                || GetGraphicsMode(dc) != GM_COMPATIBLE || GetLayout(dc) != 0) return patches;
+            COLORREF color{};
+            if (!ReadSolidBrush(brush, color) || (color & 0xFFFFFFu) != (GetSysColor(COLOR_WINDOW) & 0xFFFFFFu)) return patches;
+            RECT client{}, parentClient{};
+            POINT origin{}, dcOrigin{}, viewport{}, windowOrigin{}, parentOrigin{};
+            if (!GetClientRect(target, &client) || IsRectEmpty(&client) || !EqualRect(rect, &client)
+                || !ClientToScreen(target, &origin) || !GetDCOrgEx(dc, &dcOrigin)
+                || origin.x != dcOrigin.x || origin.y != dcOrigin.y
+                || !GetViewportOrgEx(dc, &viewport) || !GetWindowOrgEx(dc, &windowOrigin)
+                || viewport.x || viewport.y || windowOrigin.x || windowOrigin.y
+                || !GetClientRect(owner, &parentClient) || IsRectEmpty(&parentClient)
+                || !ClientToScreen(owner, &parentOrigin)) return patches;
+            if (target != owner)
+            {
+                RECT inParent{};
+                if (ButtonRect(target, owner, parentClient, parentOrigin, inParent))
+                { patches.rects[0] = client; patches.count = 1; }
+                return patches;
+            }
+            unsigned visited = 0;
+            // GetWindow walks direct siblings, NOT descendants. Hidden glyphs
+            // deliberately remain eligible so the exposed parent area is cleared.
+            for (HWND child = GetWindow(owner, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT))
+            {
+                if (++visited > 64) return {};
+                if (!HasClass(child, L"TEditButton.TGlyph") && !HasClass(child, L"TGlyph")) continue;
+                RECT button{};
+                if (patches.count == patches.rects.size() || !ButtonRect(child, owner, parentClient, parentOrigin, button)) return {};
+                patches.rects[patches.count++] = button;
+            }
+            return patches;
+        }
+
+        int WINAPI Fill(HDC, const RECT*, HBRUSH);
+        const HookDispatcherDependency<1, 3> g_fillDep{{
+            std::tuple{std::array{"user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv,
+                "ext-ms-win-ntuser-misc-l1-1-0.dll"sv}, "FillRect", reinterpret_cast<void*>(Fill)},
+        }};
+        HookDispatcher<1, 3> g_fillDispatcher{g_fillDep, nullptr};
+        thread_local bool g_inFillHook = false;
+
+#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
         bool TakeProbe(bool fill) noexcept
         {
             struct Budget { ULONGLONG epoch{}; unsigned remaining{}; bool started{}; };
@@ -105,57 +182,77 @@ namespace GlassCore::DelphiInputIcons
             --b.remaining;
             return true;
         }
+#endif
 
-        int WINAPI ProbeFill(HDC dc, const RECT* rect, HBRUSH brush)
+        int WINAPI Fill(HDC dc, const RECT* rect, HBRUSH brush)
         {
             const DWORD entryError = GetLastError();
             decltype(&::FillRect) orig{};
-            { auto lock = g_lock.lock_shared(); orig = g_fillProbeDispatcher.GetOrg<0, decltype(&::FillRect)>(); }
+            { auto lock = g_lock.lock_shared(); orig = g_fillDispatcher.GetOrg<0, decltype(&::FillRect)>(); }
             if (!orig) orig = ::FillRect;
-            // A separate guard suppresses only recursive telemetry; it must not
-            // change how a nested ImageList call is rendered.
-            if (g_inFillProbe) { SetLastError(entryError); return orig(dc, rect, brush); }
-            g_inFillProbe = true;
-            auto leave = wil::scope_exit([]() noexcept { g_inFillProbe = false; });
+            if (g_inFillHook) { SetLastError(entryError); return orig(dc, rect, brush); }
+            g_inFillHook = true;
+            auto leave = wil::scope_exit([]() noexcept { g_inFillHook = false; });
             HWND target{};
             const HWND owner = rect && brush ? IconOwner(dc, &target) : nullptr;
-            if (!owner || !TakeProbe(true)) { SetLastError(entryError); return orig(dc, rect, brush); }
-
-            const RECT r = *rect; // record the original rectangle, not its clip intersection
+            const BackgroundPatches patches = PlanButtonBackground(owner, target, dc, rect, brush);
+#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
+            const bool trace = owner && TakeProbe(true);
+            const RECT r = rect ? *rect : RECT{};
             wchar_t cls[64]{};
-            GetClassNameW(target, cls, _countof(cls));
             RECT clip{}, client{}, window{};
             POINT dcOrg{}, clientOrg{}, viewport{}, windowOrg{};
-            const int clipKind = GetClipBox(dc, &clip);
-            const BOOL clientOk = GetClientRect(target, &client);
-            const BOOL windowOk = GetWindowRect(target, &window);
-            const BOOL dcOrgOk = GetDCOrgEx(dc, &dcOrg);
-            const BOOL clientOrgOk = ClientToScreen(target, &clientOrg);
-            const BOOL viewportOk = GetViewportOrgEx(dc, &viewport);
-            const BOOL windowOrgOk = GetWindowOrgEx(dc, &windowOrg);
+            int clipKind{};
+            BOOL clientOk{}, windowOk{}, dcOrgOk{}, clientOrgOk{}, viewportOk{}, windowOrgOk{};
             LOGBRUSH lb{};
-            const ULONG_PTR value = reinterpret_cast<ULONG_PTR>(brush);
-            // FillRect also accepts COLOR_*+1 pseudo-handles. Do not interpret
-            // a pattern brush's ignored lbColor as its actual pixel colour.
-            const bool systemBrush = value && value <= COLOR_MENUBAR + 1u;
-            const bool brushValid = systemBrush || GetObjectW(brush, sizeof(lb), &lb) == sizeof(lb);
-            if (systemBrush) { lb.lbStyle = BS_SOLID; lb.lbColor = GetSysColor(static_cast<int>(value - 1)); }
-            const bool rgbValid = brushValid && lb.lbStyle == BS_SOLID;
+            bool systemBrush = false, brushValid = false, rgbValid = false;
+            if (trace)
+            {
+                GetClassNameW(target, cls, _countof(cls));
+                clipKind = GetClipBox(dc, &clip);
+                clientOk = GetClientRect(target, &client);
+                windowOk = GetWindowRect(target, &window);
+                dcOrgOk = GetDCOrgEx(dc, &dcOrg);
+                clientOrgOk = ClientToScreen(target, &clientOrg);
+                viewportOk = GetViewportOrgEx(dc, &viewport);
+                windowOrgOk = GetWindowOrgEx(dc, &windowOrg);
+                const ULONG_PTR value = reinterpret_cast<ULONG_PTR>(brush);
+                systemBrush = value && value <= COLOR_MENUBAR + 1u;
+                brushValid = systemBrush || GetObjectW(brush, sizeof(lb), &lb) == sizeof(lb);
+                if (systemBrush) { lb.lbStyle = BS_SOLID; lb.lbColor = GetSysColor(static_cast<int>(value - 1)); }
+                rgbValid = brushValid && lb.lbStyle == BS_SOLID;
+            }
+#endif
             SetLastError(entryError);
-            const int result = orig(dc, rect, brush);
+            const int result = orig(dc, rect, brush); // original arguments/result exactly once
             const DWORD error = GetLastError();
-            DebugLog(DBG_NORMAL,
-                L"[GlassCore][DelphiInputIconProbe] stage=fill api=FillRect hwnd=0x%p target=0x%p class=\"%s\" dc=0x%p rect=[%ld,%ld,%ld,%ld] clipKind=%d clip=[%ld,%ld,%ld,%ld] clientOk=%d client=[%ld,%ld,%ld,%ld] windowOk=%d window=[%ld,%ld,%ld,%ld] dcOrgOk=%d dcOrg=[%ld,%ld] clientOrgOk=%d clientOrg=[%ld,%ld] viewportOk=%d viewport=[%ld,%ld] windowOrgOk=%d windowOrg=[%ld,%ld] brush=0x%p brushValid=%d systemBrush=%d brushStyle=%u brushRGBValid=%d brushRGB=0x%06X result=%d",
-                owner, target, cls, dc, r.left, r.top, r.right, r.bottom, clipKind,
-                clip.left, clip.top, clip.right, clip.bottom, clientOk, client.left, client.top, client.right, client.bottom,
-                windowOk, window.left, window.top, window.right, window.bottom, dcOrgOk, dcOrg.x, dcOrg.y,
-                clientOrgOk, clientOrg.x, clientOrg.y, viewportOk, viewport.x, viewport.y,
-                windowOrgOk, windowOrg.x, windowOrg.y, brush, brushValid ? 1 : 0, systemBrush ? 1 : 0,
-                static_cast<unsigned>(lb.lbStyle), rgbValid ? 1 : 0, static_cast<unsigned>(lb.lbColor & 0xFFFFFFu), result);
+            unsigned patched = 0;
+            if (result)
+                for (size_t i = 0; i < patches.count; ++i)
+                {
+                    const RECT& p = patches.rects[i];
+                    // Keep the caller's actual (possibly complex) clip intact.
+                    // BLACKNESS clears RGB/alpha only in the proven button area.
+                    if (PatBlt(dc, p.left, p.top, p.right - p.left, p.bottom - p.top, BLACKNESS)) ++patched;
+                }
+#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
+            if (trace)
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiInputIconProbe] stage=fill api=FillRect hwnd=0x%p target=0x%p class=\"%s\" dc=0x%p rect=[%ld,%ld,%ld,%ld] clipKind=%d clip=[%ld,%ld,%ld,%ld] clientOk=%d client=[%ld,%ld,%ld,%ld] windowOk=%d window=[%ld,%ld,%ld,%ld] dcOrgOk=%d dcOrg=[%ld,%ld] clientOrgOk=%d clientOrg=[%ld,%ld] viewportOk=%d viewport=[%ld,%ld] windowOrgOk=%d windowOrg=[%ld,%ld] brush=0x%p brushValid=%d systemBrush=%d brushStyle=%u brushRGBValid=%d brushRGB=0x%06X result=%d patched=%u",
+                    owner, target, cls, dc, r.left, r.top, r.right, r.bottom, clipKind,
+                    clip.left, clip.top, clip.right, clip.bottom, clientOk, client.left, client.top, client.right, client.bottom,
+                    windowOk, window.left, window.top, window.right, window.bottom, dcOrgOk, dcOrg.x, dcOrg.y,
+                    clientOrgOk, clientOrg.x, clientOrg.y, viewportOk, viewport.x, viewport.y,
+                    windowOrgOk, windowOrg.x, windowOrg.y, brush, brushValid ? 1 : 0, systemBrush ? 1 : 0,
+                    static_cast<unsigned>(lb.lbStyle), rgbValid ? 1 : 0, static_cast<unsigned>(lb.lbColor & 0xFFFFFFu), result, patched);
+#else
+            (void)patched;
+#endif
             SetLastError(error);
             return result;
         }
 
+#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
         void ProbePixels(const wchar_t* api, HWND owner, HWND target, HIMAGELIST images, int index,
             HDC dc, const RECT& bounds, UINT style, BOOL drawn, HRESULT bitsResult, BOOL flushed,
             const RGBQUAD* pixels, int stride, int width, int height) noexcept
@@ -166,7 +263,7 @@ namespace GlassCore::DelphiInputIcons
             const bool available = drawn && SUCCEEDED(bitsResult) && pixels && stride >= width && flushed;
             unsigned a0 = 0, a255 = 0, apart = 0, white = 0, nonPremul = 0;
             // Read the complete image, excluding row padding. No alpha/RGB writes
-            // or policy decisions; the existing any-alpha fallback stays below.
+            // or policy decisions; alpha/legacy-mask handling stays below.
             if (available)
                 for (int row = 0; row < height; ++row)
                     for (int col = 0; col < width; ++col)
@@ -189,6 +286,53 @@ namespace GlassCore::DelphiInputIcons
                 static_cast<unsigned>(bitsResult), flushed, available ? 1 : 0, stride, a0, a255, apart, white, nonPremul);
         }
 #endif
+
+        template<typename Paint> bool RestoreLegacyMaskAlpha(HDC dc, const RECT& bounds,
+            RGBQUAD* black, int blackStride, int width, int height, UINT style, Paint& paint)
+        {
+            // The first native RGB-only pass was drawn on transparent black.
+            // Replay that SAME operation on white: the native mask (including
+            // holes, overlay and state) determines which destination pixels survive.
+            // This is coverage recovery, never a black/white RGB colour key and
+            // never a request for ILD_MASK that would bypass native image states.
+            BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+            BP_PAINTPARAMS params{sizeof(params), 0, nullptr, &blend};
+            HDC memory{};
+            HPAINTBUFFER matte = BeginBufferedPaint(dc, &bounds, BPBF_TOPDOWNDIB, &params, &memory);
+            if (!matte || !memory)
+            {
+                if (matte) EndBufferedPaint(matte, FALSE);
+                return false;
+            }
+            auto discardMatte = wil::scope_exit([matte] { EndBufferedPaint(matte, FALSE); });
+            RGBQUAD* white{};
+            int whiteStride{};
+            if (FAILED(BufferedPaintClear(matte, nullptr))
+                || FAILED(GetBufferedPaintBits(matte, &white, &whiteStride))
+                || !white || whiteStride < width || !GdiFlush()) return false;
+            for (int row = 0; row < height; ++row)
+                for (int col = 0; col < width; ++col)
+                    white[static_cast<size_t>(row) * whiteStride + col] = RGBQUAD{255, 255, 255, 0};
+            if (!paint(memory, style | ILD_TRANSPARENT | ILD_PRESERVEALPHA) || !GdiFlush()) return false;
+            for (int row = 0; row < height; ++row)
+                for (int col = 0; col < width; ++col)
+                {
+                    RGBQUAD& dark = black[static_cast<size_t>(row) * blackStride + col];
+                    const RGBQUAD& light = white[static_cast<size_t>(row) * whiteStride + col];
+                    const int delta = light.rgbBlue - dark.rgbBlue;
+                    // A valid source-over RGB/mask operation has the same
+                    // nonnegative white-minus-black contribution in all channels.
+                    // Unsupported XOR/colour-dependent results stay native.
+                    if (delta < 0 || light.rgbGreen - dark.rgbGreen != delta
+                        || light.rgbRed - dark.rgbRed != delta) return false;
+                    const int alpha = 255 - delta;
+                    if (dark.rgbBlue > alpha || dark.rgbGreen > alpha || dark.rgbRed > alpha) return false;
+                    // RGB over black is already premultiplied. Both opaque black
+                    // and opaque white survive; untouched transparent holes get A0.
+                    dark.rgbReserved = static_cast<BYTE>(alpha);
+                }
+            return true;
+        }
 
         template<typename Paint> std::optional<BOOL> TryDraw(
             HIMAGELIST images, HDC dc, int x, int y, int width, int height, UINT style, void* nativeApi,
@@ -239,11 +383,12 @@ namespace GlassCore::DelphiInputIcons
                 if (SUCCEEDED(bitsResult) && pixels && stride >= width) flushed = GdiFlush();
             }
 #if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-            // Log before commit AND before the unchanged unavailable/no-alpha
-            // fallback, so absence of pixels is not confused with an empty icon.
+            // Log the original native bytes before commit or legacy-mask recovery,
+            // so missing pixels are not confused with an empty/RGB-only icon.
             ProbePixels(api, owner, target, images, index, dc, bounds, style, drawn,
                 bitsResult, flushed, pixels, stride, width, height);
 #endif
+            [[maybe_unused]] bool legacyMask = false;
             if (drawn)
             {
                 if (!flushed) return std::nullopt;
@@ -255,9 +400,14 @@ namespace GlassCore::DelphiInputIcons
                             hasAlpha = true;
                             break;
                         }
-                // A legacy renderer may ignore PRESERVEALPHA. Do not report a
-                // successful invisible icon; discard it and use the native call.
-                if (!hasAlpha) return std::nullopt;
+                // Keep all existing nonzero-alpha bytes and SearchBox behaviour.
+                // Only a bounded TButtonedEdit RGB-only result gets mask recovery.
+                if (!hasAlpha)
+                {
+                    if (!HasClass(owner, L"TButtonedEdit")
+                        || !RestoreLegacyMaskAlpha(dc, bounds, pixels, stride, width, height, style, paint)) return std::nullopt;
+                    legacyMask = true;
+                }
             }
             const HRESULT committed = EndBufferedPaint(buffer, drawn);
             buffer = nullptr;
@@ -271,8 +421,8 @@ namespace GlassCore::DelphiInputIcons
                 --budget;
                 wchar_t cls[64]{};
                 GetClassNameW(target, cls, _countof(cls));
-                DebugLog(DBG_NORMAL, L"[GlassCore][DelphiInputIcon] stage=result api=%s hwnd=0x%p target=0x%p class=\"%s\" dc=0x%p images=0x%p index=%d rect=[%ld,%ld,%ld,%ld] style=0x%X draw=%d commit=0x%08lX",
-                    api, owner, target, cls, dc, images, index, bounds.left, bounds.top, bounds.right, bounds.bottom, style, drawn, committed);
+                DebugLog(DBG_NORMAL, L"[GlassCore][DelphiInputIcon] stage=result api=%s hwnd=0x%p target=0x%p class=\"%s\" dc=0x%p images=0x%p index=%d rect=[%ld,%ld,%ld,%ld] style=0x%X draw=%d commit=0x%08lX legacyMask=%d",
+                    api, owner, target, cls, dc, images, index, bounds.left, bounds.top, bounds.right, bounds.bottom, style, drawn, committed, legacyMask ? 1 : 0);
             }
 #endif
             SetLastError(error);
@@ -327,12 +477,13 @@ namespace GlassCore::DelphiInputIcons
         g_dispatcher.moduleAddress = GlassCore::ModuleHandler::g_entryPointModule;
         g_dispatcher.CacheHookData();
         for (size_t i = 0; i < HookCount; ++i) g_dispatcher.EnableHook(i, true);
+        // Register before paint-session hooks; keep their effective originals.
+        g_fillDispatcher.moduleAddress = GlassCore::ModuleHandler::g_entryPointModule;
+        g_fillDispatcher.CacheHookData();
+        g_fillDispatcher.EnableHook(0, true);
 #if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-        g_fillProbeDispatcher.moduleAddress = GlassCore::ModuleHandler::g_entryPointModule;
-        g_fillProbeDispatcher.CacheHookData();
-        g_fillProbeDispatcher.EnableHook(0, true);
         DebugLog(DBG_NORMAL, L"[GlassCore][DelphiInputIconProbe] stage=arm exe=0x%p fillRef=%d imageRefs=[%d,%d,%d]",
-            GlassCore::ModuleHandler::g_entryPointModule, g_fillProbeDispatcher.GetRef(0),
+            GlassCore::ModuleHandler::g_entryPointModule, g_fillDispatcher.GetRef(0),
             g_dispatcher.GetRef(DrawSlot), g_dispatcher.GetRef(DrawExSlot), g_dispatcher.GetRef(IndirectSlot));
 #endif
         g_shutdown.store(false, std::memory_order_release);
@@ -341,9 +492,7 @@ namespace GlassCore::DelphiInputIcons
     {
         g_shutdown.store(true, std::memory_order_release);
         auto lock = g_lock.lock_exclusive();
-#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-        g_fillProbeDispatcher.DisableAllHooks();
-#endif
+        g_fillDispatcher.DisableAllHooks();
         g_dispatcher.DisableAllHooks();
     }
 }

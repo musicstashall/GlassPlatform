@@ -4645,3 +4645,306 @@ GDI/DWM; реальная PE/IAT-цепочка, Windows pixels и визуал�
 состояниями и TSearchBox (изображение уже непрозрачно); для детальных fill/pixel
 строк — Debug GlassCore с opt-in `GLASS_DELPHI_DRAW_PROBE`. Отчёт по каждому:
 **скриншот → «Логи при отображении» → «Логи с зондом при отображении элемента»**.
+
+## Тест 107: LogViewer-21 — RGB-only ImageList fallback и белая заливка при скрытии TGlyph
+
+После `784fc65` пользователь не увидел визуальных изменений (`image-60.png`).
+Описанная последовательность: отображение TButtonedEdit, затем скрытие и показ
+дочернего TEditButton.TGlyph; при скрытии на его месте виден белый прямоугольник.
+Первый шаг 106 **не считается визуальным исправлением**. В этом шаге выполнен
+только разбор, production/tests не менялись; следующая политика пока не согласована.
+
+`LogViewer-21.log`: **22 337 bytes, 83 строки, UTF-8 без BOM**, SHA-256
+`7d135a8b5ab94cd1c487cd094c06a45d14a6813826e2228a02202441daae0897`.
+Все записи PID=37956/TID=49804, 11:41:14.867–11:41:19.661;
+Root называет `DelphiControlsSample_Win32.exe`, entry point `0x00B00000`.
+Исходный лог после сохранения выводов удалён из входящих, копия не создавалась.
+Изображение не удалялось. Явных ShowWindow/WM_SHOWWINDOW в этом фрагменте нет:
+сопоставление фаз со скрытием/показом дано пользователем.
+
+### Exact gate теперь пройден; непрозрачная композиция всё ещё не выполнена
+
+Owner TButtonedEdit=`0x00CD0F4C`, дочерний raw TEditButton.TGlyph=`0x008A0D80`.
+Два `stage=pixels api=ImageList_DrawEx` (строки 49/82) для HIMAGELIST=`0x00777110`,
+index=0, style=0, bounds/clip=`[0,0,16,16]`:
+
+| Время | HDC | stride | draw / bitsHr / flushed / available | alpha0 / alpha255 / alphaPartial | whiteNonzeroAlpha / nonPremul |
+|---|---|---:|---|---|---|
+| 11:41:14.882 | `0xDE011DD6` | 136 | 1 / S_OK / 1 / 1 | 256 / 0 / 0 | 0 / 118 |
+| 11:41:18.136 | `0x8E010B95` | 16 | 1 / S_OK / 1 / 1 | 256 / 0 / 0 | 0 / 118 |
+
+Это прямое доказательство прохождения квалифицированного класса в наш ImageList
+путь, а не новый пропуск gate, отсутствие импорта или предположение о старой DLL.
+Однако native draw в проверенном буфере оставил **A=0 у всех 256 пикселей**.
+`nonPremul=118` при таком A означает ненулевые RGB у 118 пикселей, не наличие
+alpha и не доказательство формата/битности исходного ImageList. Это согласуется
+с RGB/mask-отрисовкой без заполнения alpha; конкретный внутренний GDI API и
+исходная маска в этом журнале не записаны.
+
+В текущем `TryDraw` после этой статистики `hasAlpha` остаётся false:
+`if (!hasAlpha) return std::nullopt` → scope discard `EndBufferedPaint(FALSE)` →
+`DrawEx` вызывает original ещё раз на исходном DC с исходными параметрами.
+Поэтому изображение возвращается к прежней native-отрисовке, а alpha-commit
+нашего буфера не происходит. Это объясняет отсутствие видимого улучшения
+непрозрачности после исправления класса. Отсутствие `stage=result` здесь
+**не отсутствие перехвата**: ранний no-alpha fallback находится до этого маркера.
+
+Повтор при tight stride=16 с теми же счётчиками не позволяет списать всё на
+первый stride=136 или padding. `whiteNonzeroAlpha=0` при полном A0 **не исключает
+белые RGB**: этот счётчик по определению требует A>0. Нельзя ни просто снять
+защиту от невидимого буфера, ни сделать весь прямоугольник A255, ни вырезать
+белые/чёрные детали по RGB. Нужна отдельная mask-aware ветка для такого результата.
+
+### Подложка: две разные заливки, включая свежее восстановление родителем
+
+Нативные FillRect со solid brush=`0x991012A5`, RGB=`0xFFFFFF`, result=1:
+
+- Строка 27, 11:41:14.872: **родитель** TButtonedEdit, rect/client=`[0,0,136,19]`,
+  clip=`[0,0,136,19]`, clientOrg/DCOrg=`[399,502]`.
+- Строки 47/80, 11:41:14.881 и 11:41:18.136: **дочерняя кнопка** TGlyph,
+  rect/client/clip=`[0,0,16,16]`, window=`[519,503,535,519]`,
+  clientOrg/DCOrg=`[519,503]`.
+- Строки 52/65, 11:41:17.653 и 11:41:18.132: опять **родитель**,
+  тот же full-client FillRect=`[0,0,136,19]`, но clip=`[120,1,136,17]`.
+  Следующие BeginPaint и EndPaint.before несут тот же paint/clip.
+
+Геометрия однозначно совпадает: screen-rect дочернего окна минус client origin
+родителя даёт `[519−399,503−502,535−399,519−502] = [120,1,136,17]` — ровно
+16×16 и ровно частичный update родителя. В этих кадрах это **не только возможные
+старые неперерисованные пиксели**: зарегистрирован новый успешный FillRect
+родителя белой кистью в открывшейся области кнопки. Исправить только TGlyph.Paint
+или только ImageList недостаточно для сценария скрытия.
+
+Все пять fill-записей идут до/между paint-фазами без подмены текущим зондом.
+В частности, родительская заливка уже происходит **до возврата BeginPaint**,
+маркер которого следует за ней. Нельзя предполагать, что обработчик только
+после BeginPaint или только перед ImageList автоматически накроет все эти фазы.
+Root дважды пишет `SetBkColor COLOR_WINDOW→0` для TGlyph (строки 46/79),
+но следующий FillRect всё равно получает белую solid-кисть: состояние BkColor
+не меняет цвет уже созданной кисти. Перенастройка одного SetBkColor это не лечит.
+
+### Отдельные пределы анализа
+
+- 12 TextResult: 10 с S_OK/fallback=0, **2 с E_FAIL/fallback=1** при частичном
+  update родителя (options=0x1004, count=1). За ними явно следует `plain fallback origW`;
+  основные count=13/options=0x14 в обеих этих фазах успешны. Это не доказательство
+  отсутствия перерисовки и не разрешение менять общий текстовый конвейер.
+- `stage=arm` не попал в фрагмент, но fill/pixel-маркеры уже доказывают активность
+  нужных hooks. Начальные clip 1×1 у новых compatible DC не задают последующий
+  реальный размер bitmap. Указатель HDC переиспользуется разными окнами; связывать
+  операции нужно по текущим owner/target/class и геометрии, не только HDC.
+- **TSearchBox в файле нет.** Его подтверждённую пользователем непрозрачность
+  изображения не пересматриваем; выводы о текущей A0-картинке относятся к TGlyph.
+  Общая DoubleBuffered, принятые TListBox/ListView/ToolBar/Panel и IAT-инфраструктура
+  этим разбором не затрагиваются.
+
+### Следующее изменение — на согласование, двумя отдельными шагами
+
+1. **Подложка кнопки TButtonedEdit:** узкая обработка её фоновой заливки и
+   восстановления этой же области родителем при hide/show. Геометрия должна
+   доказываться реальным прямым TGlyph-child, включая скрытый, и отображаться
+   в координаты нужного DC с сохранением clip; не делать прозрачным весь Edit
+   или произвольный белый прямоугольник. Учесть заливку до возврата BeginPaint,
+   обычный paint и частичный update. Текст и обычный фон поля остаются прежними.
+2. **Изображение TButtonedEdit:** отдельная bounded legacy/RGB-only ветка, когда
+   native draw дал RGB, но A=0 везде. Сохранить native mask/состояние/overlay/index,
+   делать непрозрачным рисунок, а не прозрачные участки; не keying по цвету и не
+   blanket BitBlt/MaskBlt. Существующий alpha-путь и изображение SearchBox не менять.
+   Конкретный внутренний transfer не считать установленным этим логом.
+
+Основные предполагаемые файлы: `TInputIcons.cpp`, его behavioral runner,
+`delphi_pipeline_contract.py` и эта документация. Для фона нужны регрессии
+с видимым/скрытым прямым child, partial parent paint ровно на его месте,
+выходом за область кнопки и чужими окнами; для image — ненулевые RGB при полном
+A0 с реальной маской, чёрные/белые детали, прозрачные дырки и native параметры.
+Публикация каждого исправления — отдельным коммитом после согласования и проверок.
+Контроль неизменённого production: contracts **99/99**, input icons **13/13 ×
+Release / Debug / Debug+probe — PASS**. Это проверка текущего поведения, включая
+native fallback при A0, а не исправление обнаруженных дефектов.
+Сейчас сохранены только выводы; MSVC/Windows visual acceptance отсутствует.
+
+## Тест 108: TButtonedEdit — подложка прямой кнопки и восстановление родителем
+
+Пользователь согласовал оба шага §107 командой «внедряй». Это **первый отдельный
+implementation-коммит: только фон**. RGB-only ImageList пока сохраняет прежний
+fallback; вторая правка будет отдельной. Изображение TSearchBox, общий текстовый
+конвейер, DoubleBuffered и принятые соседние контролы не изменены.
+
+### Узкая production-политика FillRect
+
+`TInputIcons.cpp` теперь держит EXE IAT FillRect не только в opt-in зондовой
+сборке, но и в Release/обычном Debug. Использован тот же HookDispatcher и его
+**effective original**; IATRegistry/порядок Engine не переделаны. Перехват не
+зависит от уже вернувшегося BeginPaint, paint-stack или нового subclass:
+поэтому охватывает наблюдавшуюся заливку **до возврата BeginPaint**, обычную
+отрисовку и частичный update с тем же full-client FillRect.
+
+Общие прежние ограничения Full/MM_TEXT/Edit/backdrop/shutdown/reentry остаются.
+Дополнительные условия именно для фоновой правки:
+
+- owner — exact TButtonedEdit, target — сам owner либо exact
+  TEditButton.TGlyph/TGlyph с его **непосредственным** parent;
+- фактический оконный client DC: `WindowFromDC == target`, `GM_COMPATIBLE`,
+  без RTL-layout и с нулевыми window/viewport origins; DC origin совпадает с
+  `ClientToScreen(target, {0,0})`. Неизвестные/зарегистрированные memory DC,
+  non-client DC, сдвинутые и преобразованные DC не угадываются;
+- исходный RECT равен всему непустому client target. Частичная перерисовка
+  поддержана **через сохранённый clip**, а не произвольный маленький белый RECT;
+- solid brush (включая Win32 pseudo-system brush) имеет текущий RGB
+  `COLOR_WINDOW`. Цветные/узорные/неизвестные кисти не меняются;
+- реальный прямой glyph-child доказывается текущими class/parent, backdrop,
+  GetWindowRect/GetClientRect/ClientToScreen. Допускается только borderless child
+  1…1024 × 1…1024, целиком внутри client родителя и **не равный всему полю**.
+  Для parent DC screen bounds переводятся проверенным wide-вычитанием client
+  origin родителя; для child DC используется его собственный client RECT.
+
+Родитель перебирает только прямые HWND siblings (`GW_CHILD/GW_HWNDNEXT`),
+**не фильтруя скрытые окна**. Нужны нынешние границы child, а не кэш последней
+видимой картинки и не предположение «16 пикселей справа». Поддержаны обе
+кнопки; больше двух подходящих glyph либо обход более 64 siblings отменяет
+план целиком. Неподтверждённая геометрия также оставляет native-путь.
+
+Original FillRect вызывается **ровно один раз**, с теми же HDC/RECT-pointer/brush
+и входным LastError. Только после его успешного результата `PatBlt(BLACKNESS)`
+очищает доказанные button-only области. Clip DC, в том числе сложный и его
+дырки, **не заменяется**; текстовая часть/рамка/пиксели вне clip не очищаются.
+Native return и LastError возвращаются без подмены. Ошибка original не запускает
+очистку; ошибка PatBlt оставляет native-заливку и не объявляется успехом renderer.
+Это не whole-Edit transparency, не blanket GDI hook и не изменение кисти caller.
+
+Opt-in `stage=fill` сохраняет прежние geometry/brush/result поля и добавляет
+`patched=N` — число успешных button-only PatBlt (это **не** проверка финального
+Windows framebuffer). Pixel probe остаётся read-only; бюджеты 24 fill / 12 pixel
+строк в секунду на поток независимы от production-очистки.
+
+### Проверки и границы
+
+- Перед production-изменением три новых фоновых сценария дали ожидаемый **RED
+  во всех трёх сборках**: старый код оставлял native белый фон.
+- Полный production `TInputIcons.cpp` с Win32/IAT doubles: **18/18 ×
+  Release / Debug / Debug+probe — PASS**, также ASan/UBSan.
+  Новые проверки исполняют оба glyph-алиаса, full/partial/complex clip,
+  visible/hidden child, левую и правую кнопки и update вне кнопок. Геометрия
+  `[519,503,535,519] − [399,502] = [120,1,136,17]` взята из §107.
+- Проверяются сохранение обычного поля и sentinel-пикселей, 29 вариантов
+  отказа по class/parent/DC/кисти/геометрии, native/PatBlt failure,
+  shutdown/отсутствующий импорт/reentry и переданный effective original,
+  включая его нестандартные return=13/LastError=67 при реальной очистке.
+- Source contracts: **100/100 — PASS**. Старый контракт «fill только наблюдает»
+  заменён проверкой новой production-политики; условность opt-in логов сохранена.
+- Семь полных production-мутантов **поведенчески отвергнуты в Release и
+  Debug+probe**: пропуск hidden-child, очистка всего Edit, неверные координаты,
+  недоказанный DC origin, обход effective original, потеря LastError и reentry.
+  Mutation scratch удалён; production-файлы для этих проверок не подменялись.
+- Контрольные runners: ListBox background **13**, VCL images **14**, ListView
+  images **13**, Panel **12**, ButtonGroups **9**, CoolBar **9**, BomeMemo **14** — PASS.
+
+Здесь нет MSVC/Windows GDI/DWM: doubles проверяют границы и вызовы, но не реальный
+PE/IAT concurrency или визуальную приёмку. На Windows остаётся проверить
+первое отображение → hide → show обеих кнопок и частичный repaint; сами RGB-only
+картинки до следующего implementation-коммита ещё идут через native fallback.
+
+## Тест 109: TButtonedEdit — mask-aware восстановление alpha у RGB-only ImageList
+
+Это **второй согласованный implementation-коммит** после фонового §108.
+Он добавляет отдельную `RestoreLegacyMaskAlpha` только для exact TButtonedEdit
+(самого owner или его прямого glyph) и только когда успешный первый native draw
+после GetBufferedPaintBits/GdiFlush дал **A=0 во всём изображении без padding**.
+Прежние Full/Edit/backdrop/proven-DC/reentry/shutdown ограничения и bounds
+1…1024 × 1…1024 сохранены. `ILD_MASK/ILD_ROP/ILD_DPISCALE` остаются native.
+**Любая ненулевая alpha в первом проходе сохраняет прежний путь без перезаписи
+байтов. TSearchBox не получает новую ветку, в том числе при синтетическом A0.**
+
+### Покрытие от native mask, а не RGB color-key
+
+Первый проход уже нарисован native ImageList на очищенном чёрном DIB. Если
+alpha отсутствует, тот же сохранённый `paint` вызывается ещё раз в отдельный
+BPBF_TOPDOWNDIB с контрольным белым RGB. Это повтор **той же нативной операции**,
+а не подмена иконки, новый индекс, чтение bitmap strip или самостоятельная
+интерпретация overlay/disabled-state. Штатный renderer сам применяет маску.
+Документированный `ILD_TRANSPARENT` использует mask независимо от фонового
+цвета; см. [ImageList_DrawEx, fStyle](https://github.com/MicrosoftDocs/sdk-api/blob/docs/sdk-api-src/content/commctrl/nf-commctrl-imagelist_drawex.md).
+Как и раньше, к исходному fStyle добавляются только
+`ILD_TRANSPARENT | ILD_PRESERVEALPHA`; запрос не заменяется на `ILD_MASK`.
+
+Оба прохода получают тот же native index, x/y, исходные cx/cy и цвета.
+Indirect снова копируется из caller: xBitmap/yBitmap, overlay bits, fState,
+Frame, crEffect, dwRop и остальные поля сохранены; меняются только временный
+hdcDst и те же два флага. Caller-структура не модифицируется. Контрольный DIB
+**никогда не коммитится**; финальный transfer остаётся существующим
+EndBufferedPaint/AC_SRC_ALPHA для первого буфера.
+
+Для каждого RGB-канала допустимого source-over/mask результата:
+
+```
+black = premultiplied foreground
+white = black + (255 - coverage)
+delta = white.B - black.B = white.G - black.G = white.R - black.R
+alpha = 255 - delta
+```
+
+Проверяется неотрицательность и одинаковость delta всех трёх каналов, затем
+premultiplied bounds. RGB первого прохода остаётся **нетронутым**, записывается
+только вычисленная alpha. Поэтому:
+
+- чёрная деталь: black=0, white=0 → **A255**, не прозрачный black-key;
+- белая деталь: black=255, white=255 → **A255**, не прозрачный white-key;
+- прозрачная дырка native mask: black=0, white=255 → **A0**;
+- частичное native покрытие/Frame сохраняет вычисленную частичную alpha,
+  а не принудительные 255. В полностью прозрачном значке не появляется фон;
+  полностью покрытый прямоугольник разрешён только если его так реально
+  нарисовал native renderer, а не по наличию ненулевого RGB.
+
+Первый и контрольный DIB могут иметь **разные stride**: каждый индексируется
+своим stride, обход ограничен width/height и не использует/не переписывает padding.
+Перед CPU-подготовкой контрольного RGB и перед его чтением выполняется GdiFlush.
+Одновременно живут не больше двух paint buffers. Ошибка второго buffer/DC/clear/
+bits/stride/flush/native draw либо несовместимый destination-dependent/XOR
+результат отменяет ветку: оба временных буфера discarded, затем original
+повторяется на **исходном HDC с исходными параметрами**. В частности, не
+угадывается alpha при несовпавших delta, включая возможное неоднозначное
+округление сложных составных эффектов. Это намеренно ограниченный путь, не
+универсальная эмуляция всех ROP/ImageList-реализаций.
+
+При успешном commit возвращается LastError **первого** native draw, а не
+контрольного прохода/cleanup/логирования. В обычном Debug `stage=result` добавлено
+`legacyMask=1` для восстановленной маски, `0` для прежнего alpha-пути.
+Opt-in `stage=pixels` по-прежнему read-only и показывает исходные native байты
+**до** восстановления: сочетание A0 в нём и последующего `legacyMask=1` ожидаемо.
+Текст/RenderText, DoubleBuffered, фоновый renderer §108, SearchBox и принятые
+ListBox/ListView/ToolBar/Panel/прочие controls не переделывались.
+
+### Проверки и оставшаяся Windows-приёмка
+
+- Новые mask/preserved-params тесты дали **RED во всех трёх сборках** до
+  production-изменения: прежний код отбрасывал RGB-only буфер.
+- Полный production `TInputIcons.cpp`: **22/22 × Release / Debug / Debug+probe —
+  PASS**, также ASan/UBSan. Все прежние 18 сценариев, включая фон §108, сохранены.
+- Native double теперь действительно применяет **отдельную бинарную маску**
+  к текущему RGB destination и оставляет alpha нулевой, а не возвращает заранее
+  ожидаемую alpha. Проверены чёрные/белые/цветные детали и дырки с теми же RGB,
+  полностью чёрный/белый/пустой/покрытый значок, оба glyph-алиаса и owner.
+- Исполнены все три API, overlay из другого index, crop и нестандартные поля
+  Indirect, ILS_ALPHA/Frame=128 и ILS_SATURATE; caller-params сравниваются по всем
+  полям без зависимости от struct padding. Padding DIB отравлен ненулевой alpha;
+  stride первого и второго проходов различается и остаётся нетронутым.
+- 11 вариантов secondary failure/несовместимого покрытия проверяют discard,
+  исходные native параметры/fStyle на fallback и отсутствие частичного commit.
+  Контрольный draw отдаёт LastError=124, первый — 123: наружу сохраняется **123**.
+  SearchBox A0, прежние mixed-alpha байты, неподдержанные стили и reentry проверены.
+- Source contracts **103/103 — PASS**. Read-only контракт pixel probe не ослаблен;
+  запись alpha разрешена только новому helper, не общему alpha-пути.
+- Девять полных production-мутантов отвергнуты **поведенчески в Release и
+  Debug+probe**: rectangle-A255, black-key, white-key, чужой stride, включение
+  SearchBox, вмешательство в nonzero-alpha путь, потеря overlay, commit после
+  secondary failure и потеря native LastError. Mutation scratch удалён.
+- Контрольные runners вновь PASS: ListBox background **13**, VCL images **14**,
+  ListView images **13**, Panel **12**, ButtonGroups **9**, CoolBar **9**, BomeMemo **14**.
+
+Это переносимые Win32/IAT doubles и source contracts, **не** настоящие MSVC,
+Windows comctl32/uxtheme/GDI/DWM или проверка PE/IAT concurrency. Визуальный
+результат ещё не принят пользователем. После обоих implementation-коммитов
+на Windows проверить первое отображение TButtonedEdit, обе кнопки с разными
+картинками/состояниями, hide → show и частичный repaint; контроль — неизменённый
+SearchBox. Новый захват исходного LogViewer-21 для реализации не требовался;
+сохранённые выводы §107 и image-60 остаются основанием этого изменения.
