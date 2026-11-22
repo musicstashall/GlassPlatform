@@ -5054,7 +5054,164 @@ PatBlt(BLACKNESS) с сохранённым фактическим clip. Неп�
 - Контрольные runners: ListBox background **13**, VCL images **14**, ListView
   images **13**, Panel **12**, ButtonGroups **9**, CoolBar **9**, BomeMemo **14** — PASS.
 
-Новый результат **SearchBox ещё не принят визуально**: здесь нет MSVC/настоящих
-Windows comctl32/GDI/DWM или PE/IAT concurrency. На Windows остаётся проверить
-первый показ и NC repaint, text/audio, normal/hot/pressed/disabled, смену размера
-и положения; контроль — принятый TButtonedEdit и неизменённое изображение SearchBox.
+После `d96c223` пользователь **подтвердил успех и закрыл задачу SearchBox**.
+Это визуальная приёмка пользователем, а не вывод portable doubles. Принятые
+TButtonedEdit и SearchBox не входят в следующую задачу ComboLBox. Здесь по-прежнему
+нет MSVC/настоящих Windows comctl32/GDI/DWM или проверки PE/IAT concurrency.
+
+## Тест 111: SearchBox принят; LogViewer-22 — три разных пути ComboLBox
+
+**Статус: анализ и предложение следующего шага, не исправление ComboLBox.**
+Пользователь сообщил результаты открытия/закрытия списков в строгом порядке:
+обычный ComboBox работает; у TColorBox не полностью обработаны цветные образцы
+и фон под ними; TComboBox сохраняет белый фон. Анализируется именно содержимое
+выпадающих ComboLBox, **не закрытые поля и не дочерний Edit**.
+
+Входящий `LogViewer-22.log`: **191876 байт, 1227 записей, UTF-8 без BOM, CRLF**;
+SHA-256 **`32677add299bc0aea70bb743d829aa47a0292a402dfce5fdd2cffec2aae068ff`**.
+Интервал **12:47:53.083–12:47:59.182**, PID **30856**; GUI thread **40328**
+(1226 записей), thread **56960** (одна запись). Просмотрены весь журнал и
+приложенные `image-61.png`, `image-62.png`, `image-63.png`; изображения сохранены.
+После фиксации этих выводов исходный лог удаляется из входящих вложений,
+копия журнала в репозитории не создаётся.
+
+### Lifecycle работает у всех трёх списков
+
+| Контрол | Combo HWND | ComboLBox HWND | Attach / show / hide |
+|--------|------------|---------------|----------------------|
+| ComboBox внутри TComboBoxEx `0x00D00A86` | `0x006E0E00` | `0x011609C0` | 53.415 / 53.430 / 54.253 |
+| TColorBox внутри TGroupBox `0x00AA00B8` | `0x002B103C` | `0x01B30972` | 55.073 / 55.082 / 55.801 |
+| TComboBox внутри того же TGroupBox | `0x006E02BA` | `0x014300D8` | 56.500–501 / 56.531 / 57.156 |
+
+У каждого есть `ApplyComboLBoxFlyoutAtShow`, успешный SWCA backdrop,
+`CreateDropDownPopupIn hr=0`, `WM_ERASEBKGND black` и post-uncloak client refresh
+с `ok=1 updateRect=0 vis=1`. Счётчики black erase — **3 / 4 / 4**, WM_PAINT —
+**2 / 2 / 2**, успешный client refresh — **1 / 1 / 1** в указанном порядке.
+Поэтому объяснение «не приаттачился / не включилось стекло / нет repaint»
+не соответствует этому захвату. Чёрный erase сам по себе не доказывает,
+что последующая отрисовка не заменила клиент белым фоном.
+
+### TColorBox: доказаны пропуск строк и ложная классификация поля
+
+Root bridge действительно получает `ODT_COMBOBOX / WM_DRAWITEM` для **item 0…7**:
+
+- 55.116–55.121: memory DC `0xFF012E2B`, `WindowFromDC == NULL`;
+- 55.165–55.172: оконный DC `0x7B011F15`, `WindowFromDC == 0x01B30972`;
+- `action=ODA_DRAWENTIRE (1)`, `state=0x300`, прямоугольники
+  `[0,16*i,181,16*(i+1)]`.
+
+Для этих 16 наблюдений **нет соответствующих DelphiListDraw-сессий**. Это
+подтверждается production `TListBoxDraw.cpp::BeginDraw`: для ComboBox принимаются
+только поля, `if (!comboField) return false;` намеренно оставляет строки
+прежнему ComboLBox-пути (§41). На EXE путь `ComboLBoxHooks.cpp` включает только
+ExtTextOutW, а не FillRect цветных образцов. Это конкретный пробел покрытия,
+а не предположение по оттенку скриншота.
+
+Дополнительно `comboField = itemID == UINT(-1) || ODS_COMBOBOXEDIT` ошибочен:
+в 55.115 / 55.122 / 55.163 / 55.174 и позже popup focus-уведомления имеют
+`itemID=4294967295`, `action=ODA_FOCUS (4)`, `state=0x300/0x310`,
+`rcItem=[0,-16,181,0]` и DC выпадающего списка. Но BeginDraw объявляет их
+`combo=1 field=1 bounds=[0,0,200,22]`, подставляя **client закрытого ComboBox**
+вместо геометрии popup. Настоящие поля в этом же логе несут
+`ODS_COMBOBOXEDIT (0x1000)`: `state=0x1300/0x1311`, `rcItem=[3,3,180,19]`.
+`itemID=-1` сам по себе не является доказательством поля.
+
+Всего пассивных `[WndCompat][DelphiCombo] WM_DRAWITEM` — **35**, все TColorBox:
+14 полей, 16 строк, 5 focus-уведомлений. `[GlassCore][DelphiListDraw]` — **24**,
+все `field=1 / itemID=-1`: 14 настоящих полей и 10 ошибочно допущенных popup
+focus-сессий. Разница счётчиков объясняется независимыми rate-limit budget; отсутствие
+остальных пассивных строк нельзя считать отсутствием WM_DRAWITEM.
+
+Reference повторно проверен через GitHub API без сохранения исходников:
+[`Vcl.ExtCtrls.pas`, 9048–9077](https://github.com/bergsteiger/realwork/blob/master/common/components/rtl/external/Embarcadero/DelphiBerlin/vcl/Vcl.ExtCtrls.pas#L9048-L9077),
+blob **`473040dd5a566a5ac6f98e530cc29f0b5656a43f`**. `TCustomColorBox.DrawItem`
+сначала делает FillRect всего `Rect`, затем FillRect inset-образца цветом
+`Colors[Index]` и FrameRect, после чего возвращает исходный Brush.Color
+и рисует TextRect. Это объясняет, почему нельзя исправлять пропуск включением
+глобального white-key: **белый и чёрный — законные цвета образцов**. Reference
+не доказывает версию VCL пользовательского процесса или численную alpha в нём.
+
+### TComboBox: локализован пробел CTLCOLOR, но последний белый fill не измерен
+
+В данном захвате у TComboBox **нет WM_DRAWITEM-наблюдений**. Успешные field-theme
+part 4/6 и `[DelphiComboEdit] CTLCOLOR` принадлежат закрытому полю/дочернему
+Edit `0x005502A2`, а не содержимому списка. Все 44 `ComboBoxControl DTB result`
+имеют `success=1` (24 TColorBox, 20 TComboBox), 22 `DelphiComboEdit TextResult`
+имеют `hr=0 / fallback=0`; это **не доказательство исправности popup background**.
+
+В `ComboBoxSubclass.cpp` сейчас есть точечная обработка `WM_CTLCOLOREDIT`,
+но **нет WM_CTLCOLORLISTBOX**. Root обрабатывает WM_CTLCOLORLISTBOX, только если
+сообщение до него дошло. Reference
+[`Vcl.StdCtrls.pas`, 4319–4367](https://github.com/bergsteiger/realwork/blob/master/common/components/rtl/external/Embarcadero/DelphiBerlin/vcl/Vcl.StdCtrls.pas#L4319-L4367),
+blob **`199bf864a4535a6f00529824681490e6d9a0d5c0`**: `TCustomCombo.WndProc`
+сам обрабатывает диапазон `WM_CTLCOLORMSGBOX..WM_CTLCOLORSTATIC`, задаёт
+SetTextColor/SetBkColor и возвращает `Brush.Handle` **без inherited**, когда
+custom style не активен либо не рисует border. В этом пути Root не получает
+возможности заменить штатную фоновую кисть списка. Это обоснованный кандидат
+для локального адаптера на самом TComboBox, **не runtime-доказательство**, какая
+кисть фактически вернулась в этом захвате и какой API последним нарисовал белое.
+
+При повторном чтении PaintDispatcher найденный `CreateCompatibleDC.context`
+в 56.565 (`hwnd=Edit 0x005502A2`, `dc=0x6D011E78`, `src=0x2C011BE1`)
+не стал достаточным основанием менять диспетчер: в Full предусмотрен fallback
+к активному контексту, а суффикс `.context` именно это обозначает. Журнал не
+связывает данную memory surface с финальным белым fill. Числовые GDI handles
+переиспользуются; совпадение HDC в разное время не устанавливает владельца.
+
+В LogViewer-22 **нет** `[GlassCore][DelphiComboDraw]` или
+`[GlassCore][DebugDetour]`, а также нет per-fill API/brush/ROP-трассы ComboLBox.
+В текущем `ComboLBoxHooks.cpp` для `DDH_ComboLBoxPaintProbe` найден только
+вызов выключения при Shutdown; в сам набор не входят FillRect/Rectangle.
+Поэтому фраза пользователя «проба включена» не означает, что захват содержит
+полную трассу именно этих операций. Дорогие глобальные detours не предлагаются;
+достаточнее локально протоколировать фактический CTLCOLOR result и решение.
+
+### Предлагаемая граница следующего implementation-шага
+
+План ещё требует явного согласования; production в этом шаге **не изменён**:
+
+1. `GlassCore/src/Hooks/delphi/TListBoxDraw.cpp`: различить настоящее поле по
+   `ODS_COMBOBOXEDIT`, отдельно допустить только реальные строки exact TColorBox
+   с непустым rcItem и `itemID != UINT(-1)` (включая строку 0). Focus-only
+   `itemID=-1` не должен запускать field renderer. Строка использует только
+   переданный WM_DRAWITEM HDC и свой rcItem; размеры закрытого ComboBox не
+   подставляются. Новая row-ветка ограничивается FillRect; существующий текстовый
+   ComboLBox-путь не меняется и field text/icon renderer в строки не переносится.
+   Обработка фона/образцов отделяется от принятого поля: системный фон
+   целой обычной строки очищается, выделение и небольшие цветные FillRect
+   сохраняют исходный RGB с A255, включая белый/чёрный/системные цвета образцов.
+   Не включать массовый EXE FillRect в ComboLBoxHooks и не расширять строки
+   TDriveComboBox/TFilterComboBox без отдельного наблюдения.
+2. `WndCompat/Popup/ComboLBox/ComboBoxSubclass.cpp`: для exact TComboBox в Full
+   и при разрешённом backdrop проверить через GetComboBoxInfo, что сообщение
+   WM_CTLCOLORLISTBOX относится **к его настоящему, приаттаченному ComboLBox**.
+   Сначала вызвать native chain один раз, затем только при подтверждённых
+   solid brush и BkColor, равных текущему COLOR_WINDOW, заменить фон на чёрный
+   glass background. Цвет текста, выделение, custom/pattern/null brush и чужие
+   окна оставить native. Ограниченная Debug-диагностика записывает list/HDC,
+   исходный brush/BkColor и принятое решение; если белое останется, это даст
+   проверяемый следующий факт вместо обещания о неустановленном fill.
+3. `WndCompat/tests/listbox_background_rendering_test.py`,
+   `listbox_background_rendering_tests.cpp`, `listbox_background_test_shim.h` и
+   новый отдельный `WndCompat/tests/combo_list_ctlcolor_test.py`: поведенчески
+   проверить window/memory DC, настоящие строки против focus-only, white/black
+   swatches, выделение, partial/complex clip, nested/foreign contexts, original
+   failure и lifecycle; CTLCOLOR — owner/list identity, Full/backdrop, brush,
+   native text state, ровно один Def и неизменность обычного ComboBox/child Edit.
+   Уточнить `WndCompat/tests/delphi_pipeline_contract.py` и этот документ.
+
+Не менять `PaintDispatcher.cpp`, общие ComboLBox hooks, attach/animation/frame,
+общий текст/DoubleBuffered, принятые TButtonedEdit/SearchBox или закрытые поля,
+кроме исправления ошибочного допуска focus-only как поля. Если при реализации
+будет обнаружен конфликт фактического IAT occupant, это отдельное основание
+пересогласовать границу, а не обходить IATRegistry или экспортировать helper
+между hook-модулями. Первый native ComboBox остаётся регрессионным эталоном.
+
+### Проверки исходной принятой версии перед изменениями
+
+На неизменённом `d96c223` повторно выполнены **106 source contracts**, **13 ListBox
+background scenarios × Release / Debug+probe**, **28 input-icon scenarios ×
+Release / Debug / Debug+probe** — PASS. Эти результаты проверяют исходный
+принятый baseline; **новые ComboLBox-исправления ещё не реализованы и не испытаны**.
+Windows/MSVC/GDI/DWM-проверка здесь не выполнялась; повторного SearchBox-захвата
+не требуется — пользователь уже закрыл эту задачу.
