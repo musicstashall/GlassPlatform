@@ -11,6 +11,7 @@ public static class PlatformPaths
     private const string BwmRegKey = @"Software\StanislavKa\GlassPlatform";
     private const string InstallPathValue = "InstallPath";
 
+    // Legacy path resolution only; new reflection staging uses the user TEMP directory.
     public static string ReflectionCacheDirectory => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "GlassPlatform", "GlassReflection");
