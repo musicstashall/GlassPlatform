@@ -1,4 +1,4 @@
-// Хуки для отрисовки ListView (SysListView32) и WinForms ListView (.SysListView32).
+// Хуки для ListView: SysListView32, WinForms (.SysListView32), exact TListView/TSystemListView.
 //
 // Архитектура (PaintDispatcher + per-module g_overallMap):
 //
@@ -26,9 +26,11 @@
 //                       + g_comctl32Legacy BitBlt
 //     g_comctl32Legacy: CreateSolidBrush
 //
-// Иконки без альфа-канала:
-//   BWM использует GDI+ (GdipCreateBitmapAlpha) — имеет баг потери альфы на 32bpp DIB.
-//   Мы используем BitmapUtils::Promise32BPP (чистый GDI) + GdiAlphaBlend.
+// Иконки обычных ListView без альфа-канала:
+//   Promise32BPP (чистый GDI) + GdiAlphaBlend; прежняя политика ниже сохранена.
+// Exact TListView/TSystemListView (BWM Restorator, ctrl + caller comctl32):
+//   MaskBlt на самом caller new/legacy; OpaqueBitmapSource + native mask/ROP.
+//   Это не EXE paint-route TToolBar и не нормализация финального буфера окна.
 
 #include "CorePch.h"
 
@@ -36,6 +38,8 @@
 #include <Hooks/ScrollBarDrawTheme.h>
 #include <Hooks/ScrollBarTheme.h>
 #include <Subsystems/GdiHookUtils.h>
+#include <Subsystems/OpaqueBitmapSource.h>
+#include <Subsystems/RootSwcaGradient.h>
 #include <Subsystems/Settings.h>
 #include <Subsystems/RenderText.h>
 #include <Subsystems/TextGlowClientRegistry.h>
@@ -45,11 +49,13 @@
 #include <Module/ModuleHandler.h>
 #include <Subsystems/PaintDispatcher.h>
 #include <GlassControlKind.h>
+#include <GlassBackdropMark.h>
 #include <BitmapUtils.h>
 #include <wil.h>
 #include <CommCtrl.h>
 #include <uxtheme.h>
 #include <WinApiUtils.h>
+#include <array>
 #include <vector>
 #include <unordered_set>
 #include <cmath>
@@ -75,14 +81,19 @@ namespace GlassCore::ListViewControl
         HWND                          hWnd{};
         bool                          needBlackout{};
         bool                          vclListView{};
+        // Только реально полученный VCL MaskBlt-ref самого BeginPaint caller.
+        // End не пересчитывает этот ref по текущим class/kind/module globals.
+        HMODULE                       vclMaskModule{};
     };
     thread_local std::vector<ListViewPaintSession> g_lvSessionStack;
+    thread_local bool g_inVclMaskBlt = false;
     // Окна, чей фон уже чернили post-BLACKNESS (первый paint либо BkFlip).
     // Чернить каждый paint — стробоскоп при шторме; у BWM такого нет.
     thread_local std::unordered_set<HWND> g_lvBgPrimed;
 
     // Удаление фона иконок (Root\Control\ListView) — читается на входе внешней paint-сессии;
     // enable=false → black-key по умолчанию (см. GdiUtils::ApplyIconBackgroundAlpha).
+    // Только для прежних alpha-blits: VCL native MaskBlt не вырезает цвет.
     thread_local WndCompat::Menu::IconBackgroundColorRemoval g_lvIconRemoval{};
 
     static std::atomic<bool> g_shutdown{ false };
@@ -293,6 +304,9 @@ namespace GlassCore::ListViewControl
         auto it = g_overallMap.find(baseAddress);
         if (it == g_overallMap.end())
         {
+            // В том числе End после OnComctl32ModuleUnload: не воскрешать
+            // кеш и не сканировать уже выгруженный образ ради disable.
+            if (!enable) return false;
             auto [inserted, ok] = g_overallMap.emplace(
                 std::piecewise_construct,
                 std::forward_as_tuple(baseAddress),
@@ -305,8 +319,10 @@ namespace GlassCore::ListViewControl
             it->second.moduleAddress = baseAddress;
         }
 
+        const int before = it->second.GetRef(index);
         it->second.EnableHook(index, enable);
-        return true;
+        // EnableHook(true)==false бывает и при вложенном ref++, и при отказе.
+        return enable ? it->second.GetRef(index) > before : it->second.GetRef(index) < before;
     }
 
     // ── Предпрогрев IAT-кеша (только чтение: emplace + CacheHookData, без записей).
@@ -611,12 +627,37 @@ namespace GlassCore::ListViewControl
             && (_wcsicmp(cls, L"TListView") == 0 || _wcsicmp(cls, L"TSystemListView") == 0);
     }
 
-#if defined(_DEBUG)
-    // Отдельные лимиты для Begin и Fill; возобновляются после очистки лога.
+    // BWM RestoratorPaintHandler::Paint(ctrl, caller COMCTL32), не EXE-route.
+    // Оба точных класса идут одним MaskBlt-путём на фактическом caller-module.
+    [[nodiscard]] static bool IsVclListViewIconSession(HWND hwnd, HMODULE caller) noexcept
+    {
+        return caller && GlassCore::Root::IsFullInjectionMode() && IsWindow(hwnd)
+            && GlassShared::GlassGetWindowKind(hwnd) == GlassShared::GlassControlKind::ListView
+            && IsDelphiListView(hwnd) && GlassShared::GlassIsBackdropAllowedForHwnd(hwnd)
+            && (caller == GlassCore::ModuleHandler::g_comctl32New
+                || caller == GlassCore::ModuleHandler::g_comctl32Legacy);
+    }
+
+    [[nodiscard]] static bool IsVclListViewIconDc(HDC dc, HMODULE caller) noexcept
+    {
+        if (g_shutdown.load(std::memory_order_acquire) || g_inVclMaskBlt
+            || !dc || g_lvSessionStack.empty() || GetMapMode(dc) != MM_TEXT
+            || GlassCore::ScrollBarTheme::IsInsideScrollBarDrawThemeOrig()) return false;
+        const auto& s = g_lvSessionStack.back();
+        if (!s.vclListView || !s.vclMaskModule || caller != s.vclMaskModule
+            || !IsVclListViewIconSession(s.hWnd, s.mod)
+            || !GlassCore::PaintDispatcher::IsTopWindowDrawingSession(s.hWnd)
+            || !GlassCore::PaintDispatcher::IsPaintStackDcForHwnd(s.hWnd, dc)) return false;
+        const HWND owner = WindowFromDC(dc);
+        return owner == s.hWnd || (!owner && GetObjectType(dc) == OBJ_MEMDC
+            && GlassCore::PaintDispatcher::GetStackOwnerForDc(dc) == s.hWnd);
+    }
+
+    // Раздельные лимиты Begin/Fill/PostBegin (debug) и MaskBlt (все сборки).
     [[nodiscard]] static bool AllowDelphiListViewLog(unsigned channel) noexcept
     {
-        static thread_local ULONGLONG epoch[3]{};
-        static thread_local unsigned budget[3]{};
+        static thread_local ULONGLONG epoch[4]{};
+        static thread_local unsigned budget[4]{};
         const ULONGLONG now = GetTickCount64();
         if (!epoch[channel] || now - epoch[channel] >= 1000)
         {
@@ -627,7 +668,6 @@ namespace GlassCore::ListViewControl
         --budget[channel];
         return true;
     }
-#endif
 
     BOOL WINAPI Overall_MyFillRect(HDC hdc, const RECT* lprc, HBRUSH hbr)
     {
@@ -1045,60 +1085,64 @@ namespace GlassCore::ListViewControl
     }
 
     // ── MaskBlt ─────────────────────────────────────────────────────────────
-    // MaskBlt использует битовую маску для определения прозрачности —
-    // заменять на GdiAlphaBlend нельзя. Подменяем только source bitmap
-    // для обеспечения alpha=0xFF, маска сама определит прозрачность.
+    // BWM Restorator ctrl: exact TListView/TSystemListView + caller comctl32.
+    // Только здесь готовим opaque-копию; покрытие определяет native mask/ROP.
+    // Обычный SysListView32/WinForms и неавторизованные вызовы остаются native.
     BOOL WINAPI Overall_MyMaskBlt(
         HDC hdcDest, int xDest, int yDest, int width, int height,
         HDC hdcSrc, int xSrc, int ySrc,
         HBITMAP hbmMask, int xMask, int yMask, DWORD rop)
     {
+        const DWORD entryError = GetLastError();
         HMODULE callerMod = GetCallerModule(_ReturnAddress());
         auto orig = GetOverallOrigSafe<OHK_MASKBLT, decltype(&MaskBlt)>(callerMod);
-
-        if (!orig)
+        const auto native = [&] {
+            SetLastError(entryError);
+            if (orig)
+                return orig(hdcDest, xDest, yDest, width, height,
+                    hdcSrc, xSrc, ySrc, hbmMask, xMask, yMask, rop);
             return MaskBlt(hdcDest, xDest, yDest, width, height,
-                           hdcSrc, xSrc, ySrc, hbmMask, xMask, yMask, rop);
+                hdcSrc, xSrc, ySrc, hbmMask, xMask, yMask, rop);
+        };
+        if (!orig || !IsVclListViewIconDc(hdcDest, callerMod)
+            || width <= 0 || height <= 0 || !hdcSrc || hdcSrc == hdcDest
+            || GetMapMode(hdcSrc) != MM_TEXT
+            || GetCurrentObject(hdcSrc, OBJ_BITMAP) == GetCurrentObject(hdcDest, OBJ_BITMAP))
+            return native();
 
-        if (g_lvSessionStack.empty())
-            return orig(hdcDest, xDest, yDest, width, height,
-                        hdcSrc, xSrc, ySrc, hbmMask, xMask, yMask, rop);
-
-        if (!width || !height || !hdcSrc)
-            return orig(hdcDest, xDest, yDest, width, height,
-                        hdcSrc, xSrc, ySrc, hbmMask, xMask, yMask, rop);
-
-        HBITMAP hSrcBitmap = static_cast<HBITMAP>(GetCurrentObject(hdcSrc, OBJ_BITMAP));
-        if (!hSrcBitmap || Shared::BitmapUtils::IsOemBitmap(hSrcBitmap))
+        const HWND hwnd = g_lvSessionStack.back().hWnd; // snapshot до возможного native reentry
+        const auto bitmap = static_cast<HBITMAP>(GetCurrentObject(hdcSrc, OBJ_BITMAP));
+        BITMAP info{};
+        if (GetObjectW(bitmap, sizeof(info), &info) != sizeof(info)) return native();
+        RECT client{};
+        if (GetClientRect(hwnd, &client) && info.bmWidth == client.right-client.left
+            && info.bmHeight == client.bottom-client.top)
         {
-            /*DebugLog(DBG_NORMAL, L"[GlassCore][ListView] MaskBlt SKIP: hSrcBitmap=%p isOem=%d",
-                hSrcBitmap, hSrcBitmap ? Shared::BitmapUtils::IsOemBitmap(hSrcBitmap) : -1);*/
-            return orig(hdcDest, xDest, yDest, width, height,
-                        hdcSrc, xSrc, ySrc, hbmMask, xMask, yMask, rop);
+            // Неоднозначный framebuffer остаётся native даже при partial copy.
+            // Этот image-путь не решает общую VCL DoubleBuffered.
+            if (AllowDelphiListViewLog(3))
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiListView] image-native hwnd=0x%p api=MaskBlt reason=client-sized-source",
+                    hwnd);
+            return native();
         }
 
-        BITMAP bm{};
-        GetObject(hSrcBitmap, sizeof(bm), &bm);
-        bool hasAlpha = Shared::BitmapUtils::HasAlphaChannel(hSrcBitmap);
-
-        BITMAP bmMask{};
-        if (hbmMask)
-            GetObject(hbmMask, sizeof(bmMask), &bmMask);
-
-        /*DebugLog(DBG_IMPORTANT,
-            L"[GlassCore][ListView] MaskBlt: dst=(%d,%d %dx%d) src=(%d,%d) "
-            L"bmp=%dx%d bpp=%d hasAlpha=%d mask=%p maskBpp=%d rop=0x%08X callerMod=%p kind=%d",
-            xDest, yDest, width, height, xSrc, ySrc,
-            bm.bmWidth, bm.bmHeight, bm.bmBitsPixel, hasAlpha,
-            hbmMask, bmMask.bmBitsPixel, rop,
-            callerMod, static_cast<int>(g_lvSessionStack.back().kind));*/
-
-        // Оригинальный MaskBlt в любом случае — маска обрабатывает прозрачность.
-        // Для hasAlpha=true маска корректно работает с альфой.
-        // Для hasAlpha=false маска определяет прозрачные области через ROP.
-        //DebugLog(DBG_NORMAL, L"[GlassCore][ListView] MaskBlt → orig (hasAlpha=%d, bpp=%d)", hasAlpha, bm.bmBitsPixel);
-        return orig(hdcDest, xDest, yDest, width, height,
-                    hdcSrc, xSrc, ySrc, hbmMask, xMask, yMask, rop);
+        g_inVclMaskBlt = true;
+        auto leave = wil::scope_exit([]() noexcept { g_inVclMaskBlt = false; });
+        BOOL result{}; DWORD error{}; bool prepared{};
+        {
+            GlassCore::GdiUtils::OpaqueBitmapSource image{hdcSrc};
+            prepared = static_cast<bool>(image);
+            result = native(); // один draw, включая failed preparation; native FALSE не перерисовываем
+            error = GetLastError();
+        }
+        if (AllowDelphiListViewLog(3))
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiListView] MaskBlt hwnd=0x%p caller=0x%p dc=0x%p src=0x%p dst=[%d,%d,%d,%d] srcXY=[%d,%d] mask=0x%p maskXY=[%d,%d] rop=0x%08X opaqueCopy=%d result=%d",
+                hwnd, callerMod, hdcDest, hdcSrc, xDest, yDest, width, height, xSrc, ySrc,
+                hbmMask, xMask, yMask, rop, prepared ? 1 : 0, result);
+        SetLastError(error);
+        return result;
     }
 
     // ── SetBkColor ──────────────────────────────────────────────────────────
@@ -1255,7 +1299,8 @@ namespace GlassCore::ListViewControl
         HWND hWnd,
         HMODULE callerMod,
         GlassShared::GlassControlKind kind,
-        bool enable)
+        bool enable,
+        bool vclListView)
     {
         using namespace GlassShared;
         auto* g_new    = GlassCore::ModuleHandler::g_comctl32New;
@@ -1272,7 +1317,10 @@ namespace GlassCore::ListViewControl
                 EnableHooksOnModule(g_new, OHK_FILLRECT,        enable);
                 EnableHooksOnModule(g_new, OHK_STRETCHBLT,      enable);
                 EnableHooksOnModule(g_new, OHK_BITBLT,          enable);
-                EnableHooksOnModule(g_new, OHK_MASKBLT,         enable);
+                // VCL MaskBlt имеет отдельный acquired-ref snapshot, в том
+                // числе на legacy. Не приобретать его второй раз generic-набором.
+                if (!vclListView)
+                    EnableHooksOnModule(g_new, OHK_MASKBLT,     enable);
 
                 // Текст themed ListView: как EnableTreeViewHooksForModule (glow → DrawTextEx на uxtheme; иначе DTTEx на g_new).
                 if (hWnd && Shared::WinApiUtils::IsThemed(hWnd, L"ListView"))
@@ -1344,6 +1392,7 @@ namespace GlassCore::ListViewControl
 
     static void OnBeginPaintGlobal(HWND hWnd, HMODULE callerMod)
     {
+        if (g_shutdown.load(std::memory_order_acquire)) return;
         using namespace GlassShared;
         auto kind = GlassGetWindowKind(hWnd);
         if (kind != GlassControlKind::ListView && kind != GlassControlKind::WinForms_ListView)
@@ -1408,23 +1457,27 @@ namespace GlassCore::ListViewControl
         }
 #endif
 
-        g_lvSessionStack.push_back({ callerMod, kind, hWnd, diagFlipped || firstPaint, vclListView });
-        DebugLog(DBG_NORMAL, L"[GlassCore][ListView] BeginPaint: callerMod=0x%p hWnd=0x%p kind=%d depth=%zu",
-            callerMod, hWnd, static_cast<int>(kind), g_lvSessionStack.size());
-        EnableListViewHooksForModule(hWnd, callerMod, kind, true);
+        ListViewPaintSession session{ callerMod, kind, hWnd, diagFlipped || firstPaint, vclListView };
+        if (session.vclListView && IsVclListViewIconSession(hWnd, callerMod)
+            && EnableHooksOnModule(callerMod, OHK_MASKBLT, true))
+            session.vclMaskModule = callerMod;
+        // Даже неготовая exact-VCL сессия остаётся вершиной: process-wide
+        // MaskBlt-ref внешнего paint не разрешает подготовку этого изображения.
+        g_lvSessionStack.push_back(session);
+        DebugLog(DBG_NORMAL, L"[GlassCore][ListView] BeginPaint: callerMod=0x%p hWnd=0x%p kind=%d depth=%zu vclMaskModule=0x%p",
+            callerMod, hWnd, static_cast<int>(kind), g_lvSessionStack.size(), session.vclMaskModule);
+        EnableListViewHooksForModule(hWnd, callerMod, kind, true, session.vclListView);
     }
 
     static void OnEndPaintGlobal(HWND hWnd, HMODULE /*callerMod*/)
     {
-        using namespace GlassShared;
-        auto kind = GlassGetWindowKind(hWnd);
-        if (kind != GlassControlKind::ListView && kind != GlassControlKind::WinForms_ListView)
-            return;
-        if (g_lvSessionStack.empty()) return;
+        if (g_lvSessionStack.empty() || g_lvSessionStack.back().hWnd != hWnd) return;
 
         const ListViewPaintSession s = g_lvSessionStack.back();
         g_lvSessionStack.pop_back();
-        EnableListViewHooksForModule(s.hWnd ? s.hWnd : hWnd, s.mod, s.kind, false);
+        EnableListViewHooksForModule(s.hWnd, s.mod, s.kind, false, s.vclListView);
+        if (s.vclMaskModule)
+            EnableHooksOnModule(s.vclMaskModule, OHK_MASKBLT, false);
         DebugLog(DBG_NORMAL, L"[GlassCore][ListView] EndPaint: hWnd=0x%p depth=%zu", hWnd, g_lvSessionStack.size());
     }
 

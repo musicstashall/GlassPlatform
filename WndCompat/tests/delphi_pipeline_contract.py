@@ -1583,6 +1583,109 @@ class DelphiPipelineContract(unittest.TestCase):
         # The shared forwarding double already rejects WIL-invalid lvalue callbacks.
         self.assertIn('auto scope_exit(F&& fn)', read('WndCompat/tests/coolbar_test_shim.h'))
 
+    def test_vcl_listview_mask_route_uses_exact_classes_and_only_the_actual_comctl_caller(self):
+        code = read('GlassCore/src/Hooks/ListViewHooks.cpp')
+        classes = code.split('static bool IsDelphiListView(', 1)[1].split('// BWM RestoratorPaintHandler', 1)[0]
+        for name in ('TListView', 'TSystemListView'):
+            self.assertIn('_wcsicmp(cls, L"' + name + '") == 0', classes)
+        for forbidden in ('wcsstr', 'wcsncmp', 'find('):
+            self.assertNotIn(forbidden, classes)
+        gate = code.split('static bool IsVclListViewIconSession(', 1)[1].split('static bool IsVclListViewIconDc(', 1)[0]
+        for marker in ('caller &&', 'IsFullInjectionMode()', 'IsWindow(hwnd)', 'IsDelphiListView(hwnd)',
+                       'GlassControlKind::ListView', 'GlassIsBackdropAllowedForHwnd(hwnd)',
+                       'caller == GlassCore::ModuleHandler::g_comctl32New',
+                       'caller == GlassCore::ModuleHandler::g_comctl32Legacy'):
+            self.assertIn(marker, gate)
+        self.assertNotIn('g_entryPointModule', gate)
+        begin = code.split('static void OnBeginPaintGlobal(', 1)[1].split('static void OnEndPaintGlobal(', 1)[0]
+        lease = begin.split('ListViewPaintSession session{', 1)[1].split('g_lvSessionStack.push_back(session)', 1)[0]
+        for marker in ('session.vclListView && IsVclListViewIconSession(hWnd, callerMod)',
+                       'EnableHooksOnModule(callerMod, OHK_MASKBLT, true)', 'session.vclMaskModule = callerMod'):
+            self.assertIn(marker, lease)
+        for forbidden in ('g_comctl32New', 'g_comctl32Legacy', 'g_entryPointModule', 'OHK_BITBLT', 'OHK_STRETCHBLT'):
+            self.assertNotIn(forbidden, lease)
+        self.assertIn('EnableListViewHooksForModule(hWnd, callerMod, kind, true, session.vclListView)', begin)
+
+    def test_vcl_listview_mask_ref_is_acquired_by_delta_and_released_from_session_snapshot(self):
+        code = read('GlassCore/src/Hooks/ListViewHooks.cpp')
+        enable = code.split('static bool EnableHooksOnModule(', 1)[1].split('// ── Предпрогрев', 1)[0]
+        for marker in ('if (!enable) return false', 'const int before = it->second.GetRef(index)',
+                       'it->second.GetRef(index) > before'):
+            self.assertIn(marker, enable)
+        end = code.split('static void OnEndPaintGlobal(', 1)[1].split('// Post-BeginPaint:', 1)[0]
+        for marker in ('g_lvSessionStack.back().hWnd != hWnd', 'const ListViewPaintSession s',
+                       'false, s.vclListView)', 'if (s.vclMaskModule)',
+                       'EnableHooksOnModule(s.vclMaskModule, OHK_MASKBLT, false)'):
+            self.assertIn(marker, end)
+        for forbidden in ('GlassGetWindowKind', 'IsDelphiListView', 'g_comctl32'):
+            self.assertNotIn(forbidden, end)
+        generic = code.split('static void EnableListViewHooksForModule(', 1)[1].split('//  PaintDispatcher provider callbacks', 1)[0]
+        self.assertRegex(generic, r'if \(!vclListView\)\s*EnableHooksOnModule\(g_new, OHK_MASKBLT,\s*enable\)')
+        self.assertEqual(generic.count('OHK_MASKBLT'), 1)  # no duplicate VCL ref; legacy leases separately
+
+    def test_vcl_listview_icon_dc_requires_own_tls_ref_and_registered_top_owner_not_ambient_host(self):
+        code = read('GlassCore/src/Hooks/ListViewHooks.cpp')
+        dc = code.split('static bool IsVclListViewIconDc(', 1)[1].split('static bool AllowDelphiListViewLog(', 1)[0]
+        for marker in ('g_shutdown.load', 'g_inVclMaskBlt', 'g_lvSessionStack.empty()',
+                       'GetMapMode(dc) != MM_TEXT', 'IsInsideScrollBarDrawThemeOrig()',
+                       '!s.vclMaskModule', 'caller != s.vclMaskModule',
+                       'IsVclListViewIconSession(s.hWnd, s.mod)', 'IsTopWindowDrawingSession(s.hWnd)',
+                       'IsPaintStackDcForHwnd(s.hWnd, dc)', 'owner == s.hWnd',
+                       'GetObjectType(dc) == OBJ_MEMDC', 'GetStackOwnerForDc(dc) == s.hWnd'):
+            self.assertIn(marker, dc)
+        self.assertNotIn('GetPaintSessionHostHwnd', dc)
+
+    def test_vcl_listview_mask_is_opaque_source_plus_one_native_mask_rop_draw_with_error_restored(self):
+        code = read('GlassCore/src/Hooks/ListViewHooks.cpp')
+        mask = code.split('BOOL WINAPI Overall_MyMaskBlt(\n', 1)[1].split('// ── SetBkColor', 1)[0]
+        for marker in ('const DWORD entryError = GetLastError()', 'SetLastError(entryError)',
+                       'IsVclListViewIconDc(hdcDest, callerMod)', 'width <= 0 || height <= 0',
+                       'hdcSrc == hdcDest', 'GetMapMode(hdcSrc) != MM_TEXT',
+                       'info.bmWidth == client.right-client.left', 'info.bmHeight == client.bottom-client.top',
+                       'reason=client-sized-source', 'const HWND hwnd = g_lvSessionStack.back().hWnd',
+                       'OpaqueBitmapSource image{hdcSrc}', 'hbmMask, xMask, yMask, rop)',
+                       'error = GetLastError()', 'SetLastError(error)', 'AllowDelphiListViewLog(3)'):
+            self.assertIn(marker, mask)
+        self.assertEqual(mask.count('result = native()'), 1)
+        for forbidden in ('GdiAlphaBlend', 'HasAlphaChannel', 'Promise32BPP', 'ApplyIconBackgroundAlpha',
+                          'ApplyBlackKeyAlpha', 'BufferedPaintSetAlpha', 'FindTrueComctlCaller', 'GetPaintSessionHostHwnd'):
+            self.assertNotIn(forbidden, mask)
+        self.assertIn('epoch[4]', code)
+        self.assertIn('budget[4]', code)
+
+    def test_listview_existing_alpha_blits_and_post_background_policy_are_separate_from_vcl_mask(self):
+        code = read('GlassCore/src/Hooks/ListViewHooks.cpp')
+        icons = code.split('BOOL WINAPI Overall_MyBitBlt(\n', 1)[1].split('// ── MaskBlt', 1)[0]
+        for marker in ('FindTrueComctlCaller()', 'ForceOpaqueAlpha(hConverted.get())',
+                       'Promise32BPP', 'ApplyIconBackgroundAlpha', 'GdiAlphaBlend',
+                       'IsInsideScrollBarDrawThemeOrig()', 'rop != SRCCOPY'):
+            self.assertIn(marker, icons)
+        for forbidden in ('vclMaskModule', 'OpaqueBitmapSource', 'g_inVclMaskBlt'):
+            self.assertNotIn(forbidden, icons)
+        post = code.split('static bool OnListViewAfterBeginPaint(', 1)[1].split('//  Lifecycle', 1)[0]
+        self.assertIn('session.needBlackout || session.vclListView', post)
+        self.assertNotIn('vclMaskModule', post)
+        self.assertNotIn('OpaqueBitmapSource', post)
+        self.assertIn('RegisterPaintProvider({ OnBeginPaintGlobal, OnEndPaintGlobal })', code)
+        self.assertNotIn('RegisterGetDCProvider', code)
+        self.assertNotIn('RegisterCompatDCProvider', code)
+
+    def test_listview_image_suite_compiles_complete_production_and_reuses_strict_bitmap_ref_doubles(self):
+        code = read('GlassCore/src/Hooks/ListViewHooks.cpp')
+        self.assertIn('#include <Subsystems/OpaqueBitmapSource.h>', code)
+        for forbidden in ('ToolbarControl::', 'DelphiPanel::', 'IATRegistry::Instance().Register'):
+            self.assertNotIn(forbidden, code)
+        test = read('WndCompat/tests/listview_images_rendering_tests.cpp')
+        for item in ('GlassShared/src/BitmapUtils.cpp', 'GlassCore/src/Subsystems/OpaqueBitmapSource.cpp',
+                     'GlassCore/src/Hooks/ListViewHooks.cpp'):
+            self.assertIn('#include "../../' + item + '"', test)
+        self.assertIn('#include "vcl_images_test_shim.h"', read('WndCompat/tests/listview_images_test_shim.h'))
+        runner = read('WndCompat/tests/listview_images_rendering_test.py')
+        for marker in ("'Release'", "'Debug'", "'-D_DEBUG'", "'-DGLASS_DELPHI_DRAW_PROBE'", "'-Werror'"):
+            self.assertIn(marker, runner)
+        for forbidden in ('read_text', 'source.split(', 'code.split(', '-Wno-error'):
+            self.assertNotIn(forbidden, runner)
+
     def test_delphi_grid_clears_repaint_area_after_beginpaint(self):
         root = read("GlassCore/src/Hooks/RootWindowHooks.cpp")
         body = root.split('Root_OnDelphiGridAfterBeginPaint(', 1)[1].split('static void EnableSpecs', 1)[0]

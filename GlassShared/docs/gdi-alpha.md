@@ -17,8 +17,9 @@
 `GlassCore::GdiUtils::OpaqueBitmapSource`
 ([header](../../GlassCore/Include/Subsystems/OpaqueBitmapSource.h),
 [source](../../GlassCore/src/Subsystems/OpaqueBitmapSource.cpp)) используется
-только проверенными VCL-путями `TToolBar!MaskBlt` (импорт в comctl32) и EXE
-`StretchBlt` изображения `TPanel` внутри `TPanel`. Он временно снимает bitmap
+только проверенными VCL-путями `TToolBar!MaskBlt` (импорт в comctl32),
+`TListView/TSystemListView!MaskBlt` (импорт фактического comctl32 paint-caller)
+и EXE `StretchBlt` изображения `TPanel` внутри `TPanel`. Он временно снимает bitmap
 с memory-DC для корректного `GetDIBits`, создаёт top-down 32bpp копию, требует
 полный read и задаёт ей A=255 **без изменения RGB**, включая чёрные пиксели.
 Затем исходный native API получает прежние source DC, mask/ROP/геометрию;
@@ -30,6 +31,7 @@ stock/OEM не преобразуются.
 Границы class/module/session/DC и исключение клиентского framebuffer задаёт
 вызывающий hook. Нельзя применять этот helper к общему final blit или всему
 окну ради DoubleBuffered. Подробности/ограничения —
-[Delphi-VCL, тест 101](../../GlassCore/docs/Delphi-VCL.md#тест-101-непрозрачность-изображений-ttoolbar-и-вложенного-tpanel--native-bwm-пути).
+[Delphi-VCL, тест 101](../../GlassCore/docs/Delphi-VCL.md#тест-101-непрозрачность-изображений-ttoolbar-и-вложенного-tpanel--native-bwm-пути)
+и [тест 102](../../GlassCore/docs/Delphi-VCL.md#тест-102-tlistview--native-maskblt-паритет-restorator).
 
 При добавлении новых хуков ищи **существующий** паттерн в ближайшем `*Hooks.cpp` или в GlassShared, а не новый стек на GDI+.

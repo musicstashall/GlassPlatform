@@ -4208,3 +4208,108 @@ custom black, остаётся tint **A=100**. Bevel/chrome и небольши�
 runtime-отчёта прежний: **скриншот → «Логи при отображении» → «Логи с зондом
 при отображении элемента»**. Для неоднозначного client-sized источника отдельно
 понадобится определить image-vs-framebuffer, а не снимать защиту вслепую.
+
+## Тест 102: TListView — native MaskBlt-паритет Restorator
+
+Пользователь принял предыдущий TToolBar/TPanel-шаг и сообщил об оставшихся
+необработанных иконках **TListView в Restorator**. Новый scope — только этот
+иконный путь, с точным `TSystemListView`, также явно указанным в доноре.
+Общая VCL DoubleBuffered по-прежнему отложена; принятые панели/toolbar,
+BomeMemo и исправление повторных import descriptors не переделываются.
+
+### Donor-route и два пробела Glass
+
+Прочитан тот же read-only UTF-16 `BWM.txt` (SHA-256
+`bf679ce9c8a29e0d6b4ac8e3dce73cad4f52e454de0961a28e9840133f1e547f`).
+Номера ниже — строки supplied объединённого snapshot, не текущего Glass:
+
+| Место BWM | Подтверждённое поведение |
+|---|---|
+| `RestoratorPaintHandler.cpp:16961,16970,17007–17013` | **ctrl**, caller basename `COMCTL32.dll`, exact `TListView` или `TSystemListView`: erase, DrawText, **MaskBlt на самом callerModule**, GDI+ lifetime. Нет ограничения только new comctl32. |
+| `RestoratorWinHooks.cpp:18474–18502` | Временный bitmap в **том же source DC**, затем настоящий MaskBlt с исходными dest/source координатами, маской, её offsets и ROP; восстановление bitmap. Own-module caller пропускается. |
+| `RestoratorPaintHandler.cpp:17112–17205` | В `Dc`/`CompatibleDc` **нет отдельного ListView route**. Generic compatible-DC EXE без HWND — иная window-ветка, не основание расширять этот control-путь. |
+
+Это **не** EXE paint-route TToolBar из теста 101: не требуется переносить
+его приобретение MaskBlt на обоих comctl32. В supplied snapshot по-прежнему
+нет определения внешней `Utils::GdipCreateBitmapAlpha`; её неизвестные default
+правила обработки пикселей не объявляются проверенными. Glass использует
+явную согласованную opaque-политику существующей GDI/DIB-утилиты.
+
+До правки Glass уже распознавал оба точных VCL-класса для фона, но:
+
+1. generic new route приобретал MaskBlt, **legacy — нет**;
+2. тело ListView MaskBlt читало bitmap/HasAlphaChannel и неизменно вызывало
+   original: обещанной комментарием opaque-подготовки источника не было.
+
+### Изменения в ListViewHooks
+
+- Собственный `vclMaskModule` в TLS paint-сессии: точный класс, ListView-kind,
+  Full/backdrop и известный new/legacy **caller текущего BeginPaint**.
+  Ни EXE, ни посторонний caller, ни второй comctl32 автоматически не приобретаются.
+  Существующий общий text/background/BitBlt/StretchBlt-набор сохраняется;
+  лишь generic new MaskBlt для exact VCL исключён, чтобы не получить второй ref.
+- Успешное приобретение определяется **GetRef до/после**, а не bool-результатом
+  EnableHook: вложенный false может означать ref++. End проверяет HWND вершины
+  и освобождает сохранённый MaskBlt-ref даже после смены kind/class/module globals.
+  Disable отсутствующей записи после unload не пересоздаёт кеш выгруженного образа.
+- В теле MaskBlt нужны свой ref вершины TLS, тот же caller, текущий exact-класс,
+  mode/backdrop и top window paint. Destination обязан быть зарегистрирован
+  в PaintDispatcher за этим HWND; memory DC дополнительно требует точного
+  stack-owner. Ambient host сам по себе не авторизует DC. Чужой поток/DC,
+  неготовая вложенная сессия, scrollbar orig-depth, reentry и shutdown — native.
+- Общий `GdiUtils::OpaqueBitmapSource` временно создаёт **RGB-preserving A=255**
+  copy и выбирает её в прежний source DC. Маска, mask offsets, ROP, размеры,
+  координаты и HDC передаются исходному MaskBlt без замены на AlphaBlend.
+  Чёрные детали не становятся прозрачными; chroma-настройка ListView здесь
+  не применяется. `Promise32BPP`/HasAlphaChannel и прежние renderers не менялись.
+- Один native draw и при failed preparation; native FALSE возвращается без
+  повторной отрисовки. Source bitmap и DC state восстановлены, временные GDI
+  объекты удалены. Входной LastError передаётся native, выходной переживает
+  cleanup/диагностику. HWND для лога захвачен до возможного reentry/роста vector.
+- MM_TEXT обоих DC, положительные extents, отсутствие self/bitmap-alias;
+  OEM/stock и 1/4-bpp source-маски остаются native. Как у panel image-пути,
+  **любой source bitmap размера всего client остаётся native**, даже при
+  partial copy: настоящий рисунок и framebuffer здесь неоднозначны.
+  Это консервативное отличие от донора, а не исправление DoubleBuffered.
+
+Production-изменения ограничены `ListViewHooks.cpp`; установка чужих hook-наборов
+или renderer-вызовы Toolbar/Panel не добавлены, ModuleHandler/IATRegistry и
+WndCompat-классификация не изменены. Тела прежних BitBlt/StretchBlt, текста,
+FillRect, theme-background и post-BeginPaint-фона сверены с предыдущим HEAD —
+без изменений. Обычный SysListView32 и WinForms MaskBlt остаются native.
+
+### Проверки и Windows acceptance
+
+- Новые source contracts + прежние: **89/89**, PASS.
+- `listview_images_rendering_test.py`: **13/13 × Release/Debug**, также
+  **13/13 × Release/Debug с ASan+UBSan**, PASS. Компилируются **полные production**
+  BitmapUtils.cpp, OpaqueBitmapSource.cpp и ListViewHooks.cpp; строгие bitmap/ref
+  doubles переиспользованы из теста 101, отдельной копии нового алгоритма нет.
+- Red до production-правки: route-тест обеих сборок получает исходный bitmap
+  вместо opaque-копии уже на modern caller; после правки проходят оба класса
+  и оба caller route, aliases, no-EXE/no-cross-comctl, masks/ROP/offsets/native
+  return, DIB/DDB/garbage alpha, Full/backdrop/DC/TLS-изоляция, nested refs,
+  missing/failed registration, setup/native failures, LastError, reentry с
+  ростом стека, unload/shutdown/компенсация failed BeginPaint и client buffer.
+  Дополнительно исполняются прежние SysListView32/WinForms alpha-blits,
+  measurement/glyph text и first/flip-vs-VCL фон.
+- Контрольные VCL images **14/14 × Release/Debug**, panels **12/12 × Release/Debug**,
+  Bome memo **14/14**, button groups **9/9 × Release/Debug**, TCoolBar **9/9**,
+  input icons **6/6** — PASS. UTF-8/no BOM, project/filter XML, единственная
+  регистрация общего helper и `git diff --check` проверены; scratch не оставлен.
+
+Двойники не проверяют реальные PE/IAT-трамплины, GDI palette conversion,
+Windows MaskBlt/ROP-альфу и DWM. **MSVC Win32/x64 и визуальный результат в
+Restorator здесь не проверены.** Не объявляются покрытыми произвольные BPL,
+GetProcAddress, standalone GetDC/WM_PRINTCLIENT и неизвестные offscreen DC.
+
+После пересборки x86 GlassCore проверить список Restorator: normal/selected/
+hot/disabled значки, их чёрные детали и прозрачность по маске, прокрутку,
+repaint/resize; контрольные SysListView32/WinForms и принятые Toolbar/Panel.
+Диагностика: `[ListView] BeginPaint ... vclMaskModule=...`;
+`[DelphiListView] MaskBlt ... caller ... mask ... maskXY ... rop ... opaqueCopy ... result`
+(до 16 строк/сек/поток), либо
+`image-native ... api=MaskBlt reason=client-sized-source`.
+`opaqueCopy=1` подтверждает подготовку источника, **не** финальный Windows PASS;
+отсутствие строки не доказывает отсутствия исходного API. Формат отчёта:
+**скриншот → «Логи при отображении» → «Логи с зондом при отображении элемента»**.
