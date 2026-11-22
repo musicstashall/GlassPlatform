@@ -1,4 +1,4 @@
-// Panel-only extensions to the existing portable Win32/IAT doubles. No real
+// Panel-only extensions to portable Win32/IAT/Detours doubles. No real
 // Windows rasterization is claimed; the production DIB bytes are inspected.
 #pragma once
 #if !defined(GLASS_TEST_REAL_OPAQUE_BITMAP)
@@ -13,6 +13,7 @@
 using BYTE = std::uint8_t;
 using ULONG_PTR = std::uintptr_t;
 using LONG_PTR = std::intptr_t;
+using FARPROC = void(*)();
 struct BITMAP
 {
     LONG bmType{}, bmWidth{1}, bmHeight{1}, bmWidthBytes{4};
@@ -50,6 +51,10 @@ namespace PanelTest
     inline std::unordered_map<HDC, HGDIOBJ> bitmaps;
     inline bool failDc = false, failBitmap = false, failSelect = false, failBlend = false;
     inline bool coreAvailable = true, endAvailable = true;
+    inline TestModule user32;
+    inline bool user32Available = true, textExportAvailable = true;
+    inline FARPROC beginExport{}, endExport{};
+    inline int textResolutions = 0;
     inline int liveDcs = 0, liveBitmaps = 0, blends = 0;
     inline RECT blendRect{};
     inline BLENDFUNCTION blendMode{};
@@ -141,10 +146,11 @@ inline BOOL GdiAlphaBlend(HDC, int x, int y, int w, int h, HDC src,
 }
 inline HMODULE PanelGetModuleHandleW(LPCWSTR name)
 {
+    if (std::wstring_view(name) == L"user32.dll")
+        return PanelTest::user32Available ? &PanelTest::user32 : nullptr;
     return PanelTest::coreAvailable && std::wstring_view(name) == L"GlassCore.dll"
         ? GlassCore::ModuleHandler::g_entryPointModule : nullptr;
 }
-using FARPROC = void(*)();
 FARPROC PanelGetProcAddress(HMODULE, LPCSTR);
 // DrawThemeTextEx structures keep the x64 SDK layout/fields used by VCL.
 struct POINT { LONG x{}, y{}; };
@@ -312,7 +318,7 @@ inline int MultiByteToWideChar(UINT cp, DWORD flags, LPCSTR text, int bytes, LPW
     }
     return static_cast<int>(value.size());
 }
-inline int DrawTextA(HDC dc, LPCSTR text, int count, LPRECT rect, UINT flags)
+inline int PanelNativeDrawTextA(HDC dc, LPCSTR text, int count, LPRECT rect, UINT flags)
 {
     ++PanelTest::nativeAnsi; PanelTest::nativeEntryError = GetLastError();
     PanelTest::ansiDc = dc; PanelTest::ansiPointer = text; PanelTest::ansiCount = count;
@@ -324,9 +330,95 @@ inline int DrawTextA(HDC dc, LPCSTR text, int count, LPRECT rect, UINT flags)
     return PanelTest::nativeResult;
 }
 inline int WINAPI ChainedPanelAnsi(HDC dc, LPCSTR text, int count, LPRECT rect, UINT flags)
-{ ++PanelTest::chainedAnsi; return ::DrawTextA(dc, text, count, rect, flags); }
+{ ++PanelTest::chainedAnsi; return PanelNativeDrawTextA(dc, text, count, rect, flags); }
+namespace PanelTest
+{
+    using AnsiFn = int(WINAPI*)(HDC, LPCSTR, int, LPRECT, UINT);
+    inline AnsiFn textExport = &ChainedPanelAnsi, trampolineTarget{};
+    inline void* textDetour{};
+    inline bool failDetourBegin = false, failAttach = false, failCommit = false, failDetach = false;
+    inline int detourWrites = 0, attachAttempts = 0, detachAttempts = 0;
+    inline int attaches = 0, detaches = 0, trampolines = 0;
+    struct PendingDetour { void** real{}; void* hook{}; bool enable{}; };
+    inline PendingDetour pending;
+}
+// Export dispatch and trampoline are distinct: calling DrawTextA again on a
+// native fallback would re-enter the installed hook, not bypass it. This is a
+// behavioral double, not executable instruction patching or a real Detours ABI.
+inline int DrawTextA(HDC dc, LPCSTR text, int count, LPRECT rect, UINT flags)
+{
+    const auto target = PanelTest::textDetour
+        ? reinterpret_cast<PanelTest::AnsiFn>(PanelTest::textDetour) : PanelTest::textExport;
+    return target(dc, text, count, rect, flags);
+}
+inline int WINAPI PanelAnsiTrampoline(HDC dc, LPCSTR text, int count, LPRECT rect, UINT flags)
+{
+    ++PanelTest::trampolines;
+    assert(PanelTest::trampolineTarget && PanelTest::textDetour);
+    return PanelTest::trampolineTarget(dc, text, count, rect, flags);
+}
+inline FARPROC PanelGetProcAddress(HMODULE module, LPCSTR name)
+{
+    if (module == &PanelTest::user32 && std::strcmp(name, "DrawTextA") == 0)
+    {
+        ++PanelTest::textResolutions;
+        if (!PanelTest::textExportAvailable) return nullptr;
+        return reinterpret_cast<FARPROC>(PanelTest::textDetour ? &::DrawTextA : PanelTest::textExport);
+    }
+    if (module != GlassCore::ModuleHandler::g_entryPointModule) return nullptr;
+    if (std::strcmp(name, "GlassCore_BeginDelphiPanelPaint") == 0) return PanelTest::beginExport;
+    if (PanelTest::endAvailable && std::strcmp(name, "GlassCore_EndDelphiPanelPaint") == 0)
+        return PanelTest::endExport;
+    return nullptr;
+}
+namespace GlassCore::Hooks::Detours
+{
+    inline void Attach(void** real, void* hook)
+    {
+        ++PanelTest::attachAttempts;
+        if (PanelTest::failAttach) throw std::runtime_error("DetourAttach failed");
+        assert(!PanelTest::pending.real && real && *real && hook && !PanelTest::textDetour);
+        assert(*real == reinterpret_cast<void*>(PanelTest::textExport));
+        PanelTest::pending = {real, hook, true};
+    }
+    inline void Detach(void** real, void* hook)
+    {
+        ++PanelTest::detachAttempts;
+        if (PanelTest::failDetach) throw std::runtime_error("DetourDetach failed");
+        assert(!PanelTest::pending.real && real && *real == reinterpret_cast<void*>(&PanelAnsiTrampoline));
+        assert(PanelTest::textDetour == hook);
+        PanelTest::pending = {real, hook, false};
+    }
+    inline HRESULT Write(const std::function<void()>& callback) noexcept
+    {
+        ++PanelTest::detourWrites;
+        if (PanelTest::failDetourBegin) return E_FAIL;
+        PanelTest::pending = {};
+        try { callback(); }
+        catch (...) { PanelTest::pending = {}; return E_FAIL; }
+        const auto op = std::exchange(PanelTest::pending, {});
+        if (PanelTest::failCommit) return E_FAIL; // No pointer/patch mutation on aborted commit.
+        assert(op.real);
+        if (op.enable)
+        {
+            ++PanelTest::attaches;
+            PanelTest::trampolineTarget = reinterpret_cast<PanelTest::AnsiFn>(*op.real);
+            PanelTest::textDetour = op.hook;
+            *op.real = reinterpret_cast<void*>(&PanelAnsiTrampoline);
+        }
+        else
+        {
+            ++PanelTest::detaches;
+            *op.real = reinterpret_cast<void*>(PanelTest::trampolineTarget);
+            PanelTest::textDetour = nullptr;
+            PanelTest::trampolineTarget = nullptr;
+        }
+        return S_OK;
+    }
+}
 
 #if !defined(GLASS_TEST_REAL_OPAQUE_BITMAP)
+inline BOOL FAILED(HRESULT hr) { return hr < 0; }
 namespace GlassCore::Hooks
 {
     // Ref-delta + first-active-occupant model, not executable PE/IAT machinery.

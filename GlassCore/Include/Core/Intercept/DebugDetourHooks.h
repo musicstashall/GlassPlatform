@@ -8,7 +8,7 @@ namespace GlassCore::Hooks::DebugDetourHooks
 {
     // Битовая маска слотов (1ull << N соответствует индексу N в SetEnabled / внутри DebugDetourHooks.cpp).
     // Номера слотов (N) — часть публичного API; сгруппированы ниже по смыслу, не по возрастанию N.
-    // Тип маски — uint64_t (слоты 0..63); фактически используются 0..33.
+    // Тип маски — uint64_t (слоты 0..63); фактически используются 0..39.
 
     // --- Фон: тема и DirectUI ---
     inline constexpr uint64_t DDH_DrawThemeBackground = 1ull << 0;  // uxtheme: DrawThemeBackground
@@ -24,6 +24,14 @@ namespace GlassCore::Hooks::DebugDetourHooks
     inline constexpr uint64_t DDH_DrawTextExW = 1ull << 4;
     inline constexpr uint64_t DDH_ExtTextOutW = 1ull << 5;
     inline constexpr uint64_t DDH_TextOutW = 1ull << 8;
+    // ANSI и tabbed: диагностический passthrough, без чтения/сохранения текста.
+    // Добавлены в конец нумерации; прежние публичные биты 0..33 не сдвигаются.
+    inline constexpr uint64_t DDH_DrawTextA = 1ull << 34;
+    inline constexpr uint64_t DDH_DrawTextExA = 1ull << 35;
+    inline constexpr uint64_t DDH_ExtTextOutA = 1ull << 36;
+    inline constexpr uint64_t DDH_TextOutA = 1ull << 37;
+    inline constexpr uint64_t DDH_TabbedTextOutA = 1ull << 38;
+    inline constexpr uint64_t DDH_TabbedTextOutW = 1ull << 39;
     // uxtheme ordinal #126 — DrawTextWithGlow (сигнатура как в RenderText.cpp).
     inline constexpr uint64_t DDH_DrawTextWithGlow = 1ull << 23;
 
@@ -79,11 +87,13 @@ namespace GlassCore::Hooks::DebugDetourHooks
         DDH_DrawTextW | DDH_DrawTextExW | DDH_ExtTextOutW | DDH_BitBlt |
         DDH_TextOutW | DDH_PatBlt;
 
-    // Все слоты (0..33).
+    // Все слоты (0..39). Автоматически не включаются.
     inline constexpr uint64_t DDH_All =
         DDH_DrawThemeBackground | DDH_PaintBackground | DDH_DrawThemeBackgroundEx |
         DDH_DrawThemeText | DDH_DrawThemeTextEx | DDH_DrawTextW | DDH_DrawTextExW |
         DDH_ExtTextOutW | DDH_TextOutW | DDH_DrawTextWithGlow |
+        DDH_DrawTextA | DDH_DrawTextExA | DDH_ExtTextOutA | DDH_TextOutA |
+        DDH_TabbedTextOutA | DDH_TabbedTextOutW |
         DDH_BitBlt | DDH_PatBlt | DDH_FillRect | DDH_StretchBlt | DDH_AnimateWindow | DDH_SetClassLongPtrW |
         DDH_DwmExtendFrameIntoClientArea | DDH_DwmSetWindowAttribute | DDH_DwmEnableBlurBehindWindow |
         DDH_SetWindowCompositionAttribute |

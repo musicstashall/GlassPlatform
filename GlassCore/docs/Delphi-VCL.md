@@ -5664,3 +5664,195 @@ Windows/MSVC, реальные Windows NLS/GDI/uxtheme, PE/IAT concurrency и DW
 и custom tinted подложки/скосы не изменились; в Debug при необходимости доступен
 `[GlassCore][DelphiPanel] text api=DrawTextA`. Это не запрос повторной приёмки
 ComboLBox/SearchBox/TButtonedEdit и не требование нового их захвата.
+
+## Тест 115: исправление настоящего DebugDetourHooks и BWM-style DrawTextA для TPanel
+
+Пользователь после опубликованного **65c2fbb** сообщил: **«Кнопки рисуются,
+а текст — нет»**, указал на отсутствие ANSI-индексов именно в
+**DebugDetourHooks**, затем явно подтвердил выполнение исправления и отдельно
+потребовал перехват DrawTextA панели, **как в BWM**. Повторного согласования
+этого плана не требуется. Предыдущая публикация действительно находилась
+в remote; объяснять этот результат неопубликованным рабочим деревом нельзя.
+
+**Коррекция прежнего вывода:** §113 реализовал дополнительный optional EXE-IAT
+`DelphiDrawProbe`, а не запрошенное дополнение настоящего DDH. §114 описывает
+первую, опубликованную, но не принятую пользователем реализацию TPanel через
+EXE-IAT TextSlot. Ни её зелёные doubles, ни работающий Button не доказывали,
+что панельный handler вообще вызывается. Актуальный маршрут ниже заменяет
+IAT TextSlot из §114; исторические результаты тех шагов не являются проверкой
+этого исправления.
+
+### Что установлено по сообщению и донору
+
+Фрагмент **15:16:38.268–15:16:38.283** содержит только Button HWND
+`0x00FC0D66` / `0x00B00560`, длины **99/142**, RECT `[16,8,360,34]` /
+`[16,2,345,41]`, `format=0x102014`, callerMod `0x6A780000`, text caller
+`0x6CB50000` и глубину сессии 1→0. В нём нет panel Begin, DDH ANSI API или
+результата композиции панели. По этим абсолютным адресам без module map
+нельзя назвать DLL или установить причину отсутствия текста. Это pasted text,
+не новый входящий файл журнала; удалять исходный файл лога здесь нечего.
+
+Повторное чтение защищённого UTF-16 BWM.txt установило точное отличие:
+
+- **17058–17096**: window/EXE-ветка, exact TPanel/TPage, вызов
+  `WinHooks::DrawTextAttach(enable)` вокруг paint; вложенное изображение TPanel
+  обрабатывается отдельно.
+- **17747–17755**: `actualDrawTextA` получается через
+  **GetProcAddress(user32, "DrawTextA")**.
+- **17795–17811**: reference-count и **Detours::Attach/Detach** на переходах
+  0→1 / 1→0. Это **не подмена named import в EXE**.
+- **18014–18058**: ANSI→alpha/native fallback. Его непрозрачные text-rectangle
+  fills и допущения об ANSI/wide-длинах не являются разрешением менять
+  принятую подложку или общий текст Glass.
+
+Таким образом, source mismatch прежнего IAT-пути с BWM доказан. Что именно
+произошло в пользовательском процессе, Button-only фрагмент не устанавливает.
+BWM.txt не изменён; SHA256 по-прежнему
+`bf679ce9c8a29e0d6b4ac8e3dce73cad4f52e454de0961a28e9840133f1e547f`.
+
+### Настоящий DDH: публичные индексы и только диагностика
+
+Изменены **GlassCore/Include/Core/Intercept/DebugDetourHooks.h** и
+**GlassCore/src/Core/Intercept/DebugDetourHooks.cpp**. Прежние биты **0..33**
+сохранены; новые добавлены в конец:
+
+| Public mask | Бит / slot |
+|---|---:|
+| DDH_DrawTextA | 34 |
+| DDH_DrawTextExA | 35 |
+| DDH_ExtTextOutA | 36 |
+| DDH_TextOutA | 37 |
+| DDH_TabbedTextOutA | 38 |
+| DDH_TabbedTextOutW | 39 |
+
+**TextOutW уже был на бите 8** и не перенумерован. `kSlotCount` и ref-массив
+теперь **40**, DDH_All содержит все 40 слотов; originals, объявления и обе
+ветки attach/detach синхронизированы. Включение остаётся явным вызовом
+`DebugDetourHooks::SetEnabled(нужная_маска, true)` и симметричным `false`.
+Нового автоматического DDH_All, нового caller-а SetEnabled или изменения
+DDH_ComboLBoxPaintProbe нет. В Release публичная функция остаётся no-op;
+production cpp по-прежнему исключён из Release Win32/x64 в проекте.
+
+Шесть новых handlers вызывают **matching native original ровно один раз**.
+Они не декодируют и не читают текст, не вызывают preview, не читают RECT,
+DRAWTEXTPARAMS, dx или tab-stop arrays. Параметры, signed/unsigned counts,
+flags/options, mutable pointers, BOOL/int/packed LONG и native mutations
+остаются у исходного API. Старые W-handlers с их прежним поведением не
+переписывались.
+
+Новый общий metadata logger пишет `[GlassCore][DebugDetour]` с API, caller
+module, HDC, доступным через WindowFromDC HWND/class, count, flags, x/y,
+указателями RECT/params/dx/tabs, tab count/origin и **textColor/bkColor/bkMode**.
+Для memory DC без WindowFromDC получается `hdcWin=-`: это не доказательство
+отсутствия paint-сессии. Строки в диагностике **не сохраняются**. Сохранены
+own-GlassCore silent passthrough, входной LastError до native и LastError native
+после него. TLS guard ограничивает только реентерабельную диагностику, не API;
+исключение logger-а также не подавляет original.
+
+При failed/aborted общей Detours-транзакции восстанавливается снимок всех
+DDH refs: не остаётся ложного enabled-состояния после частичного прохода маски.
+Для компиляции полного исходника в portable runner устранён прежний
+MSVC-specific промежуточный static_cast function-pointer→void*: адрес
+GlassCoreModuleHandle передаётся тем же API через прямой reinterpret_cast.
+Логика определения собственного модуля от этого не меняется.
+
+### Панель: acquisition/lifetime как у BWM, без нового фонового renderer
+
+В **GlassCore/src/Hooks/delphi/TPanelDraw.cpp** удалён только прежний IAT
+**TextSlot**. Четыре фоновых/image IAT-слота **FillRect/PatBlt/ExtTextOutW/
+StretchBlt**, их номера и работа через HookDispatcher/IATRegistry сохранены.
+Для текста введён отдельный private **user32 export Detours**:
+
+1. Startup разрешает `user32!DrawTextA` через GetModuleHandleW/GetProcAddress,
+   но **не устанавливает** detour. Повторный Startup не теряет действующий
+   trampoline; отсутствующий модуль/экспорт не создаёт text lease.
+2. Message bridge по-прежнему открывает Begin/End вокруг native paint. Только
+   exact case-insensitive **TPanel + WM_PAINT/WM_PRINTCLIENT** приобретает
+   отдельный `ansiTextAcquired`; первый владелец ставит Detours, вложенные
+   владельцы увеличивают ref без повторного Attach. В `acquired` логе бит
+   **0x10** теперь означает этот export lease, а не пятый IAT-слот.
+3. Успешного text lease достаточно для Begin **даже без DrawTextA/других EXE
+   imports и даже без dispatcher.moduleAddress**. Неудачные Begin/Attach/Commit
+   не увеличивают text refs. Если не приобрелось ничего, Begin остаётся false;
+   доступные прежние фоновые IAT могут работать и без text detour.
+4. End освобождает только refs данной сессии; последний text owner снимает
+   Detours. Native fallback идёт в сохранённый **actual/trampoline**, никогда
+   повторно в уже перехваченный `::DrawTextA`.
+5. При failed Detach attachment-state и trampoline не выбрасываются, но
+   logical lease уже закрыт: вне подходящей TLS-сессии остаётся native-only
+   passthrough. Следующая сессия не делает duplicate Attach; последующее
+   закрытие или Shutdown повторяет Detach. Shutdown обнуляет logical refs,
+   освобождает IAT и пытается снять оставшийся text detour. Это локальная
+   обработка ошибки, **не изменение контракта выгрузки DLL** и не доказательство
+   безопасности реального Windows detach/unload при системной ошибке.
+
+Глобален только адрес экспортного перехвата на время этих leases. **Рендеринг
+не стал глобальным:** handler повторно проверяет Full/backdrop, живое окно,
+class/message, собственный ref текущей TLS-сессии, прежний IsPanelDc
+(window-owned DC, подтверждённый paint-stack MEMDC, explicit print DC) и reentry.
+Чужой DC/поток, Frame/erase и несоответствующий TPanel вызов остаются native.
+Сторонний IAT occupant не снимается и не вызывается из соседнего renderer;
+если он вообще не вызывает системный экспорт, этот detour его не обходит.
+
+**Сохранена отрисовка §114:** выбранный шрифт → charset/codepage, точные ANSI
+byte bounds и UTF-16 length, CALCRECT/MODIFYSTRING/NOCLIP и ошибки → native,
+SaveDC/RestoreDC, private RECT, transparent DrawTextWithAlpha и LastError.
+Системная прозрачная база, custom tint **A=100**, bevels и DoubleBuffered
+не меняются; непрозрачные BWM text-rectangle fills не перенесены. Внутренний
+общий DrawTextWithAlpha fallback и RenderText/PaintDispatcher не переписаны.
+TPage и другие panel renderers не добавлены. Принятые ComboLBox/SearchBox/
+TButtonedEdit не переоткрываются.
+
+Для различения разрешения адреса, установки и вызова доступны отдельные строки:
+`[GlassCore][DelphiPanel] text-resolve api=DrawTextA`, `text-detour ... enable=1/0
+... attached=... hr=...`, прежний `Begin ... class="TPanel" ... acquired=0x...`,
+а затем `text api=DrawTextA` или `text-native ... reason=...`. Внешний DDH —
+независимый debug-инструмент, не условие работы panel renderer. Одновременная
+установка нескольких export-detours требует проверки реальной цепочки;
+portable double не доказывает совместимость Detours при любом порядке их
+установки/снятия. Автоматически включать весь DDH ради этого не нужно.
+
+### Проверки этого исправления
+
+- Новый **debug_detour_hooks_test.py** компилирует **полные, без извлечения
+  фрагментов/копирования реализации, production DDH header и cpp**. Не RootGdiHooks
+  и не optional DelphiDrawProbe. **18 тестов PASS**: 17 поведенческих сценариев
+  в Debug `-O0` и OptimizedDebug `-O2`, плюс Release no-op. Проверяются все
+  40 масок/обе switch-ветки, шесть originals/handlers, вложенные/mixed refs,
+  abort rollback, unreadable/null/non-NUL text/arrays, native-once, counts,
+  mutations, results/state/LastError, metadata, logger exception/reentry и TLS.
+- Полный **TPanelDraw.cpp + настоящий message bridge: 31×3 PASS** (Release,
+  Debug, Debug+probe). Добавлена модель export dispatch и отдельного trampoline;
+  проверяются отсутствие EXE imports/moduleAddress, first/final lease,
+  nested paint/erase/Frame, missing export, Begin/Attach/Commit/Detach failure,
+  повторный Startup/Shutdown и сохранение unrelated IAT occupant. Прежняя ANSI/
+  DC/фон/state/conversion/fallback проверка сохранена.
+- Оба этих набора с **ASan+UBSan и leak detection — PASS**;
+  `-fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie`.
+- **120 source contracts PASS**. Соседние production suites: optional IAT probe
+  **19**, ButtonGroups **9**, CoolBar **9**, BomeMemo **14**, VCL images **14**,
+  ListView images **13**, ListBox **21×3**, CTLCOLOR **13×3**, input icons
+  **28×3** — PASS в конфигурациях соответствующих runner. Image runner получил
+  только пустой test include для HookHelper, не новую rendering-логику.
+- **30/30 компилируемых мутантов отвергнуты исполнением**: 17 для настоящего DDH,
+  13 для panel detour route. Среди них пропуск slot39, неверная attach-цель,
+  потеря параметров/табуляции/count/native-once/LastError, чтение text,
+  global/stuck logger guard, потеря ref rollback, IAT-зависимый acquisition,
+  повторный nested Attach/ранний Detach, failed-acquire phantom ref,
+  рекурсия через export, потеря retained trampoline/Shutdown/DC/reentry gate.
+  Compile failures не засчитывались. Mutation sources/binaries удалены.
+
+Hash-сверка относительно опубликованного 65c2fbb подтвердила scope **12 файлов**:
+9 существовавших и 3 новых файла DDH-harness; остальные **1782** существовавших
+файла побайтово неизменны, удалений нет. Отдельно побайтово сверены прежние
+panel background/image/DC/decoder/themed bodies, DDH attach/detach cases 0..33
+и старые W/rendering handlers. Предыдущие разделы документа не переписаны.
+Все 12 текстовых файлов — UTF-8 без BOM; четыре Python AST и diff-check PASS.
+Разовые скрипты/manifest удалены после сверки; защищённый BWM сохранён.
+
+Win32/Detours/NLS/stack/logging в этих проверках — **environment doubles**;
+это не Windows/MSVC-сборка, не настоящие executable patches, не concurrency
+или NLS/GDI/uxtheme/DWM-проверка и **не визуальная приёмка текста TPanel**.
+Платформу не запускали/останавливали, DLL не освобождали. Для пользовательской
+Windows-проверки остаётся именно исправленная TPanel и её неизменная подложка;
+повторной проверки закрытых ComboLBox/SearchBox/TButtonedEdit не требуется.

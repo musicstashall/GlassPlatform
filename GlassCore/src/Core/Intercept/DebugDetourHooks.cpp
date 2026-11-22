@@ -4,6 +4,7 @@
 // Фон:   N=0  DrawThemeBackground; N=10 dui70::Element::PaintBackground (GetProcAddress; ABI x64: this, HDC, Value*, RECT&×4);
 //        N=22 DrawThemeBackgroundEx
 // Текст: N=1,2,3,4,5,8,23 — DTT, DTTEx, DrawTextW, DrawTextExW, ExtTextOutW, TextOutW, DrawTextWithGlow (uxtheme #126)
+//        N=34 DrawTextA; N=35 DrawTextExA; N=36 ExtTextOutA; N=37 TextOutA; N=38,39 TabbedTextOutA/W (metadata only)
 // GDI:   N=6 BitBlt; N=9 PatBlt; N=17 SetDIBits; N=15 SetDCBrushColor; N=16 SetBkColor; N=18 CreateSolidBrush;
 //        N=19 GetSysColorBrush; N=20 GetStockObject; N=21 GetSysColor; N=27 Rectangle; N=28 FillRect (user32);
 //        N=29 StretchBlt (gdi32)
@@ -26,6 +27,8 @@
 
 #include <detours.h>
 #include <intrin.h>
+#include <algorithm>
+#include <array>
 #include <dwmapi.h>
 
 #pragma comment(lib, "dwmapi.lib")
@@ -40,7 +43,7 @@ namespace GlassCore::Hooks::DebugDetourHooks
 {
     namespace
     {
-        constexpr size_t kSlotCount = 34;
+        constexpr size_t kSlotCount = 40;
         constexpr size_t kTextPreviewMax = 120;
 
         wil::srwlock g_lock;
@@ -60,6 +63,12 @@ namespace GlassCore::Hooks::DebugDetourHooks
         decltype(&::BitBlt) g_trueBitBlt = ::BitBlt;
         decltype(&::AnimateWindow) g_trueAnimateWindow = ::AnimateWindow;
         decltype(&::TextOutW) g_trueTextOutW = ::TextOutW;
+        decltype(&::DrawTextA) g_trueDrawTextA = ::DrawTextA;
+        decltype(&::DrawTextExA) g_trueDrawTextExA = ::DrawTextExA;
+        decltype(&::ExtTextOutA) g_trueExtTextOutA = ::ExtTextOutA;
+        decltype(&::TextOutA) g_trueTextOutA = ::TextOutA;
+        decltype(&::TabbedTextOutA) g_trueTabbedTextOutA = ::TabbedTextOutA;
+        decltype(&::TabbedTextOutW) g_trueTabbedTextOutW = ::TabbedTextOutW;
         decltype(&::PatBlt) g_truePatBlt = ::PatBlt;
         decltype(&::Rectangle) g_trueRectangle = ::Rectangle;
         decltype(&::FillRect) g_trueFillRect = ::FillRect;
@@ -162,7 +171,7 @@ namespace GlassCore::Hooks::DebugDetourHooks
             HMODULE hMod = nullptr;
             GetModuleHandleExW(
                 GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                reinterpret_cast<LPCWSTR>(static_cast<void*>(&GlassCoreModuleHandle)),
+                reinterpret_cast<LPCWSTR>(&GlassCoreModuleHandle),
                 &hMod);
             return hMod;
         }
@@ -1212,6 +1221,13 @@ namespace GlassCore::Hooks::DebugDetourHooks
             const RECT* pRect3,
             const RECT* pRect4);
 
+        int WINAPI HookDrawTextA(HDC, LPCSTR, int, LPRECT, UINT);
+        int WINAPI HookDrawTextExA(HDC, LPSTR, int, LPRECT, UINT, LPDRAWTEXTPARAMS);
+        BOOL WINAPI HookExtTextOutA(HDC, int, int, UINT, const RECT*, LPCSTR, UINT, const INT*);
+        BOOL WINAPI HookTextOutA(HDC, int, int, LPCSTR, int);
+        LONG WINAPI HookTabbedTextOutA(HDC, int, int, LPCSTR, int, int, const INT*, int);
+        LONG WINAPI HookTabbedTextOutW(HDC, int, int, LPCWSTR, int, int, const INT*, int);
+
         void AttachSlot(size_t slot)
         {
             switch (slot)
@@ -1425,6 +1441,42 @@ namespace GlassCore::Hooks::DebugDetourHooks
                     reinterpret_cast<void**>(&g_trueBufferedPaintSetAlpha),
                     reinterpret_cast<void*>(&HookBufferedPaintSetAlpha));
                 break;
+            case 34:
+                THROW_HR_IF(E_POINTER, !g_trueDrawTextA);
+                Hooks::Detours::Attach(
+                    reinterpret_cast<void**>(&g_trueDrawTextA),
+                    reinterpret_cast<void*>(&HookDrawTextA));
+                break;
+            case 35:
+                THROW_HR_IF(E_POINTER, !g_trueDrawTextExA);
+                Hooks::Detours::Attach(
+                    reinterpret_cast<void**>(&g_trueDrawTextExA),
+                    reinterpret_cast<void*>(&HookDrawTextExA));
+                break;
+            case 36:
+                THROW_HR_IF(E_POINTER, !g_trueExtTextOutA);
+                Hooks::Detours::Attach(
+                    reinterpret_cast<void**>(&g_trueExtTextOutA),
+                    reinterpret_cast<void*>(&HookExtTextOutA));
+                break;
+            case 37:
+                THROW_HR_IF(E_POINTER, !g_trueTextOutA);
+                Hooks::Detours::Attach(
+                    reinterpret_cast<void**>(&g_trueTextOutA),
+                    reinterpret_cast<void*>(&HookTextOutA));
+                break;
+            case 38:
+                THROW_HR_IF(E_POINTER, !g_trueTabbedTextOutA);
+                Hooks::Detours::Attach(
+                    reinterpret_cast<void**>(&g_trueTabbedTextOutA),
+                    reinterpret_cast<void*>(&HookTabbedTextOutA));
+                break;
+            case 39:
+                THROW_HR_IF(E_POINTER, !g_trueTabbedTextOutW);
+                Hooks::Detours::Attach(
+                    reinterpret_cast<void**>(&g_trueTabbedTextOutW),
+                    reinterpret_cast<void*>(&HookTabbedTextOutW));
+                break;
             default:
                 THROW_HR(E_INVALIDARG);
             }
@@ -1637,6 +1689,42 @@ namespace GlassCore::Hooks::DebugDetourHooks
                     Hooks::Detours::Detach(
                         reinterpret_cast<void**>(&g_trueBufferedPaintSetAlpha),
                         reinterpret_cast<void*>(&HookBufferedPaintSetAlpha));
+                break;
+            case 34:
+                if (g_trueDrawTextA)
+                    Hooks::Detours::Detach(
+                        reinterpret_cast<void**>(&g_trueDrawTextA),
+                        reinterpret_cast<void*>(&HookDrawTextA));
+                break;
+            case 35:
+                if (g_trueDrawTextExA)
+                    Hooks::Detours::Detach(
+                        reinterpret_cast<void**>(&g_trueDrawTextExA),
+                        reinterpret_cast<void*>(&HookDrawTextExA));
+                break;
+            case 36:
+                if (g_trueExtTextOutA)
+                    Hooks::Detours::Detach(
+                        reinterpret_cast<void**>(&g_trueExtTextOutA),
+                        reinterpret_cast<void*>(&HookExtTextOutA));
+                break;
+            case 37:
+                if (g_trueTextOutA)
+                    Hooks::Detours::Detach(
+                        reinterpret_cast<void**>(&g_trueTextOutA),
+                        reinterpret_cast<void*>(&HookTextOutA));
+                break;
+            case 38:
+                if (g_trueTabbedTextOutA)
+                    Hooks::Detours::Detach(
+                        reinterpret_cast<void**>(&g_trueTabbedTextOutA),
+                        reinterpret_cast<void*>(&HookTabbedTextOutA));
+                break;
+            case 39:
+                if (g_trueTabbedTextOutW)
+                    Hooks::Detours::Detach(
+                        reinterpret_cast<void**>(&g_trueTabbedTextOutW),
+                        reinterpret_cast<void*>(&HookTabbedTextOutW));
                 break;
             default:
                 break;
@@ -1987,6 +2075,70 @@ namespace GlassCore::Hooks::DebugDetourHooks
                 reserved,
                 static_cast<unsigned int>(hr));
             return hr;
+        }
+
+        // New text diagnostics never inspect text, RECT, lpDx, tab stops or
+        // DRAWTEXTPARAMS. Even malformed/measurement/mutable calls reach the
+        // original once, with their pointers/counts/flags and LastError intact.
+        thread_local bool g_inTextMetadata = false;
+        void LogTextMetadata(LPCWSTR api, void* caller, HDC hdc, std::int64_t count,
+            UINT flags, int x, int y, const void* rect, const void* extra,
+            int tabCount = 0, int tabOrigin = 0) noexcept
+        {
+            const DWORD error = GetLastError();
+            auto restoreError = wil::scope_exit([&]() noexcept { SetLastError(error); });
+            if (g_inTextMetadata || CallerModuleIsGlassCore(caller)) return;
+            g_inTextMetadata = true;
+            auto leave = wil::scope_exit([]() noexcept { g_inTextMetadata = false; });
+            try
+            {
+                wchar_t modName[64]{}, winBuf[160]{};
+                GetOuterCallerModuleBaseName(modName, std::size(modName));
+                FormatHdcWindowSuffix(hdc, winBuf, std::size(winBuf));
+                const COLORREF textColor = hdc ? GetTextColor(hdc) : CLR_INVALID;
+                const COLORREF bkColor = hdc ? GetBkColor(hdc) : CLR_INVALID;
+                const int bkMode = hdc ? GetBkMode(hdc) : 0;
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DebugDetour] %s caller=%s hdc=%p count=%lld flags=0x%X x=%d y=%d rect=%p extra=%p tabCount=%d tabOrigin=%d textColor=0x%08X bkColor=0x%08X bkMode=%d %s",
+                    api, modName, hdc, static_cast<long long>(count), flags, x, y, rect, extra,
+                    tabCount, tabOrigin, static_cast<unsigned>(textColor), static_cast<unsigned>(bkColor), bkMode, winBuf);
+            }
+            catch (...) { /* A failed diagnostic must not suppress the native call. */ }
+        }
+
+        int WINAPI HookDrawTextA(HDC hdc, LPCSTR text, int count, LPRECT rect, UINT flags)
+        {
+            LogTextMetadata(L"DrawTextA", _ReturnAddress(), hdc, count, flags, 0, 0, rect, nullptr);
+            return g_trueDrawTextA(hdc, text, count, rect, flags);
+        }
+        int WINAPI HookDrawTextExA(HDC hdc, LPSTR text, int count, LPRECT rect, UINT flags,
+            LPDRAWTEXTPARAMS params)
+        {
+            LogTextMetadata(L"DrawTextExA", _ReturnAddress(), hdc, count, flags, 0, 0, rect, params);
+            return g_trueDrawTextExA(hdc, text, count, rect, flags, params);
+        }
+        BOOL WINAPI HookExtTextOutA(HDC hdc, int x, int y, UINT flags, const RECT* rect,
+            LPCSTR text, UINT count, const INT* dx)
+        {
+            LogTextMetadata(L"ExtTextOutA", _ReturnAddress(), hdc, count, flags, x, y, rect, dx);
+            return g_trueExtTextOutA(hdc, x, y, flags, rect, text, count, dx);
+        }
+        BOOL WINAPI HookTextOutA(HDC hdc, int x, int y, LPCSTR text, int count)
+        {
+            LogTextMetadata(L"TextOutA", _ReturnAddress(), hdc, count, 0, x, y, nullptr, nullptr);
+            return g_trueTextOutA(hdc, x, y, text, count);
+        }
+        LONG WINAPI HookTabbedTextOutA(HDC hdc, int x, int y, LPCSTR text, int count,
+            int tabCount, const INT* tabs, int tabOrigin)
+        {
+            LogTextMetadata(L"TabbedTextOutA", _ReturnAddress(), hdc, count, 0, x, y, nullptr, tabs, tabCount, tabOrigin);
+            return g_trueTabbedTextOutA(hdc, x, y, text, count, tabCount, tabs, tabOrigin);
+        }
+        LONG WINAPI HookTabbedTextOutW(HDC hdc, int x, int y, LPCWSTR text, int count,
+            int tabCount, const INT* tabs, int tabOrigin)
+        {
+            LogTextMetadata(L"TabbedTextOutW", _ReturnAddress(), hdc, count, 0, x, y, nullptr, tabs, tabCount, tabOrigin);
+            return g_trueTabbedTextOutW(hdc, x, y, text, count, tabCount, tabs, tabOrigin);
         }
 
         int WINAPI HookDrawTextW(HDC hdc, LPCWSTR lpchText, int cchText, LPRECT lprc, UINT format)
@@ -3145,9 +3297,10 @@ namespace GlassCore::Hooks::DebugDetourHooks
     {
         auto lock = g_lock.lock_exclusive();
         DebugLog(L"[GlassCore][DebugDetour] SetEnabled");
+        const auto before = std::to_array(g_ref);
         try
         {
-            return Hooks::Detours::Write([&]() {
+            const HRESULT hr = Hooks::Detours::Write([&]() {
                 for (size_t i = 0; i < kSlotCount; ++i)
                 {
                     const uint64_t bit = 1ull << static_cast<uint32_t>(i);
@@ -3171,9 +3324,12 @@ namespace GlassCore::Hooks::DebugDetourHooks
                     }
                 }
             });
+            if (FAILED(hr)) std::copy(before.begin(), before.end(), g_ref);
+            return hr;
         }
         catch (...)
         {
+            std::copy(before.begin(), before.end(), g_ref);
             return wil::ResultFromCaughtException();
         }
     }
