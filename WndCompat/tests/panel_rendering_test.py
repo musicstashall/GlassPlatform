@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Execute production VCL panel hooks/message bridge with Win32/IAT doubles.
+"""Execute production VCL panel hooks/message bridge with Win32/IAT/Detours doubles.
 
 The root themed-text gate and IAT handler are also compiled directly from
 production source excerpts. The complete TPanelDraw unit is compiled in three
-configurations, including its private DrawTextA slot and ANSI decoding. Checks
-routing, DIB bytes, options and scoped state, not Windows NLS tables, pixels,
+configurations, including its user32 DrawTextA export detour and ANSI decoding.
+Checks export acquisition/trampoline lifetime, routing, DIB bytes, options and
+scoped state, not Windows NLS tables, pixels, executable Detours patches,
 real IAT chains, uxtheme alpha, or MSVC build compatibility.
 """
 from pathlib import Path
@@ -32,6 +33,7 @@ class PanelRenderingTest(unittest.TestCase):
             'CorePch.h', 'WndPch.h', 'windows.h', 'uxtheme.h', 'wil.h', 'DebugLog.h',
             'GlassBackdropMark.h', 'InjectionMode.h', 'WndCompat.h',
             'Tracker/WinEventHandler.h', 'Core/Intercept/HookDispatcher.h',
+            'Core/Intercept/HookHelper.h',
             'Module/ModuleHandler.h', 'Subsystems/PaintDispatcher.h',
             'Subsystems/RootSwcaGradient.h', 'Subsystems/RenderText.h',
             'Subsystems/OpaqueBitmapSource.h',
@@ -113,10 +115,10 @@ class PanelRenderingTest(unittest.TestCase):
     def test_card_and_radio_group_use_probe_options_without_panel_background_changes(self):
         self.run_case('card-and-radio-captions')
 
-    def test_ansi_only_exe_import_renders_through_private_scoped_slot(self):
+    def test_ansi_export_route_needs_neither_exe_import_nor_iat_acquisition(self):
         self.run_case('ansi-route')
 
-    def test_ansi_slot_is_exact_tpanel_paint_print_only(self):
+    def test_ansi_detour_is_exact_tpanel_paint_print_only(self):
         self.run_case('ansi-classes')
 
     def test_ansi_bounded_embedded_nul_dbcs_and_utf16_lengths(self):
@@ -143,7 +145,7 @@ class PanelRenderingTest(unittest.TestCase):
     def test_ansi_save_mode_renderer_exception_failure_and_zero_result(self):
         self.run_case('ansi-render-failures')
 
-    def test_ansi_actual_original_missing_original_and_stale_hook_native_once(self):
+    def test_ansi_native_once_uses_real_detour_trampoline_and_detached_export(self):
         self.run_case('ansi-original')
 
     def test_ansi_lookup_logging_cleanup_and_native_last_error(self):
@@ -152,8 +154,17 @@ class PanelRenderingTest(unittest.TestCase):
     def test_ansi_nested_ref_delta_and_ineligible_inner_session_do_not_leak(self):
         self.run_case('ansi-nested')
 
-    def test_ansi_missing_import_registration_failure_and_first_occupant(self):
+    def test_ansi_export_lease_leaves_unrelated_iat_first_occupant_untouched(self):
         self.run_case('ansi-imports')
+
+    def test_ansi_detour_begin_attach_and_commit_failures_do_not_acquire_phantom_refs(self):
+        self.run_case('ansi-detour-failures')
+
+    def test_ansi_missing_user32_export_and_repeated_startup_do_not_attach_or_destroy_trampoline(self):
+        self.run_case('ansi-detour-resolution')
+
+    def test_ansi_detach_failure_retains_native_trampoline_and_shutdown_retries_once(self):
+        self.run_case('ansi-detour-lifetime')
 
     def test_ansi_renderer_reentry_and_log_budget_do_not_suppress_calls(self):
         self.run_case('ansi-reentry-budget')

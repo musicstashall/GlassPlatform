@@ -34,6 +34,7 @@ class VclImagesRenderingTest(unittest.TestCase):
             'Subsystems/GdiHookUtils.h', 'Subsystems/RootSwcaGradient.h',
             'Subsystems/TextGlowClientRegistry.h', 'Subsystems/PaintDispatcher.h',
             'Module/ModuleHandler.h', 'Core/Intercept/HookDispatcher.h',
+            'Core/Intercept/HookHelper.h',
         ):
             path = stubs / header
             path.parent.mkdir(parents=True, exist_ok=True)

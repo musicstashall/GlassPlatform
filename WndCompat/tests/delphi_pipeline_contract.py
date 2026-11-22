@@ -1962,7 +1962,7 @@ class DelphiPipelineContract(unittest.TestCase):
             self.assertIn(guard, code)
         self.assertNotIn('_ReturnAddress', code)
 
-    def test_panel_ansi_slot_is_private_exact_tpanel_and_paint_print_only(self):
+    def test_panel_ansi_export_detour_is_private_exact_tpanel_and_paint_print_only(self):
         code = read('GlassCore/src/Hooks/delphi/TPanelDraw.cpp')
         gate = code.split('bool IsAnsiTextPanel(', 1)[1].split('bool IsAnsiTextRect(', 1)[0]
         for marker in ('message == WM_PAINT || message == WM_PRINTCLIENT',
@@ -1970,18 +1970,95 @@ class DelphiPipelineContract(unittest.TestCase):
             self.assertIn(marker, gate)
         for forbidden in ('WM_ERASEBKGND', 'IsDelphiPanelClassName', 'wcsstr', 'TFrame', 'TPage'):
             self.assertNotIn(forbidden, gate)
-        self.assertIn('"DrawTextA", reinterpret_cast<PVOID>(PanelDrawTextA)', code)
-        self.assertIn('i == TextSlot && !IsAnsiTextPanel(hwnd, message)', code)
+        table = code.split('g_dep{{', 1)[1].split('}};', 1)[0]
+        self.assertNotIn('DrawTextA', table)
+        self.assertNotIn('TextSlot', code)
+        self.assertIn('IsAnsiTextPanel(hwnd, message) && AcquireAnsiText()', code)
+        self.assertIn('GetProcAddress(user32, "DrawTextA")', code)
+        self.assertIn('Detours::Attach(reinterpret_cast<void**>(&g_actualDrawTextA)', code)
+        self.assertIn('Detours::Detach(reinterpret_cast<void**>(&g_actualDrawTextA)', code)
         self.assertIn('g_dispatcher.moduleAddress = GlassCore::ModuleHandler::g_entryPointModule', code)
         handler = code.split('int WINAPI PanelDrawTextA(HDC dc,', 1)[1].split(
             'HRESULT DrawContainerThemeTextEx(', 1)[0]
-        for marker in ('Original<TextSlot, decltype(&::DrawTextA)>', '!original || g_inHook || !IsPanelDc(dc)',
-                       'g_stack.back().acquired[TextSlot]',
+        for marker in ('const auto original = AnsiTextOriginal()', 'g_inHook || !IsPanelDc(dc)',
+                       'g_stack.back().ansiTextAcquired',
                        'IsAnsiTextPanel(g_stack.back().hwnd, g_stack.back().message)'):
             self.assertIn(marker, handler)
         for forbidden in ('IsWindowUnicode', 'GetACP(', 'DetourAttach', '_ReturnAddress'):
             self.assertNotIn(forbidden, code)
         self.assertNotIn('DrawTextA', read('GlassCore/Include/Hooks/delphi/TPanelDraw.h'))
+
+    def test_panel_export_lease_lifetime_is_independent_of_exe_iat_and_native_uses_trampoline(self):
+        code = read('GlassCore/src/Hooks/delphi/TPanelDraw.cpp')
+        for marker in ('size_t g_ansiTextRefs{}', 'bool g_ansiTextAttached = false',
+                       'bool ansiTextAcquired = false', 'constexpr unsigned kAnsiTextMask = 1u << Count',
+                       '!g_ansiTextRefs && !g_ansiTextAttached', 'if (FAILED(hr)) return false',
+                       '++g_ansiTextRefs', 's.ansiTextAcquired && g_ansiTextRefs && --g_ansiTextRefs == 0',
+                       'if (s.ansiTextAcquired) mask |= kAnsiTextMask', 'return g_actualDrawTextA',
+                       'catch (...) { ReleaseSession(s); return false; }', 'text-resolve api=DrawTextA',
+                       'text-detour api=DrawTextA enable=1', 'text-detour api=DrawTextA enable=0'):
+            self.assertIn(marker, code)
+        begin = code.split('bool BeginPaint(HWND hwnd,', 1)[1].split('void EndPaint()', 1)[0]
+        self.assertNotIn('!g_dispatcher.moduleAddress', begin)
+        self.assertLess(begin.index('AcquireAnsiText()'), begin.index('if (!mask) return false'))
+        self.assertIn('g_dispatcher.moduleAddress && i < Count', begin)
+        shutdown = code.split('void Shutdown() noexcept', 1)[1]
+        self.assertIn('g_ansiTextRefs = 0', shutdown)
+        self.assertIn('DetachAnsiText()', shutdown)
+        self.assertNotIn('DebugDetourHooks', code)
+
+    def test_actual_debug_detour_new_public_bits_preserve_old_slots_and_all_mask(self):
+        header = read('GlassCore/Include/Core/Intercept/DebugDetourHooks.h')
+        code = read('GlassCore/src/Core/Intercept/DebugDetourHooks.cpp')
+        for name, slot in (('DrawTextA', 34), ('DrawTextExA', 35), ('ExtTextOutA', 36),
+                           ('TextOutA', 37), ('TabbedTextOutA', 38), ('TabbedTextOutW', 39), ('TextOutW', 8)):
+            self.assertIn(f'DDH_{name} = 1ull << {slot};', header)
+            self.assertIn(f'decltype(&::{name}) g_true{name} = ::{name};', code)
+            for switch in (code.split('void AttachSlot(size_t slot)', 1)[1].split('void DetachSlot', 1)[0],
+                           code.split('void DetachSlot(size_t slot)', 1)[1].split('HRESULT WINAPI HookDrawThemeBackground', 1)[0]):
+                case = switch.split(f'case {slot}:', 1)[1].split('break;', 1)[0]
+                self.assertIn(f'&g_true{name}', case)
+                self.assertIn(f'&Hook{name}', case)
+        self.assertIn('constexpr size_t kSlotCount = 40;', code)
+        all_mask = header.split('inline constexpr uint64_t DDH_All =', 1)[1].split(';', 1)[0]
+        for name in ('DrawTextA', 'DrawTextExA', 'ExtTextOutA', 'TextOutA', 'TabbedTextOutA', 'TabbedTextOutW'):
+            self.assertIn('DDH_' + name, all_mask)
+        self.assertIn('const auto before = std::to_array(g_ref)', code)
+        self.assertIn('if (FAILED(hr)) std::copy(before.begin(), before.end(), g_ref)', code)
+
+    def test_actual_debug_text_metadata_never_reads_strings_or_arrays_and_stays_passthrough(self):
+        code = read('GlassCore/src/Core/Intercept/DebugDetourHooks.cpp')
+        new = code.split('thread_local bool g_inTextMetadata = false;', 1)[1].split(
+            'int WINAPI HookDrawTextW(HDC hdc, LPCWSTR lpchText', 1)[0]
+        for marker in ('GetOuterCallerModuleBaseName', 'FormatHdcWindowSuffix', 'GetTextColor(hdc)',
+                       'GetBkColor(hdc)', 'GetBkMode(hdc)', 'SetLastError(error)',
+                       'g_inTextMetadata || CallerModuleIsGlassCore(caller)', 'g_inTextMetadata = false',
+                       'count=%lld flags=0x%X', 'tabCount=%d tabOrigin=%d', 'catch (...)'):
+            self.assertIn(marker, new)
+        for forbidden in ('FormatTextPreview', 'MultiByteToWideChar', 'strlen', 'wcslen', 'text[', 'rect->',
+                          '*text', '*rect', '*params', '*dx', '*tabs', 'DrawTextWithAlpha', 'SetBkMode(',
+                          'SetTextColor(', 'SetBkColor('):
+            self.assertNotIn(forbidden, new)
+        for name in ('DrawTextA', 'DrawTextExA', 'ExtTextOutA', 'TextOutA', 'TabbedTextOutA', 'TabbedTextOutW'):
+            self.assertEqual(new.count('return g_true' + name + '('), 1)
+            self.assertIn(f'LogTextMetadata(L"{name}", _ReturnAddress()', new)
+
+    def test_actual_debug_detour_harness_compiles_whole_production_cpp_not_optional_iat_probe(self):
+        test = read('WndCompat/tests/debug_detour_hooks_tests.cpp')
+        self.assertIn('#include "../../GlassCore/src/Core/Intercept/DebugDetourHooks.cpp"', test)
+        self.assertIn('#include <Core/Intercept/DebugDetourHooks.h>', test)
+        self.assertNotIn('RootGdiHooks', test)
+        for marker in ('FailedTransactions', 'MissingOriginal', 'NoTextOrArrayReads', 'Metadata',
+                       'NativeMutations', 'ReentrantLogger', 'FailedLogger', 'ReleaseNoop'):
+            self.assertIn(marker, test)
+        runner = read('WndCompat/tests/debug_detour_hooks_test.py')
+        for marker in ("'Debug'", "'OptimizedDebug'", "'Release'", "'-Werror'", "'-D_DEBUG'"):
+            self.assertIn(marker, runner)
+        self.assertNotIn("'GLASS_DELPHI_DRAW_PROBE'", runner)
+        project = read('GlassCore/GlassCore.vcxproj').split(
+            '<ClCompile Include="src\\Core\\Intercept\\DebugDetourHooks.cpp">', 1)[1].split('</ClCompile>', 1)[0]
+        self.assertIn("Release|Win32", project)
+        self.assertIn("Release|x64", project)
 
     def test_panel_ansi_decoder_preserves_byte_bounds_and_uses_real_utf16_length(self):
         code = read('GlassCore/src/Hooks/delphi/TPanelDraw.cpp')
@@ -1999,10 +2076,10 @@ class DelphiPipelineContract(unittest.TestCase):
                        'DT_CALCRECT | DT_MODIFYSTRING | DT_NOCLIP', 'GetMapMode(dc) != MM_TEXT',
                        'RECT drawRect = *rect', 'DrawTextWithAlpha(dc, wide.data()',
                        'static_cast<int>(wide.size()), &drawRect, flags, result, true)',
-                       'original(dc, text, count, rect, flags)', '::DrawTextA(dc, text, count, rect, flags)'):
+                       'original(dc, text, count, rect, flags)'):
             self.assertIn(marker, handler)
         for forbidden in ('ApplyBackground(', 'Blacken(', 'FillRect(', 'PatBlt(', 'DrawTextW(',
-                          'BomeMemo::', 'DrawTextAttach(', 'SetTextColor('):
+                          'BomeMemo::', 'DrawTextAttach(', 'SetTextColor(', '::DrawTextA('):
             self.assertNotIn(forbidden, handler)
 
     def test_panel_ansi_state_error_cleanup_and_production_harness_stay_scoped(self):
@@ -2014,8 +2091,8 @@ class DelphiPipelineContract(unittest.TestCase):
                        'SetBkMode(dc, TRANSPARENT)', 'g_inHook = true', 'g_inHook = false',
                        'catch (...)', 'TakeDiag(4)', 'text api=DrawTextA', 'ansiCount=%d wideCount=%d cp=%u'):
             self.assertIn(marker, handler)
-        self.assertLess(handler.index('GetLastError()'), handler.index('Original<TextSlot'))
-        self.assertLess(handler.index('SetLastError(exitError)'), handler.index('Original<TextSlot'))
+        self.assertLess(handler.index('GetLastError()'), handler.index('AnsiTextOriginal()'))
+        self.assertLess(handler.index('SetLastError(exitError)'), handler.index('AnsiTextOriginal()'))
         self.assertLess(handler.index('RestoreDC(dc, saved)'), handler.index('return SUCCEEDED(hr) ? result : native()'))
         self.assertNotIn('lpchText=%s', handler)
         self.assertNotIn('wide.c_str()', handler)
@@ -2025,7 +2102,9 @@ class DelphiPipelineContract(unittest.TestCase):
         tests = read('WndCompat/tests/panel_rendering_tests.cpp')
         self.assertIn('../../GlassCore/src/Hooks/delphi/TPanelDraw.cpp', tests)
         for marker in ('AnsiCountsAndUtf16Length', 'AnsiConversionFailures', 'AnsiNestedRefDeltas',
-                       'AnsiImportsAndFirstOccupant', 'AnsiPreservesDcClippingAndBackground',
+                       'AnsiExportWithoutImportRoute', 'AnsiExportAndIndependentIatOccupant',
+                       'AnsiDetourAcquisitionFailures', 'AnsiDetachFailureAndShutdownLifetime',
+                       'AnsiPreservesDcClippingAndBackground',
                        'AnsiThreadLocalContext', 'AnsiLastError', 'AnsiRendererFailures'):
             self.assertIn(marker, tests)
 
@@ -2112,9 +2191,9 @@ class DelphiPipelineContract(unittest.TestCase):
         code = read('GlassCore/src/Hooks/delphi/TPanelDraw.cpp')
         enum = code.split('enum : size_t {', 1)[1].split('Count };', 1)[0]
         table = code.split('g_dep{{', 1)[1].split('}};', 1)[0]
-        self.assertEqual(len(re.findall(r'\b\w+Slot\b', enum)), 5)
+        self.assertEqual(len(re.findall(r'\b\w+Slot\b', enum)), 4)
         self.assertEqual(re.findall(r'"([A-Za-z0-9]+)", reinterpret_cast<PVOID>', table),
-                         ['FillRect', 'PatBlt', 'ExtTextOutW', 'StretchBlt', 'DrawTextA'])
+                         ['FillRect', 'PatBlt', 'ExtTextOutW', 'StretchBlt'])
         gate = code.split('bool IsNestedImagePanel(', 1)[1].split('bool IsPanelDc(', 1)[0]
         for marker in ('g_entryPointModule', 'GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)',
                        '_wcsicmp(name, L"TPanel") == 0', 'GetParent(hwnd)',
