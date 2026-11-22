@@ -1,0 +1,431 @@
+// Restorator startup placeholders. BWM RestoratorPaintHandler::Paint, caller
+// EXE: exact TResTreeView -> BitBltAttach, exact TImgViewBox -> StretchBltAttach.
+// The EXE copies a picture drawn on black into the paint DC; on glass it lands
+// with A=0 and only brightens the backdrop.
+//
+// While such a paint session is open both gdi32 exports are detoured. A SRCCOPY
+// blit of a picture on black into that window's own DC gets an owned 32bpp
+// copy with the black matte removed: solid blocks opaque, strokes as opaque as
+// they are bright, background transparent black. The caller's blit then runs
+// unchanged with that copy selected. Other ROPs, DCs and callers, and pictures
+// that are not on black, stay native. No shared colour key and no AlphaBlend.
+#include "CorePch.h"
+#include <Hooks/delphi/RestoratorImages.h>
+#include <Core/Intercept/HookHelper.h>
+#include <Module/ModuleHandler.h>
+#include <Subsystems/PaintDispatcher.h>
+#include <Subsystems/OpaqueBitmapSource.h>
+#include <Subsystems/RootSwcaGradient.h>
+#include <GlassBackdropMark.h>
+#include <DebugLog.h>
+#include <wil.h>
+#include <CommCtrl.h>
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <vector>
+
+namespace GlassCore::RestoratorImages
+{
+    namespace
+    {
+        using namespace GlassCore::Hooks;
+
+        // Brightest channel of a pixel. The pictures are lossy, so near-black
+        // ringing surrounds their content: at or below kBackground a pixel is
+        // background, above kInk it is content, in between only if chained to content.
+        constexpr unsigned kBackground = 16;
+        constexpr unsigned kInk = 32;
+        // Content this thick in both directions is a solid block, and the dark
+        // details it encloses (a caption outline inside a banner) belong to it.
+        // Thinner strokes are text: the black inside a letter stays background.
+        constexpr unsigned kSolidSide = 5;
+        // The picture, or a client-sized buffer holding it, up to 2560x1600.
+        // This bounds the copy made per paint; a larger source stays native.
+        constexpr std::uint64_t kMaxPixels = 1u << 22;
+        constexpr BYTE Ink = 1, Weak = 2, Corner = 4, Solid = 8, Open = 16;
+
+        BOOL WINAPI PictureBitBlt(HDC, int, int, int, int, HDC, int, int, DWORD);
+        BOOL WINAPI PictureStretchBlt(HDC, int, int, int, int, HDC, int, int, int, int, DWORD);
+
+        wil::srwlock g_lock;
+        std::atomic<bool> g_shutdown{true};
+        decltype(&::BitBlt) g_actualBitBlt{};         // export, or its trampoline while attached
+        decltype(&::StretchBlt) g_actualStretchBlt{};
+        size_t g_refs{};                              // open leased paint sessions, all threads
+        unsigned g_generation{};                      // bumped by Shutdown: older leases are void
+        bool g_attached = false;                      // both detours, one transaction
+        struct Session { HWND hwnd{}; bool leased{}; unsigned generation{}; };
+        thread_local std::vector<Session> g_sessions;
+        thread_local bool g_inside = false;
+
+        bool TakeDiag(size_t channel) noexcept
+        {
+            static thread_local ULONGLONG epoch[3]{};
+            static thread_local unsigned budget[3]{};
+            const ULONGLONG now = GetTickCount64();
+            if (!epoch[channel] || now - epoch[channel] >= 1000)
+            { epoch[channel] = now; budget[channel] = 16; }
+            if (!budget[channel]) return false;
+            --budget[channel]; return true;
+        }
+
+        unsigned Level(DWORD pixel) noexcept
+        {
+            return (std::max)({pixel & 0xFFu, (pixel >> 8) & 0xFFu, (pixel >> 16) & 0xFFu});
+        }
+
+        // Top-down or bottom-up BGRA, A=255 on entry, premultiplied on success.
+        // Returns false, leaving the pixels untouched, unless at least three
+        // quarters of the outline is background: only a picture drawn on black
+        // has a black matte to remove.
+        bool CutBlackBackground(DWORD* pixels, size_t width, size_t height)
+        {
+            const size_t count = width * height;
+            size_t outline = 0, dark = 0;
+            const auto probe = [&](size_t x, size_t y) {
+                ++outline;
+                if (Level(pixels[y * width + x]) <= kBackground) ++dark;
+            };
+            for (size_t x = 0; x < width; ++x) { probe(x, 0); if (height > 1) probe(x, height - 1); }
+            for (size_t y = 1; y + 1 < height; ++y) { probe(0, y); if (width > 1) probe(width - 1, y); }
+            if (dark * 4 < outline * 3) return false;
+
+            std::vector<BYTE> mark(count);
+            std::vector<std::uint32_t> pending; // pixel indices; count <= kMaxPixels
+            for (size_t i = 0; i < count; ++i)
+            {
+                const unsigned level = Level(pixels[i]);
+                mark[i] = level > kInk ? Ink : level > kBackground ? Weak : BYTE{};
+            }
+            // Content: bright pixels and the dim ones chained to them, 8 neighbours.
+            const auto attach = [&](size_t x, size_t y) {
+                const size_t right = (std::min)(x + 1, width - 1), bottom = (std::min)(y + 1, height - 1);
+                for (size_t ny = y ? y - 1 : 0; ny <= bottom; ++ny)
+                    for (size_t nx = x ? x - 1 : 0; nx <= right; ++nx)
+                    {
+                        BYTE& m = mark[ny * width + nx];
+                        if (m != Weak) continue;
+                        m = Ink; pending.push_back(static_cast<std::uint32_t>(ny * width + nx));
+                    }
+            };
+            for (size_t y = 0; y < height; ++y)
+                for (size_t x = 0; x < width; ++x)
+                    if (mark[y * width + x] == Ink) attach(x, y);
+            while (!pending.empty())
+            {
+                const size_t i = pending.back(); pending.pop_back();
+                attach(i % width, i / width);
+            }
+            // Solid blocks: content covered by a full kSolidSide square. First mark
+            // the bottom-right corner of every such square, then spread each corner
+            // back over its square.
+            std::vector<BYTE> column(width);
+            for (size_t y = 0; y < height; ++y)
+            {
+                unsigned run = 0;
+                for (size_t x = 0; x < width; ++x)
+                {
+                    BYTE& m = mark[y * width + x];
+                    run = m == Ink ? (std::min)(run + 1u, kSolidSide) : 0u;
+                    const unsigned rows = run == kSolidSide ? (std::min)(column[x] + 1u, kSolidSide) : 0u;
+                    column[x] = static_cast<BYTE>(rows);
+                    if (rows == kSolidSide) m |= Corner;
+                }
+            }
+            std::fill(column.begin(), column.end(), static_cast<BYTE>(kSolidSide));
+            for (size_t y = height; y-- > 0;)
+            {
+                unsigned across = kSolidSide; // columns to the nearest corner on the right
+                for (size_t x = width; x-- > 0;)
+                {
+                    BYTE& m = mark[y * width + x];
+                    across = (m & Corner) ? 0u : (std::min)(across + 1u, kSolidSide);
+                    // rows to the nearest covered row below
+                    const unsigned down = across < kSolidSide ? 0u : (std::min)(column[x] + 1u, kSolidSide);
+                    column[x] = static_cast<BYTE>(down);
+                    if (down < kSolidSide) m |= Solid;
+                }
+            }
+            // Background: whatever the outline reaches without crossing a solid block.
+            const auto open = [&](size_t i) {
+                BYTE& m = mark[i];
+                if (m & (Solid | Open)) return;
+                m |= Open; pending.push_back(static_cast<std::uint32_t>(i));
+            };
+            for (size_t x = 0; x < width; ++x) { open(x); open(count - width + x); }
+            for (size_t y = 0; y < height; ++y) { open(y * width); open(y * width + width - 1); }
+            while (!pending.empty())
+            {
+                const size_t i = pending.back(); pending.pop_back();
+                const size_t x = i % width;
+                if (x) open(i - 1);
+                if (x + 1 < width) open(i + 1);
+                if (i >= width) open(i - width);
+                if (i + width < count) open(i + width);
+            }
+            // Not reached: a solid block and what it encloses; colour and A=255 stay.
+            // Reached content was blended with the black around it, so its brightness
+            // is its coverage: a white core stays opaque, an edge fades, and no dark
+            // fringe remains. Reached background becomes transparent black.
+            for (size_t i = 0; i < count; ++i)
+            {
+                if (!(mark[i] & Open)) continue;
+                pixels[i] = (mark[i] & Ink) ? (pixels[i] & 0x00FFFFFFu) | (Level(pixels[i]) << 24) : 0u;
+            }
+            return true;
+        }
+
+        struct Blit
+        {
+            LPCWSTR api{};
+            HWND hwnd{};
+            HDC dc{}, source{};
+            DWORD rop{};
+            int x{}, y{}, w{}, h{}, sx{}, sy{}, sw{}, sh{};
+        };
+
+        // nullptr: the selected bitmap may be copied. Otherwise the reason it stays native.
+        LPCWSTR RejectBitmap(HDC source, BITMAP& info) noexcept
+        {
+            const auto bitmap = static_cast<HBITMAP>(GetCurrentObject(source, OBJ_BITMAP));
+            DIBSECTION dib{};
+            const int size = bitmap ? GetObjectW(bitmap, sizeof(dib), &dib) : 0;
+            if (size != sizeof(dib) && size != sizeof(BITMAP)) return L"source";
+            info = dib.dsBm;
+            if (info.bmWidth <= 0 || info.bmHeight <= 0
+                || static_cast<std::uint64_t>(info.bmWidth) * static_cast<std::uint64_t>(info.bmHeight) > kMaxPixels)
+                return L"size";
+            // A 32bpp DIB that already carries alpha is copied exactly by the native
+            // blit. A selected DDB cannot be read here; its fourth byte is ignored.
+            if (size == sizeof(dib) && info.bmBitsPixel == 32 && info.bmBits && GdiFlush())
+            {
+                const auto* bytes = static_cast<const BYTE*>(info.bmBits);
+                const size_t count = static_cast<size_t>(info.bmWidth) * static_cast<size_t>(info.bmHeight);
+                for (size_t i = 0; i < count; ++i)
+                    if (bytes[i * 4 + 3]) return L"alpha";
+            }
+            return nullptr;
+        }
+        LPCWSTR Reject(const Blit& blit, BITMAP& info) noexcept
+        {
+            if (blit.rop != SRCCOPY) return L"rop";
+            if (!GlassCore::Root::IsFullInjectionMode() || !IsWindow(blit.hwnd)
+                || !GlassShared::GlassIsBackdropAllowedForHwnd(blit.hwnd)) return L"mode";
+            // A DC of this very window (BeginPaint's, or one a VCL canvas took with
+            // GetDC) that the dispatcher tracks, with no drawing session above ours.
+            // Never a memory DC: WindowFromDC has no owner for it.
+            if (!blit.dc || WindowFromDC(blit.dc) != blit.hwnd
+                || !GlassCore::PaintDispatcher::IsTopWindowDrawingSession(blit.hwnd)
+                || !GlassCore::PaintDispatcher::IsPaintStackDcForHwnd(blit.hwnd, blit.dc)) return L"dc";
+            if (!blit.source || blit.source == blit.dc) return L"source";
+            return RejectBitmap(blit.source, info);
+        }
+        // The source DC now holds OpaqueBitmapSource's top-down 32bpp copy.
+        bool CutSelectedCopy(HDC source, const BITMAP& original) noexcept
+        {
+            DIBSECTION dib{};
+            const auto copy = static_cast<HBITMAP>(GetCurrentObject(source, OBJ_BITMAP));
+            if (!copy || GetObjectW(copy, sizeof(dib), &dib) != sizeof(dib)) return false;
+            const BITMAP& info = dib.dsBm;
+            if (!info.bmBits || info.bmPlanes != 1 || info.bmBitsPixel != 32
+                || info.bmWidth != original.bmWidth || info.bmHeight != original.bmHeight) return false;
+            try
+            {
+                return CutBlackBackground(static_cast<DWORD*>(info.bmBits),
+                    static_cast<size_t>(info.bmWidth), static_cast<size_t>(info.bmHeight));
+            }
+            catch (...) { return false; } // Out of memory: pixels are still untouched.
+        }
+
+        // The donor's gate: a leased paint session on this thread and an EXE call site.
+        HWND SessionWindow(void* returnAddress) noexcept
+        {
+            if (g_inside || g_sessions.empty() || !g_sessions.back().leased
+                || g_shutdown.load(std::memory_order_acquire)) return nullptr;
+            const HMODULE exe = GlassCore::ModuleHandler::g_entryPointModule;
+            return exe && DetourGetContainingModule(returnAddress) == exe ? g_sessions.back().hwnd : nullptr;
+        }
+        // `native` restores the entry LastError and calls the original once, with
+        // the caller's arguments. It runs exactly once on every path.
+        template <typename Native>
+        BOOL DrawPicture(const Blit& blit, bool extents, const Native& native)
+        {
+            g_inside = true;
+            auto leave = wil::scope_exit([]() noexcept { g_inside = false; });
+            BITMAP info{};
+            LPCWSTR reason = extents ? Reject(blit, info) : L"extents";
+            BOOL result{}; DWORD error{};
+            if (!reason)
+            {
+                // The source may also be a client-sized buffer. The A=255 copy is
+                // never drawn as it is: its matte is cut, or it is dropped and the
+                // caller's own bitmap is drawn.
+                GlassCore::GdiUtils::OpaqueBitmapSource picture{blit.source};
+                if (!picture) reason = L"copy";
+                else if (!CutSelectedCopy(blit.source, info)) reason = L"background";
+                else { result = native(); error = GetLastError(); }
+            } // The copy is deleted and the caller's bitmap selected again.
+            if (reason) { result = native(); error = GetLastError(); }
+            if (TakeDiag(1))
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][RestoratorImages] image api=%s hwnd=0x%p dc=0x%p dcWnd=0x%p dcType=%lu src=0x%p bpp=%u size=[%ld,%ld] dst=[%d,%d,%d,%d] srcRect=[%d,%d,%d,%d] rop=0x%08X cut=%d reason=%s result=%d",
+                    blit.api, blit.hwnd, blit.dc, blit.dc ? WindowFromDC(blit.dc) : nullptr,
+                    blit.dc ? GetObjectType(blit.dc) : 0ul, blit.source,
+                    unsigned(info.bmBitsPixel), info.bmWidth, info.bmHeight,
+                    blit.x, blit.y, blit.w, blit.h, blit.sx, blit.sy, blit.sw, blit.sh, blit.rop,
+                    reason ? 0 : 1, reason ? reason : L"none", result);
+            SetLastError(error);
+            return result;
+        }
+        template <typename Fn> Fn Actual(const Fn& slot) noexcept
+        {
+            auto lock = g_lock.lock_shared();
+            return slot;
+        }
+        BOOL WINAPI PictureBitBlt(HDC dc, int x, int y, int w, int h, HDC source, int sx, int sy, DWORD rop)
+        {
+            const DWORD entryError = GetLastError();
+            void* const returnAddress = _ReturnAddress();
+            const auto actual = Actual(g_actualBitBlt);
+            if (!actual) return FALSE; // Never attached without it; the export would re-enter.
+            const auto native = [&] {
+                SetLastError(entryError);
+                return actual(dc, x, y, w, h, source, sx, sy, rop);
+            };
+            const HWND hwnd = SessionWindow(returnAddress);
+            if (!hwnd) return native();
+            return DrawPicture(Blit{L"BitBlt", hwnd, dc, source, rop, x, y, w, h, sx, sy, w, h}, w && h, native);
+        }
+        BOOL WINAPI PictureStretchBlt(HDC dc, int x, int y, int w, int h,
+            HDC source, int sx, int sy, int sw, int sh, DWORD rop)
+        {
+            const DWORD entryError = GetLastError();
+            void* const returnAddress = _ReturnAddress();
+            const auto actual = Actual(g_actualStretchBlt);
+            if (!actual) return FALSE;
+            const auto native = [&] {
+                SetLastError(entryError);
+                return actual(dc, x, y, w, h, source, sx, sy, sw, sh, rop); // scale and mirroring stay native
+            };
+            const HWND hwnd = SessionWindow(returnAddress);
+            if (!hwnd) return native();
+            return DrawPicture(Blit{L"StretchBlt", hwnd, dc, source, rop, x, y, w, h, sx, sy, sw, sh},
+                w && h && sw && sh, native);
+        }
+
+        // Caller holds g_lock exclusively. Session refs are separate from the
+        // attachment: a failed last Detach keeps both trampolines valid.
+        bool Detach() noexcept
+        {
+            if (!g_attached) return true;
+            const HRESULT hr = Detours::Write([] {
+                Detours::Detach(reinterpret_cast<void**>(&g_actualBitBlt), reinterpret_cast<void*>(&PictureBitBlt));
+                Detours::Detach(reinterpret_cast<void**>(&g_actualStretchBlt), reinterpret_cast<void*>(&PictureStretchBlt));
+            });
+            if (SUCCEEDED(hr)) g_attached = false;
+            if (TakeDiag(2)) DebugLog(SUCCEEDED(hr) ? DBG_NORMAL : DBG_WARNING,
+                L"[GlassCore][RestoratorImages] detour api=BitBlt+StretchBlt enable=0 refs=%zu attached=%d hr=0x%08X",
+                g_refs, g_attached ? 1 : 0, static_cast<unsigned>(hr));
+            return SUCCEEDED(hr);
+        }
+        bool Acquire(unsigned& generation) noexcept
+        {
+            auto lock = g_lock.lock_exclusive();
+            if (g_shutdown.load(std::memory_order_acquire) || !g_actualBitBlt || !g_actualStretchBlt) return false;
+            if (!g_attached)
+            {
+                const HRESULT hr = Detours::Write([] {
+                    Detours::Attach(reinterpret_cast<void**>(&g_actualBitBlt), reinterpret_cast<void*>(&PictureBitBlt));
+                    Detours::Attach(reinterpret_cast<void**>(&g_actualStretchBlt), reinterpret_cast<void*>(&PictureStretchBlt));
+                });
+                if (SUCCEEDED(hr)) g_attached = true;
+                if (TakeDiag(2)) DebugLog(SUCCEEDED(hr) ? DBG_NORMAL : DBG_WARNING,
+                    L"[GlassCore][RestoratorImages] detour api=BitBlt+StretchBlt enable=1 refs=%zu attached=%d hr=0x%08X",
+                    g_refs + (SUCCEEDED(hr) ? 1u : 0u), g_attached ? 1 : 0, static_cast<unsigned>(hr));
+                if (FAILED(hr)) return false; // No phantom lease after an aborted transaction.
+            }
+            ++g_refs; generation = g_generation;
+            return true;
+        }
+        void Release(unsigned generation) noexcept
+        {
+            auto lock = g_lock.lock_exclusive();
+            // A session of another thread may outlive Shutdown, and even a restart.
+            if (generation != g_generation) return;
+            if (g_refs && --g_refs == 0) Detach();
+        }
+
+        enum class Host { None, Tree, Viewer };
+        Host HostOf(HWND hwnd) noexcept
+        {
+            wchar_t name[32]{};
+            if (!hwnd || !GetClassNameW(hwnd, name, static_cast<int>(_countof(name)))) return Host::None;
+            if (_wcsicmp(name, L"TResTreeView") == 0) return Host::Tree;
+            if (_wcsicmp(name, L"TImgViewBox") == 0) return Host::Viewer;
+            return Host::None;
+        }
+        void OnBegin(HWND hwnd, HMODULE caller) noexcept
+        {
+            if (g_shutdown.load(std::memory_order_acquire)) return;
+            const Host host = HostOf(hwnd);
+            if (host == Host::None) return;
+            const HMODULE exe = GlassCore::ModuleHandler::g_entryPointModule;
+            const bool eligible = exe && caller == exe && GlassCore::Root::IsFullInjectionMode()
+                && GlassShared::GlassIsBackdropAllowedForHwnd(hwnd)
+                && reinterpret_cast<HMODULE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)) == exe;
+            // comctl32 draws a populated tree; only the empty one shows a picture.
+            const unsigned items = eligible && host == Host::Tree ? static_cast<unsigned>(TreeView_GetCount(hwnd)) : 0;
+            // Every BeginPaint of these classes is recorded, leased or not, so that
+            // OnEnd pairs with it by LIFO and never releases an outer session.
+            Session session{hwnd};
+            session.leased = eligible && !items && Acquire(session.generation);
+            try { g_sessions.push_back(session); }
+            catch (...) { if (session.leased) Release(session.generation); return; }
+            if (TakeDiag(0))
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][RestoratorImages] Begin hwnd=0x%p class=%s caller=0x%p eligible=%d items=%u leased=%d depth=%zu",
+                    hwnd, host == Host::Tree ? L"TResTreeView" : L"TImgViewBox", caller,
+                    eligible ? 1 : 0, items, session.leased ? 1 : 0, g_sessions.size());
+        }
+        void OnEnd(HWND hwnd, HMODULE) noexcept
+        {
+            for (auto it = g_sessions.rbegin(); it != g_sessions.rend(); ++it)
+            {
+                if (it->hwnd != hwnd) continue;
+                const Session session = *it;
+                g_sessions.erase((it + 1).base());
+                if (session.leased) Release(session.generation);
+                return;
+            }
+        }
+    }
+
+    void Startup() noexcept
+    {
+        auto lock = g_lock.lock_exclusive();
+        if (!g_shutdown.load(std::memory_order_acquire)) return;
+        // Do not replace retained trampolines if an earlier Detach failed.
+        if (!g_attached)
+        {
+            const HMODULE gdi32 = GetModuleHandleW(L"gdi32.dll");
+            g_actualBitBlt = gdi32
+                ? reinterpret_cast<decltype(g_actualBitBlt)>(GetProcAddress(gdi32, "BitBlt")) : nullptr;
+            g_actualStretchBlt = gdi32
+                ? reinterpret_cast<decltype(g_actualStretchBlt)>(GetProcAddress(gdi32, "StretchBlt")) : nullptr;
+            DebugLog(g_actualBitBlt && g_actualStretchBlt ? DBG_NORMAL : DBG_WARNING,
+                L"[GlassCore][RestoratorImages] resolve gdi32=0x%p BitBlt=0x%p StretchBlt=0x%p",
+                gdi32, reinterpret_cast<void*>(g_actualBitBlt), reinterpret_cast<void*>(g_actualStretchBlt));
+        }
+        GlassCore::PaintDispatcher::RegisterPaintProvider({OnBegin, OnEnd});
+        g_shutdown.store(false, std::memory_order_release);
+    }
+    void Shutdown() noexcept
+    {
+        g_shutdown.store(true, std::memory_order_release);
+        auto lock = g_lock.lock_exclusive();
+        g_refs = 0; ++g_generation;
+        Detach(); // Also retries a failed last-session Detach.
+        g_sessions.clear();
+    }
+}

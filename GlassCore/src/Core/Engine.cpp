@@ -22,6 +22,7 @@
 #include <Hooks/delphi/TBackgroundHooks.h>
 #include <Hooks/delphi/TInputIcons.h>
 #include <Hooks/delphi/TPanelDraw.h>
+#include <Hooks/delphi/RestoratorImages.h>
 #include <Hooks/UpDown.h>
 #include <Hooks/forms/FormsHooks.h>
 #include <Subsystems/CtlColorProbe.h>
@@ -170,6 +171,7 @@ namespace GlassCore::Engine
         GlassCore::DelphiToggle::Startup();
         GlassCore::DelphiBackground::Startup();
         GlassCore::DelphiPanel::Startup();
+        GlassCore::RestoratorImages::Startup();
         GlassCore::UpDownControl::Startup();
         GlassCore::FormsHooks::Startup();
         GlassCore::Hooks::Immersive::Startup();
@@ -286,6 +288,7 @@ namespace GlassCore::Engine
         GlassCore::StatusBarControl::Shutdown();
         GlassCore::ProgressBarControl::Shutdown();
         GlassCore::DirectUI::Shutdown();
+        GlassCore::RestoratorImages::Shutdown();
         GlassCore::DelphiPanel::Shutdown();
         GlassCore::DelphiInputIcons::Shutdown();
         GlassCore::DelphiBackground::Shutdown();

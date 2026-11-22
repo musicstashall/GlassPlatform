@@ -36,6 +36,7 @@ Menu-ключи на эти поверхности **не** влияют (см. 
 | TreeView (MaskBlt non-alpha) | `TreeViewHooks.cpp` | black-key | `SpriteEffect` |
 | ToolbarWindow32 (MaskBlt/BitBlt non-alpha) | `ToolbarHooks.cpp` | black-key | `SpriteEffect` |
 | TToolBar (VCL native MaskBlt) | `ToolbarHooks.cpp` + `OpaqueBitmapSource` | opaque 32bpp copy, настоящая маска/ROP | тот же native mask-путь, не chroma |
+| Restorator: TResTreeView / TImgViewBox (EXE SRCCOPY BitBlt/StretchBlt) | `delphi/RestoratorImages.cpp` + `OpaqueBitmapSource` | локальное удаление чёрной подложки картинки на чёрном | тот же путь, настройка не применяется |
 | Button (comctl32 BitBlt non-alpha) | `ButtonHooks.cpp` | black-key | `SpriteEffect` |
 | MFC Afx toolbar (16×16) | `RootGdiHooks.cpp` | black-key (без настройки/UI) | — |
 | Static с изображением | `WndCompat/Controls/StaticSubclass.cpp` | только `Promise32BPP` (alpha=255, цвет не удаляется) | `SpriteEffect` |
@@ -61,6 +62,11 @@ caller текущего BeginPaint** (new либо legacy) и доказанны
 Это не глобальная смена `Promise32BPP`, common-controls renderer или решение
 DoubleBuffered; см. [Delphi-VCL, тест 101](Delphi-VCL.md#тест-101-непрозрачность-изображений-ttoolbar-и-вложенного-tpanel--native-bwm-пути)
 и [тест 102](Delphi-VCL.md#тест-102-tlistview--native-maskblt-паритет-restorator).
+
+Стартовые картинки Restorator (`RestoratorImages`) — тоже отдельный путь: порог,
+связность и сплошные блоки заданы в самом модуле, `ApplyBlackKeyAlpha` и
+chroma-настройка не используются; см.
+[Delphi-VCL, тест 119](Delphi-VCL.md#тест-119-restorator--стартовые-картинки-trestreeview-и-timgviewbox-без-чёрной-подложки).
 
 ### Static (`STM_SETIMAGE`)
 
