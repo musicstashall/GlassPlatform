@@ -28,4 +28,14 @@ namespace GlassShared
         return hwnd && GetClassNameW(hwnd, name, static_cast<int>(_countof(name))) > 0
             && IsDelphiPanelClassName(name);
     }
+
+    // Text-only exception, not membership of the panel background/themed set.
+    // TPageControl/TTabSheet and WM_ERASEBKGND/GetDC are intentionally excluded.
+    [[nodiscard]] inline bool IsDelphiPageAnsiPaintWindow(HWND hwnd, UINT message) noexcept
+    {
+        if (message != WM_PAINT && message != WM_PRINTCLIENT) return false;
+        wchar_t name[64]{};
+        return hwnd && GetClassNameW(hwnd, name, static_cast<int>(_countof(name))) > 0
+            && _wcsicmp(name, L"TPage") == 0;
+    }
 }

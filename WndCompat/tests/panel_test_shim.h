@@ -270,6 +270,7 @@ namespace PanelTest
     inline std::wstring alphaText;
     inline thread_local ULONGLONG clock = 100;
     inline thread_local std::vector<std::wstring> logFormats;
+    inline thread_local std::vector<std::wstring> logStrings;
     inline std::unordered_map<HMODULE, std::unordered_map<std::string, std::vector<void*>>> occupants;
     inline std::unordered_map<HMODULE, std::vector<std::string>> registrationFailures, noOriginal;
 }
@@ -495,8 +496,17 @@ inline BOOL PanelRestoreDC(HDC dc, int index)
 inline int PanelSetBkMode(HDC dc, int mode)
 { SetLastError(0xd107); return PanelTest::failMode ? 0 : ::SetBkMode(dc, mode); }
 inline ULONGLONG PanelTickCount64() { SetLastError(0xd108); return PanelTest::clock; }
-template <typename... Args> inline void PanelDebugLog(int, LPCWSTR format, Args...)
-{ PanelTest::logFormats.emplace_back(format); SetLastError(0xd109); }
+template <typename T> inline void PanelCaptureLogString(T value)
+{
+    if constexpr (std::is_convertible_v<T, LPCWSTR>)
+        if (value) PanelTest::logStrings.emplace_back(value);
+}
+template <typename... Args> inline void PanelDebugLog(int, LPCWSTR format, Args... args)
+{
+    PanelTest::logFormats.emplace_back(format);
+    (PanelCaptureLogString(args), ...);
+    SetLastError(0xd109);
+}
 namespace GlassCore::Text
 {
     inline HRESULT PanelDrawTextWithAlpha(HDC dc, LPCWSTR text, int count,

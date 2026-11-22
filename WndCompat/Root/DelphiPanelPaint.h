@@ -11,13 +11,16 @@ namespace WndCompat
 {
     // Narrow optional bridge: no peer import library or GlassCoreProviders ABI
     // change. Both callbacks are snapshotted before native paint can re-enter.
+    // Exact TPage has a separate text-only paint/print gate. Its erase still
+    // follows the existing root policy, not the panel background pipeline.
     [[nodiscard]] inline bool TryHandleDelphiPanelPaint(HWND hwnd, UINT message,
         WPARAM wParam, LPARAM lParam, LRESULT& result)
     {
         if ((message != WM_PAINT && message != WM_ERASEBKGND && message != WM_PRINTCLIENT)
             || IsShuttingDown() || WinEventHook_GetMode() != Shared::InjectionMode::Full
             || !GlassShared::GlassIsBackdropAllowedForHwnd(hwnd)
-            || !GlassShared::IsDelphiPanelWindow(hwnd))
+            || (!GlassShared::IsDelphiPanelWindow(hwnd)
+                && !GlassShared::IsDelphiPageAnsiPaintWindow(hwnd, message)))
             return false;
 
         using BeginFn = BOOL(WINAPI*)(HWND, UINT, HDC) noexcept;
