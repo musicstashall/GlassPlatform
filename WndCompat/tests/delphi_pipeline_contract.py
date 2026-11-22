@@ -378,7 +378,7 @@ class DelphiPipelineContract(unittest.TestCase):
 
     def test_vcl_input_button_background_uses_proven_direct_child_bounds_and_client_dc(self):
         code = read('GlassCore/src/Hooks/delphi/TInputIcons.cpp')
-        plan = code.split('BackgroundPatches PlanButtonBackground(', 1)[1].split('int WINAPI Fill(HDC,', 1)[0]
+        plan = code.split('BackgroundPatches PlanButtonBackground(', 1)[1].split('BackgroundPatches PlanSearchBackground(', 1)[0]
         child = code.split('bool ButtonRect(', 1)[1].split('BackgroundPatches PlanButtonBackground(', 1)[0]
         for marker in ('HasClass(owner, L"TButtonedEdit")', 'WindowFromDC(dc) != target',
                        'GetGraphicsMode(dc) != GM_COMPATIBLE', 'GetLayout(dc) != 0',
@@ -413,6 +413,66 @@ class DelphiPipelineContract(unittest.TestCase):
         for marker in ('COLOR_MENUBAR + 1u', 'GetSysColor(', 'GetObjectW(brush, sizeof(lb), &lb)',
                        'lb.lbStyle != BS_SOLID'):
             self.assertIn(marker, brush)
+
+    def test_vcl_searchbox_background_proves_its_own_nc_dc_and_reserved_strip(self):
+        code = read('GlassCore/src/Hooks/delphi/TInputIcons.cpp')
+        plan = code.split('BackgroundPatches PlanSearchBackground(', 1)[1].split('int WINAPI Fill(HDC,', 1)[0]
+        for marker in ('owner != target', '!HasClass(owner, L"TSearchBox")', 'WindowFromDC(dc) != owner',
+                       'GetGraphicsMode(dc) != GM_COMPATIBLE', 'GetLayout(dc) != 0',
+                       'ReadSolidBrush(brush, color)', 'GetSysColor(COLOR_WINDOW)',
+                       'GetWindowRect(owner, &window)', 'GetClientRect(owner, &client)',
+                       'client.left || client.top || IsRectEmpty(&client)',
+                       'ClientToScreen(owner, &clientOrigin)', 'GetDCOrgEx(dc, &dcOrigin)',
+                       'dcOrigin.x != window.left', 'dcOrigin.y != window.top',
+                       'GetViewportOrgEx(dc, &viewport)', 'GetWindowOrgEx(dc, &windowOrigin)',
+                       'viewport.x || viewport.y || windowOrigin.x || windowOrigin.y',
+                       'static_cast<long long>(window.right) - window.left',
+                       'static_cast<long long>(clientOrigin.x) - window.left',
+                       'const long long right = left + client.right',
+                       'std::numeric_limits<LONG>::max', 'right > width || bottom > height',
+                       'const long long rightInset = width - right',
+                       'const long long border = left < rightInset ? left : rightInset',
+                       'border <= 0 || top != border || height - bottom != border || left == rightInset',
+                       'left > rightInset ? border : right', 'left > rightInset ? left : width - border',
+                       'buttonRight - buttonLeft > 1024 || bottom - top > 1024',
+                       '!EqualRect(rect, &button)', 'patches.rects[0] = button', 'patches.count = 1'):
+            self.assertIn(marker, plan)
+        body = re.sub(r'//[^\n]*|/\*.*?\*/', '', plan, flags=re.S)
+        # Not a fixed edge width, inferred image/clip bounds, descendant or DC host.
+        for forbidden in ('GetSystemMetrics', 'GetClipBox', 'GetParent', 'GetWindow(',
+                          'GetStackOwnerForDc', 'GetPaintSession', 'ImageList_',
+                          'BeginBufferedPaint', 'PatBlt(', 'SelectClipRgn', 'IntersectClipRect',
+                          'BufferedPaintSetAlpha', 'GetWindowLongPtr'):
+            self.assertNotIn(forbidden, body)
+        self.assertNotRegex(body, r'(?<![\w])(?:2|24)(?![\w])')
+
+    def test_vcl_searchbox_background_is_only_an_additional_fill_plan_not_an_image_fix(self):
+        code = read('GlassCore/src/Hooks/delphi/TInputIcons.cpp')
+        fill = code.split('int WINAPI Fill(HDC dc, const RECT* rect, HBRUSH brush)', 1)[1].split('void ProbePixels(', 1)[0]
+        self.assertIn('if (!patches.count) patches = PlanSearchBackground(owner, target, dc, rect, brush)', fill)
+        self.assertLess(fill.index('PlanButtonBackground('), fill.index('PlanSearchBackground('))
+        self.assertLess(fill.index('PlanSearchBackground('), fill.index('const int result = orig(dc, rect, brush)'))
+        self.assertEqual(code.count('PlanSearchBackground(owner, target, dc, rect, brush)'), 1)
+        images = code.split('template<typename Paint> std::optional<BOOL> TryDraw(', 1)[1]
+        self.assertNotIn('PlanSearchBackground', images)
+        self.assertNotIn('PatBlt(', images)
+        self.assertIn('if (!hasAlpha)', images)
+        self.assertIn('if (!HasClass(owner, L"TButtonedEdit")', images)  # SearchBox RGB-only still native
+        for forbidden in ('RGBQUAD', 'ExtTextOut', 'DoubleBuffered', 'BeginBufferedPaint'):
+            self.assertNotIn(forbidden, fill)
+
+    def test_vcl_searchbox_behavioral_suite_separates_nc_background_from_existing_images(self):
+        runner = read('WndCompat/tests/input_icons_test.py')
+        for marker in ('RECT SearchGeometry(', 'void CompositeBuffer()', 'constexpr int x=108,y=3',
+                       'for(int state=0;state<4;++state)', 'Images audio=f.images',
+                       'r.left==104&&r.top==2&&r.right==128&&r.bottom==21',
+                       'test_searchbox_background_uses_current_left_or_right_nc_reservation_not_fixed_width',
+                       'test_searchbox_nc_background_keeps_partial_complex_empty_and_foreign_clips',
+                       'test_searchbox_hot_pressed_and_custom_background_colors_stay_native',
+                       'test_searchbox_nc_fill_and_existing_text_audio_image_alpha_remain_separate',
+                       'test_searchbox_background_rejects_client_memory_transformed_foreign_and_unproven_geometry',
+                       'test_searchbox_background_failures_reentry_missing_import_shutdown_and_effective_original'):
+            self.assertIn(marker, runner)
 
     def test_vcl_input_button_fill_preserves_effective_original_result_error_and_clip(self):
         code = read('GlassCore/src/Hooks/delphi/TInputIcons.cpp')

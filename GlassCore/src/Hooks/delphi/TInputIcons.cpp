@@ -162,6 +162,52 @@ namespace GlassCore::DelphiInputIcons
             return patches;
         }
 
+        BackgroundPatches PlanSearchBackground(HWND owner, HWND target, HDC dc, const RECT* rect, HBRUSH brush) noexcept
+        {
+            BackgroundPatches patches{};
+            // SearchBox owns a reserved NC strip, not a TGlyph child. Prove the
+            // WINDOW coordinate DC; a client/registered memory DC is not enough.
+            if (!owner || owner != target || !HasClass(owner, L"TSearchBox") || !rect
+                || WindowFromDC(dc) != owner || GetGraphicsMode(dc) != GM_COMPATIBLE || GetLayout(dc) != 0) return patches;
+            COLORREF color{};
+            if (!ReadSolidBrush(brush, color) || (color & 0xFFFFFFu) != (GetSysColor(COLOR_WINDOW) & 0xFFFFFFu)) return patches;
+            RECT window{}, client{};
+            POINT clientOrigin{}, dcOrigin{}, viewport{}, windowOrigin{};
+            if (!GetWindowRect(owner, &window) || !GetClientRect(owner, &client)
+                || client.left || client.top || IsRectEmpty(&client)
+                || !ClientToScreen(owner, &clientOrigin) || !GetDCOrgEx(dc, &dcOrigin)
+                || dcOrigin.x != window.left || dcOrigin.y != window.top
+                || !GetViewportOrgEx(dc, &viewport) || !GetWindowOrgEx(dc, &windowOrigin)
+                || viewport.x || viewport.y || windowOrigin.x || windowOrigin.y) return patches;
+            const long long width = static_cast<long long>(window.right) - window.left;
+            const long long height = static_cast<long long>(window.bottom) - window.top;
+            const long long left = static_cast<long long>(clientOrigin.x) - window.left;
+            const long long top = static_cast<long long>(clientOrigin.y) - window.top;
+            const long long right = left + client.right;
+            const long long bottom = top + client.bottom;
+            if (width <= 0 || height <= 0 || width > (std::numeric_limits<LONG>::max)()
+                || height > (std::numeric_limits<LONG>::max)() || left < 0 || top < 0
+                || right > width || bottom > height) return patches;
+            const long long rightInset = width - right;
+            const long long border = left < rightInset ? left : rightInset;
+            // Require a symmetric frame plus ONE extra horizontal reservation.
+            // Infer its side/width from current geometry, not a guessed DPI width,
+            // clip bounding box, image rectangle, or private VCL field offset.
+            if (border <= 0 || top != border || height - bottom != border || left == rightInset) return patches;
+            const long long buttonLeft = left > rightInset ? border : right;
+            const long long buttonRight = left > rightInset ? left : width - border;
+            if (buttonRight <= buttonLeft || buttonRight - buttonLeft > 1024 || bottom - top > 1024) return patches;
+            const RECT button{static_cast<LONG>(buttonLeft), static_cast<LONG>(top),
+                static_cast<LONG>(buttonRight), static_cast<LONG>(bottom)};
+            // Only the complete background fill of that strip. Partial NC repaint
+            // remains controlled by the untouched caller clip, as for ButtonedEdit.
+            // Native coloured hot/pressed/custom brushes were rejected above.
+            if (!EqualRect(rect, &button)) return patches;
+            patches.rects[0] = button;
+            patches.count = 1;
+            return patches;
+        }
+
         int WINAPI Fill(HDC, const RECT*, HBRUSH);
         const HookDispatcherDependency<1, 3> g_fillDep{{
             std::tuple{std::array{"user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv,
@@ -195,7 +241,8 @@ namespace GlassCore::DelphiInputIcons
             auto leave = wil::scope_exit([]() noexcept { g_inFillHook = false; });
             HWND target{};
             const HWND owner = rect && brush ? IconOwner(dc, &target) : nullptr;
-            const BackgroundPatches patches = PlanButtonBackground(owner, target, dc, rect, brush);
+            BackgroundPatches patches = PlanButtonBackground(owner, target, dc, rect, brush);
+            if (!patches.count) patches = PlanSearchBackground(owner, target, dc, rect, brush);
 #if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
             const bool trace = owner && TakeProbe(true);
             const RECT r = rect ? *rect : RECT{};
