@@ -1,4 +1,4 @@
-// Native VCL ImageList icons: TButtonedEdit/TGlyph and TSearchBox's window DC.
+// Native VCL ImageList icons: TButtonedEdit/TEditButton.TGlyph and TSearchBox.
 // Do not redirect Edit text or reinterpret arbitrary BitBlt/MaskBlt operations.
 #include "CorePch.h"
 #include <Hooks/delphi/TInputIcons.h>
@@ -52,7 +52,7 @@ namespace GlassCore::DelphiInputIcons
             return hwnd && GetClassNameW(hwnd, cls, _countof(cls)) && _wcsicmp(cls, name) == 0;
         }
 
-        HWND IconOwner(HDC dc) noexcept
+        HWND IconOwner(HDC dc, HWND* target = nullptr) noexcept
         {
             if (!dc || g_inside || g_shutdown.load(std::memory_order_acquire)
                 || !GlassCore::Root::IsFullInjectionMode() || GetMapMode(dc) != MM_TEXT) return nullptr;
@@ -67,23 +67,135 @@ namespace GlassCore::DelphiInputIcons
                     || bitmap.bmBitsPixel <= 1) return nullptr;
             }
             HWND owner = window;
-            // VCL's TEditButton.TGlyph is a real child TCustomControl, not a Button.
-            if (HasClass(window, L"TGlyph"))
+            // Exact container classes, independent of the assigned image/index.
+            // Both glyph spellings require an immediate TButtonedEdit parent.
+            if (HasClass(window, L"TEditButton.TGlyph") || HasClass(window, L"TGlyph"))
             {
                 owner = GetParent(window);
                 if (!HasClass(owner, L"TButtonedEdit")) return nullptr;
             }
             else if (!HasClass(window, L"TButtonedEdit") && !HasClass(window, L"TSearchBox"))
                 return nullptr;
-            return GlassShared::GlassGetWindowKind(owner) == GlassShared::GlassControlKind::Edit
-                && GlassShared::GlassIsBackdropAllowedForHwnd(owner)
-                && GlassShared::GlassIsBackdropAllowedForHwnd(window) ? owner : nullptr;
+            if (GlassShared::GlassGetWindowKind(owner) != GlassShared::GlassControlKind::Edit
+                || !GlassShared::GlassIsBackdropAllowedForHwnd(owner)
+                || !GlassShared::GlassIsBackdropAllowedForHwnd(window)) return nullptr;
+            if (target) *target = window;
+            return owner;
         }
 
-        template<typename Paint> std::optional<BOOL> TryDraw(
-            HIMAGELIST images, HDC dc, int x, int y, int width, int height, UINT style, void* nativeApi, Paint paint)
+#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
+        // Observation only. Install at Startup, before paint-session hooks, and
+        // call the dispatcher's effective original, never replace a fill/brush.
+        int WINAPI ProbeFill(HDC, const RECT*, HBRUSH);
+        const HookDispatcherDependency<1, 3> g_fillProbeDep{{
+            std::tuple{std::array{"user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv,
+                "ext-ms-win-ntuser-misc-l1-1-0.dll"sv}, "FillRect", reinterpret_cast<void*>(ProbeFill)},
+        }};
+        HookDispatcher<1, 3> g_fillProbeDispatcher{g_fillProbeDep, nullptr};
+        thread_local bool g_inFillProbe = false;
+
+        bool TakeProbe(bool fill) noexcept
         {
-            const HWND owner = IconOwner(dc);
+            struct Budget { ULONGLONG epoch{}; unsigned remaining{}; bool started{}; };
+            static thread_local Budget budgets[2]{};
+            auto& b = budgets[fill ? 0 : 1];
+            const ULONGLONG now = GetTickCount64();
+            if (!b.started || now - b.epoch >= 1000) b = {now, fill ? 24u : 12u, true};
+            if (!b.remaining) return false;
+            --b.remaining;
+            return true;
+        }
+
+        int WINAPI ProbeFill(HDC dc, const RECT* rect, HBRUSH brush)
+        {
+            const DWORD entryError = GetLastError();
+            decltype(&::FillRect) orig{};
+            { auto lock = g_lock.lock_shared(); orig = g_fillProbeDispatcher.GetOrg<0, decltype(&::FillRect)>(); }
+            if (!orig) orig = ::FillRect;
+            // A separate guard suppresses only recursive telemetry; it must not
+            // change how a nested ImageList call is rendered.
+            if (g_inFillProbe) { SetLastError(entryError); return orig(dc, rect, brush); }
+            g_inFillProbe = true;
+            auto leave = wil::scope_exit([]() noexcept { g_inFillProbe = false; });
+            HWND target{};
+            const HWND owner = rect && brush ? IconOwner(dc, &target) : nullptr;
+            if (!owner || !TakeProbe(true)) { SetLastError(entryError); return orig(dc, rect, brush); }
+
+            const RECT r = *rect; // record the original rectangle, not its clip intersection
+            wchar_t cls[64]{};
+            GetClassNameW(target, cls, _countof(cls));
+            RECT clip{}, client{}, window{};
+            POINT dcOrg{}, clientOrg{}, viewport{}, windowOrg{};
+            const int clipKind = GetClipBox(dc, &clip);
+            const BOOL clientOk = GetClientRect(target, &client);
+            const BOOL windowOk = GetWindowRect(target, &window);
+            const BOOL dcOrgOk = GetDCOrgEx(dc, &dcOrg);
+            const BOOL clientOrgOk = ClientToScreen(target, &clientOrg);
+            const BOOL viewportOk = GetViewportOrgEx(dc, &viewport);
+            const BOOL windowOrgOk = GetWindowOrgEx(dc, &windowOrg);
+            LOGBRUSH lb{};
+            const ULONG_PTR value = reinterpret_cast<ULONG_PTR>(brush);
+            // FillRect also accepts COLOR_*+1 pseudo-handles. Do not interpret
+            // a pattern brush's ignored lbColor as its actual pixel colour.
+            const bool systemBrush = value && value <= COLOR_MENUBAR + 1u;
+            const bool brushValid = systemBrush || GetObjectW(brush, sizeof(lb), &lb) == sizeof(lb);
+            if (systemBrush) { lb.lbStyle = BS_SOLID; lb.lbColor = GetSysColor(static_cast<int>(value - 1)); }
+            const bool rgbValid = brushValid && lb.lbStyle == BS_SOLID;
+            SetLastError(entryError);
+            const int result = orig(dc, rect, brush);
+            const DWORD error = GetLastError();
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiInputIconProbe] stage=fill api=FillRect hwnd=0x%p target=0x%p class=\"%s\" dc=0x%p rect=[%ld,%ld,%ld,%ld] clipKind=%d clip=[%ld,%ld,%ld,%ld] clientOk=%d client=[%ld,%ld,%ld,%ld] windowOk=%d window=[%ld,%ld,%ld,%ld] dcOrgOk=%d dcOrg=[%ld,%ld] clientOrgOk=%d clientOrg=[%ld,%ld] viewportOk=%d viewport=[%ld,%ld] windowOrgOk=%d windowOrg=[%ld,%ld] brush=0x%p brushValid=%d systemBrush=%d brushStyle=%u brushRGBValid=%d brushRGB=0x%06X result=%d",
+                owner, target, cls, dc, r.left, r.top, r.right, r.bottom, clipKind,
+                clip.left, clip.top, clip.right, clip.bottom, clientOk, client.left, client.top, client.right, client.bottom,
+                windowOk, window.left, window.top, window.right, window.bottom, dcOrgOk, dcOrg.x, dcOrg.y,
+                clientOrgOk, clientOrg.x, clientOrg.y, viewportOk, viewport.x, viewport.y,
+                windowOrgOk, windowOrg.x, windowOrg.y, brush, brushValid ? 1 : 0, systemBrush ? 1 : 0,
+                static_cast<unsigned>(lb.lbStyle), rgbValid ? 1 : 0, static_cast<unsigned>(lb.lbColor & 0xFFFFFFu), result);
+            SetLastError(error);
+            return result;
+        }
+
+        void ProbePixels(const wchar_t* api, HWND owner, HWND target, HIMAGELIST images, int index,
+            HDC dc, const RECT& bounds, UINT style, BOOL drawn, HRESULT bitsResult, BOOL flushed,
+            const RGBQUAD* pixels, int stride, int width, int height) noexcept
+        {
+            const DWORD error = GetLastError();
+            auto restore = wil::scope_exit([error]() noexcept { SetLastError(error); });
+            if (!TakeProbe(false)) return;
+            const bool available = drawn && SUCCEEDED(bitsResult) && pixels && stride >= width && flushed;
+            unsigned a0 = 0, a255 = 0, apart = 0, white = 0, nonPremul = 0;
+            // Read the complete image, excluding row padding. No alpha/RGB writes
+            // or policy decisions; the existing any-alpha fallback stays below.
+            if (available)
+                for (int row = 0; row < height; ++row)
+                    for (int col = 0; col < width; ++col)
+                    {
+                        const RGBQUAD& p = pixels[static_cast<size_t>(row) * stride + col];
+                        if (p.rgbReserved == 0) ++a0;
+                        else if (p.rgbReserved == 255) ++a255;
+                        else ++apart;
+                        if (p.rgbReserved && p.rgbRed >= 240 && p.rgbGreen >= 240 && p.rgbBlue >= 240) ++white;
+                        if (p.rgbRed > p.rgbReserved || p.rgbGreen > p.rgbReserved || p.rgbBlue > p.rgbReserved) ++nonPremul;
+                    }
+            wchar_t cls[64]{};
+            GetClassNameW(target, cls, _countof(cls));
+            RECT clip{};
+            const int clipKind = GetClipBox(dc, &clip);
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiInputIconProbe] stage=pixels api=%s hwnd=0x%p target=0x%p class=\"%s\" dc=0x%p images=0x%p index=%d rect=[%ld,%ld,%ld,%ld] size=%dx%d style=0x%X clipKind=%d clip=[%ld,%ld,%ld,%ld] draw=%d bitsHr=0x%08X flushed=%d available=%d stride=%d alpha0=%u alpha255=%u alphaPartial=%u whiteNonzeroAlpha=%u nonPremul=%u",
+                api, owner, target, cls, dc, images, index, bounds.left, bounds.top, bounds.right, bounds.bottom,
+                width, height, style, clipKind, clip.left, clip.top, clip.right, clip.bottom, drawn,
+                static_cast<unsigned>(bitsResult), flushed, available ? 1 : 0, stride, a0, a255, apart, white, nonPremul);
+        }
+#endif
+
+        template<typename Paint> std::optional<BOOL> TryDraw(
+            HIMAGELIST images, HDC dc, int x, int y, int width, int height, UINT style, void* nativeApi,
+            [[maybe_unused]] const wchar_t* api, [[maybe_unused]] int index, Paint paint)
+        {
+            HWND target{};
+            const HWND owner = IconOwner(dc, &target);
             // Mask/ROP requests are not visible icons; DPI-sized bounds are not inferred.
             if (!owner || !images || (style & (ILD_MASK | ILD_ROP | ILD_DPISCALE))) return std::nullopt;
             // Use the same comctl32 generation as the intercepted import (v5/v6
@@ -117,12 +229,24 @@ namespace GlassCore::DelphiInputIcons
             // No black-key: a black magnifier is part of the icon, not a colour key.
             const BOOL drawn = paint(memory, style | ILD_TRANSPARENT | ILD_PRESERVEALPHA);
             const DWORD error = GetLastError();
+            RGBQUAD* pixels{};
+            int stride{};
+            HRESULT bitsResult = E_FAIL;
+            BOOL flushed = FALSE;
             if (drawn)
             {
-                RGBQUAD* pixels{};
-                int stride{};
-                if (FAILED(GetBufferedPaintBits(buffer, &pixels, &stride)) || !pixels || stride < width
-                    || !GdiFlush()) return std::nullopt;
+                bitsResult = GetBufferedPaintBits(buffer, &pixels, &stride);
+                if (SUCCEEDED(bitsResult) && pixels && stride >= width) flushed = GdiFlush();
+            }
+#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
+            // Log before commit AND before the unchanged unavailable/no-alpha
+            // fallback, so absence of pixels is not confused with an empty icon.
+            ProbePixels(api, owner, target, images, index, dc, bounds, style, drawn,
+                bitsResult, flushed, pixels, stride, width, height);
+#endif
+            if (drawn)
+            {
+                if (!flushed) return std::nullopt;
                 bool hasAlpha = false;
                 for (int row = 0; row < height && !hasAlpha; ++row)
                     for (int col = 0; col < width; ++col)
@@ -145,8 +269,10 @@ namespace GlassCore::DelphiInputIcons
             if (budget)
             {
                 --budget;
-                DebugLog(DBG_NORMAL, L"[GlassCore][DelphiInputIcon] hwnd=0x%p dc=0x%p rect=[%ld,%ld,%ld,%ld] style=0x%X draw=%d commit=0x%08lX",
-                    owner, dc, bounds.left, bounds.top, bounds.right, bounds.bottom, style, drawn, committed);
+                wchar_t cls[64]{};
+                GetClassNameW(target, cls, _countof(cls));
+                DebugLog(DBG_NORMAL, L"[GlassCore][DelphiInputIcon] stage=result api=%s hwnd=0x%p target=0x%p class=\"%s\" dc=0x%p images=0x%p index=%d rect=[%ld,%ld,%ld,%ld] style=0x%X draw=%d commit=0x%08lX",
+                    api, owner, target, cls, dc, images, index, bounds.left, bounds.top, bounds.right, bounds.bottom, style, drawn, committed);
             }
 #endif
             SetLastError(error);
@@ -159,7 +285,7 @@ namespace GlassCore::DelphiInputIcons
             const auto orig = Original<DrawSlot, decltype(&::ImageList_Draw)>();
             if (!orig) return ImageList_Draw(images, index, dc, x, y, style);
             const DWORD error = GetLastError();
-            if (const auto result = TryDraw(images, dc, x, y, 0, 0, style, reinterpret_cast<void*>(orig),
+            if (const auto result = TryDraw(images, dc, x, y, 0, 0, style, reinterpret_cast<void*>(orig), L"ImageList_Draw", index,
                 [&](HDC memory, UINT flags) { return orig(images, index, memory, x, y, flags); })) return *result;
             SetLastError(error);
             return orig(images, index, dc, x, y, style);
@@ -170,7 +296,7 @@ namespace GlassCore::DelphiInputIcons
             const auto orig = Original<DrawExSlot, decltype(&::ImageList_DrawEx)>();
             if (!orig) return ImageList_DrawEx(images, index, dc, x, y, width, height, background, foreground, style);
             const DWORD error = GetLastError();
-            if (const auto result = TryDraw(images, dc, x, y, width, height, style, reinterpret_cast<void*>(orig),
+            if (const auto result = TryDraw(images, dc, x, y, width, height, style, reinterpret_cast<void*>(orig), L"ImageList_DrawEx", index,
                 [&](HDC memory, UINT flags) { return orig(images, index, memory, x, y, width, height, background, foreground, flags); })) return *result;
             SetLastError(error);
             return orig(images, index, dc, x, y, width, height, background, foreground, style);
@@ -181,7 +307,8 @@ namespace GlassCore::DelphiInputIcons
             if (!orig) return ImageList_DrawIndirect(params);
             if (!params || params->cbSize != sizeof(*params)) return orig(params);
             const DWORD error = GetLastError();
-            if (const auto result = TryDraw(params->himl, params->hdcDst, params->x, params->y, params->cx, params->cy, params->fStyle, reinterpret_cast<void*>(orig),
+            if (const auto result = TryDraw(params->himl, params->hdcDst, params->x, params->y, params->cx, params->cy, params->fStyle,
+                reinterpret_cast<void*>(orig), L"ImageList_DrawIndirect", params->i,
                 [&](HDC memory, UINT flags) {
                     auto work = *params;
                     work.hdcDst = memory; work.fStyle = flags;
@@ -200,12 +327,23 @@ namespace GlassCore::DelphiInputIcons
         g_dispatcher.moduleAddress = GlassCore::ModuleHandler::g_entryPointModule;
         g_dispatcher.CacheHookData();
         for (size_t i = 0; i < HookCount; ++i) g_dispatcher.EnableHook(i, true);
+#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
+        g_fillProbeDispatcher.moduleAddress = GlassCore::ModuleHandler::g_entryPointModule;
+        g_fillProbeDispatcher.CacheHookData();
+        g_fillProbeDispatcher.EnableHook(0, true);
+        DebugLog(DBG_NORMAL, L"[GlassCore][DelphiInputIconProbe] stage=arm exe=0x%p fillRef=%d imageRefs=[%d,%d,%d]",
+            GlassCore::ModuleHandler::g_entryPointModule, g_fillProbeDispatcher.GetRef(0),
+            g_dispatcher.GetRef(DrawSlot), g_dispatcher.GetRef(DrawExSlot), g_dispatcher.GetRef(IndirectSlot));
+#endif
         g_shutdown.store(false, std::memory_order_release);
     }
     void Shutdown()
     {
         g_shutdown.store(true, std::memory_order_release);
         auto lock = g_lock.lock_exclusive();
+#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
+        g_fillProbeDispatcher.DisableAllHooks();
+#endif
         g_dispatcher.DisableAllHooks();
     }
 }

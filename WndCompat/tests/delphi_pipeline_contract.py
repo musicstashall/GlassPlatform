@@ -278,13 +278,19 @@ class DelphiPipelineContract(unittest.TestCase):
         for guard in ('IsFullInjectionMode()', 'GetMapMode(dc) != MM_TEXT',
                       'WindowFromDC(dc)', 'GetStackOwnerForDc(dc)',
                       'IsTopWindowDrawingSession(window)', 'bitmap.bmBitsPixel <= 1',
-                      'L"TButtonedEdit"', 'L"TSearchBox"', 'L"TGlyph"', 'GetParent(window)',
+                      'L"TButtonedEdit"', 'L"TSearchBox"', 'L"TEditButton.TGlyph"', 'L"TGlyph"', 'GetParent(window)',
                       'GlassControlKind::Edit', 'GlassIsBackdropAllowedForHwnd(owner)',
                       'GlassIsBackdropAllowedForHwnd(window)', 'g_inside', 'g_shutdown'):
             self.assertIn(guard, code)
-        for forbidden in ('wcsstr', 'GetPaintSessionHostHwnd', 'ApplyBlackKeyAlpha',
-                          'ColorTreatAsTransparent', 'ExtTextOut', 'reinterpret_cast<PVOID>(BitBlt)'):
+        glyph = code.split('if (HasClass(window, L"TEditButton.TGlyph") || HasClass(window, L"TGlyph"))', 1)[1].split('else if', 1)[0]
+        self.assertIn('owner = GetParent(window)', glyph)
+        self.assertIn('if (!HasClass(owner, L"TButtonedEdit")) return nullptr', glyph)
+        self.assertIn('_wcsicmp(cls, name) == 0', code)
+        for forbidden in ('wcsstr', 'wcsncmp', 'GetAncestor', 'GetPaintSessionHostHwnd', 'ApplyBlackKeyAlpha',
+                          'ColorTreatAsTransparent', 'ExtTextOut', 'reinterpret_cast<PVOID>(BitBlt)',
+                          'BufferedPaintSetAlpha'):
             self.assertNotIn(forbidden, code)
+        self.assertNotRegex(code, r'\.rgb(?:Reserved|Red|Green|Blue)\s*=(?!=)')
         self.assertIn('g_entryPointModule', code)
         self.assertNotIn('RegisterModulePrewarmHandler', code)  # no IAT writes under loader lock
 
@@ -308,6 +314,82 @@ class DelphiPipelineContract(unittest.TestCase):
         runner = read('WndCompat/tests/input_icons_test.py')
         self.assertIn("for debug in (False, True)", runner)
         self.assertIn('GlassCore/src/Hooks/delphi/TInputIcons.cpp', runner)
+
+    def test_vcl_input_icon_fill_probe_observes_original_arguments_without_a_background_policy(self):
+        code = read('GlassCore/src/Hooks/delphi/TInputIcons.cpp')
+        guard = '#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)'
+        probe = code.split(guard, 1)[1].split('#endif', 1)[0]
+        self.assertIn('HookDispatcher<1, 3> g_fillProbeDispatcher', probe)
+        self.assertIn('"FillRect", reinterpret_cast<void*>(ProbeFill)', probe)
+        fill = probe.split('int WINAPI ProbeFill(HDC dc, const RECT* rect, HBRUSH brush)', 1)[1].split('void ProbePixels(', 1)[0]
+        for marker in ('g_fillProbeDispatcher.GetOrg<0, decltype(&::FillRect)>()',
+                       'IconOwner(dc, &target)', 'g_inFillProbe', 'TakeProbe(true)',
+                       'const RECT r = *rect', 'GetClipBox(dc, &clip)',
+                       'GetClientRect(target, &client)', 'GetWindowRect(target, &window)',
+                       'GetDCOrgEx(dc, &dcOrg)', 'ClientToScreen(target, &clientOrg)',
+                       'GetViewportOrgEx(dc, &viewport)', 'GetWindowOrgEx(dc, &windowOrg)',
+                       'const int result = orig(dc, rect, brush)', 'SetLastError(entryError)',
+                       'const DWORD error = GetLastError()', 'SetLastError(error)',
+                       'brushValid && lb.lbStyle == BS_SOLID', 'stage=fill',
+                       'brushRGBValid=', 'brushRGB=', 'clipKind=', 'result='):
+            self.assertIn(marker, fill)
+        for forbidden in ('PatBlt', 'BitBlt', 'AlphaBlend', 'BeginBufferedPaint',
+                          'CreateSolidBrush', 'DeleteObject', 'SelectObject',
+                          'SelectClipRgn', 'IntersectClipRect', 'BufferedPaintSetAlpha'):
+            self.assertNotIn(forbidden, fill)
+        self.assertLess(fill.index('GetClipBox(dc, &clip)'), fill.index('const int result = orig'))
+        self.assertLess(fill.index('const int result = orig'), fill.index('stage=fill'))
+
+    def test_vcl_input_icon_pixel_probe_is_read_only_before_commit_and_fallback(self):
+        code = read('GlassCore/src/Hooks/delphi/TInputIcons.cpp')
+        probe = code.split('void ProbePixels(', 1)[1].split('#endif', 1)[0]
+        for marker in ('TakeProbe(false)',
+                       'drawn && SUCCEEDED(bitsResult) && pixels && stride >= width && flushed',
+                       'if (available)', 'row < height', 'col < width',
+                       'const RGBQUAD& p = pixels[static_cast<size_t>(row) * stride + col]',
+                       'alpha0=', 'alpha255=', 'alphaPartial=', 'whiteNonzeroAlpha=', 'nonPremul=',
+                       'available=', 'bitsHr=', 'flushed=', 'stage=pixels',
+                       'api=%s', 'hwnd=0x%p', 'target=0x%p', 'index=%d', 'stride=%d',
+                       'GetClassNameW(target, cls, _countof(cls))', 'SetLastError(error)'):
+            self.assertIn(marker, probe)
+        for forbidden in ('GetBufferedPaintBits(', 'GdiFlush()', 'BufferedPaintSetAlpha', 'EndBufferedPaint'):
+            self.assertNotIn(forbidden, probe)
+        self.assertNotRegex(probe, r'\.rgb(?:Reserved|Red|Green|Blue)\s*=(?!=)')
+        draw = code.split('template<typename Paint> std::optional<BOOL> TryDraw(', 1)[1].split('BOOL WINAPI Draw(HIMAGELIST images', 1)[0]
+        for after in ('if (!flushed) return std::nullopt', 'if (!hasAlpha) return std::nullopt',
+                      'const HRESULT committed = EndBufferedPaint(buffer, drawn)'):
+            self.assertLess(draw.index('ProbePixels(api,'), draw.index(after))
+        for api in ('ImageList_Draw', 'ImageList_DrawEx', 'ImageList_DrawIndirect'):
+            self.assertIn('L"' + api + '", ' + ('params->i' if api.endswith('Indirect') else 'index'), code)
+
+    def test_vcl_input_icon_probe_has_its_own_bounded_opt_in_lifecycle_and_behavioral_fixtures(self):
+        code = read('GlassCore/src/Hooks/delphi/TInputIcons.cpp')
+        guard = '#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)'
+        startup = code.split('void Startup()', 1)[1].split('void Shutdown()', 1)[0]
+        shutdown = code.split('void Shutdown()', 1)[1]
+        for body, operation in ((startup, 'g_fillProbeDispatcher.EnableHook(0, true)'),
+                                (shutdown, 'g_fillProbeDispatcher.DisableAllHooks()')):
+            self.assertIn(operation, body.split(guard, 1)[1].split('#endif', 1)[0])
+        self.assertIn('if (!g_shutdown.load(std::memory_order_acquire)) return', startup)
+        self.assertIn('g_entryPointModule', startup)
+        for marker in ('stage=arm', 'g_fillProbeDispatcher.GetRef(0)', 'imageRefs=[%d,%d,%d]'):
+            self.assertIn(marker, startup)
+        self.assertIn('static thread_local Budget budgets[2]', code)
+        self.assertIn('budgets[fill ? 0 : 1]', code)
+        self.assertIn('fill ? 24u : 12u', code)
+        self.assertIn('now - b.epoch >= 1000', code)
+        engine = read('GlassCore/src/Core/Engine.cpp')
+        for later in ('GlassCore::Root::Startup()', 'GlassCore::PaintDispatcher::Startup()'):
+            self.assertLess(engine.index('GlassCore::DelphiInputIcons::Startup()'), engine.index(later))
+        runner = read('WndCompat/tests/input_icons_test.py')
+        for marker in ("for probe in ((False, True) if debug else (False,))", "'-DGLASS_DELPHI_DRAW_PROBE'",
+                       'test_qualified_class_all_indices_legacy_alias_and_no_substring_or_ancestor_match',
+                       'test_separate_white_fill_and_mixed_black_white_partial_alpha_pixels_are_unchanged',
+                       'test_fill_probe_records_original_arguments_geometry_results_and_error_without_drawing',
+                       'test_pixel_probe_counts_full_buffer_without_padding_and_distinguishes_unavailable_bits',
+                       'test_probe_budgets_are_separate_bounded_and_thread_local',
+                       'test_fill_probe_calls_and_restores_supplied_effective_original_even_for_foreign_windows'):
+            self.assertIn(marker, runner)
 
     def test_runtime_core_lookups_have_unique_undecorated_named_exports(self):
         # Check actual callers, not just declarations: WINAPI dllexport alone

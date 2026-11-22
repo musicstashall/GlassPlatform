@@ -4547,3 +4547,101 @@ input icon doubles **6/6 × Release/Debug — PASS**. Старый icon double �
 ровно один непрозрачный чёрный пиксель и использует raw `TGlyph`; он не проверял
 новый фактический класс, белую отдельную подложку или Windows pixels. Эти PASS
 не опровергают наблюдение пользователя. MSVC/Win32 GDI/DWM здесь не проверялись.
+
+## Тест 106: TEditButton.TGlyph — exact gate и раздельная диагностика подложки/ImageList
+
+После теста 105 пользователь уточнил наблюдение: **у TSearchBox само изображение
+уже непрозрачно, остаётся белая подложка; у TButtonedEdit обработка изображения
+не применялась, остаются белый фон и просвечивание**. Это уточнение заменяет
+первоначальную общую формулировку про оба изображения в начале теста 105.
+Пользователь согласовал первый шаг: исправить допуск класса и добавить наблюдение,
+**не менять pixel/background policy**. Это не завершение всей задачи иконок.
+
+### Изменение маршрута и неизменяемая политика
+
+В `TInputIcons.cpp::IconOwner` добавлен точный raw class `TEditButton.TGlyph`
+в дополнение к `TGlyph`. У обоих вариантов обязателен **непосредственный**
+TButtonedEdit-parent; промежуточная панель, TSearchBox-parent, чужой parent
+или только похожее имя не подходят. Прямые TButtonedEdit/TSearchBox сохранены.
+Это имя оконного контейнера служебной кнопки, не имя/цвет/индекс картинки:
+путь одинаков для любых назначенных левой/правой кнопке изображений и состояний.
+
+Сохранены Full, MM_TEXT, Edit-kind владельца и backdrop обоих HWND. Для memory
+DC по-прежнему нужны зарегистрированный DC, верхняя сессия и цветной bitmap;
+ambient HWND не считается доказательством. Три native ImageList API, их index,
+overlay/state/geometry, RGB-параметры DrawEx, reentry, clipping, fallback и shutdown
+не заменены. Размеры ограничены прежними 1024×1024 и overflow checks.
+
+Альфа SearchBox **не переделывалась**. Зонд не подменяет отдельный FillRect
+и не записывает RGB/alpha изображения: белые/чёрные детали и частичная alpha
+не нормализуются. Нет white/black colour-key, whole-rectangle A255, новой заливки
+или очистки фона. Текст, обычный фон Edit,
+общая DoubleBuffered и принятые TListBox/ListView/ToolBar/Panel не менялись.
+
+### Диагностика: обычный Debug и opt-in зонд
+
+- Обычный Debug сохраняет ограниченный `[DelphiInputIcon] stage=result` после
+  EndBufferedPaint, теперь также с именем ImageList API, owner/target HWND,
+  raw class, HIMAGELIST и image index. Успех draw/commit — всё ещё не visual acceptance.
+- Только `_DEBUG && GLASS_DELPHI_DRAW_PROBE` добавляет `[DelphiInputIconProbe]`:
+  - `stage=arm` — EXE и **реальные refs** FillRect / трёх ImageList imports.
+    `fillRef=0` означает, что слот не включён; отсутствие fill-записи в таком
+    случае нельзя трактовать как отсутствие операции в приложении.
+  - `stage=fill` — исходные rect/brush, raw class и owner/target, RGB/style с
+    признаками валидности, результат native call, clip и его тип; client/window
+    rect, DC/client screen origins и viewport/window origins с признаками успеха.
+    RGB считается установленным только для solid или COLOR_*+1 pseudo-brush;
+    игнорируемый lbColor pattern-кисти не выдаётся за цвет её пикселей.
+    Clip — bounding box региона, не доказательство точной области кнопки.
+  - `stage=pixels` — API, owner/target/raw class, index, размеры, stride, clip,
+    draw/bitsHr/flushed/available и **alpha0/alpha255/alphaPartial/whiteNonzeroAlpha**
+    полного изображения без padding **до commit и до unavailable/no-alpha fallback**.
+    `whiteNonzeroAlpha` — RGB каждого канала ≥240 при A>0; `nonPremul` — число
+    пикселей, у которых хотя бы один RGB>A (включая A0 с ненулевым RGB).
+    Это статистика результата native draw в промежуточном буфере, не извлечение
+    исходного ресурса ImageList. Белый может быть легитимной деталью, partial alpha
+    — краем сглаживания; эти счётчики сами по себе не задают новую политику.
+
+`available=0` не означает «всё прозрачно»: счётчики тогда не вычислены. При
+`draw=0` bits API вообще не вызывается; bitsHr остаётся E_FAIL-маркером.
+При успешном чтении полностью нулевой alpha лог даёт available=1 и alpha0=width×height,
+затем сохраняется прежний native fallback. Ранние отказы до получения буфера
+и неподдерживаемые mask/ROP/DPI styles не получают pixel-запись.
+
+Fill и pixel-записи имеют **раздельные thread-local бюджеты 24 и 12 на 1000 ms**.
+Зонд FillRect установлен только на EXE при Startup, до включения paint-провайдеров,
+через штатный HookDispatcher; вызывает его effective original, не обходит его
+сырым API и снимается при Shutdown. Аргументы, native result, входящий/исходящий
+LastError не подменяются. Отдельный recursion guard подавляет только повторную
+телеметрию, не отключает вложенную композицию ImageList. Изменений IATRegistry,
+ModuleHandler, новых bridge exports или paint/ownership/refcount-провайдеров нет.
+На BPL/другие модули охват не расширялся; themed DrawElement не объявлен FillRect.
+
+### Проверки и предел результата
+
+- Прежний target-тест сначала **RED в Release/Debug** с фактическим dotted class,
+  затем GREEN после additive exact gate.
+- `input_icons_test.py`: **13/13 × Release / Debug / Debug+probe — PASS**;
+  компилируется полный production source, а не копия gate/renderer.
+  Проверены разные indices, legacy alias, близкие имена и прямой parent;
+  отдельная белая заливка плюс mixed alpha 0/100/200/255, чёрные/белые детали,
+  stride padding; payload/порядок логов, unavailable bits/native failure,
+  раздельные бюджеты/поток, native args/result/LastError, reentry, отсутствующий
+  import, repeated Startup/Shutdown, captured hook и supplied effective original.
+- Тот же набор под **ASan/UBSan, все три конфигурации — PASS**.
+- Contracts **99/99 — PASS**; регрессии: TListBox **13**, VCL images **14**,
+  ListView images **13**, Panel **12**, Button groups **9**, CoolBar **9**,
+  Bome memo **14** — PASS в конфигурациях их runners.
+- **8 complete-source поведенческих мутаций отвергнуты**: потеря dotted class,
+  substring match, чужой parent, whole-image A255; подсчёт padding, обход
+  effective FillRect original, потеря LastError, общий бюджет fill/images.
+  Первые четыре мутации отвергнуты во всех трёх сборках, остальные —
+  в Debug+probe. Временные деревья тестов/мутаций удалены.
+
+Это переносимые environment doubles и source contracts. Здесь нет MSVC/Windows
+GDI/DWM; реальная PE/IAT-цепочка, Windows pixels и визуальный результат не проверены.
+Исправление белой подложки остаётся **следующим отдельным шагом после runtime-данных**.
+Для проверки: обычный Debug — обе кнопки TButtonedEdit с разными картинками и
+состояниями и TSearchBox (изображение уже непрозрачно); для детальных fill/pixel
+строк — Debug GlassCore с opt-in `GLASS_DELPHI_DRAW_PROBE`. Отчёт по каждому:
+**скриншот → «Логи при отображении» → «Логи с зондом при отображении элемента»**.
