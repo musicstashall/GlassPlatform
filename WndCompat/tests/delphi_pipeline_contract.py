@@ -1314,12 +1314,82 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('ExtTextOutWithAlpha(', combo_text)
         self.assertIn('if (!count) return TRUE;', combo_text)
         begin_draw = draw.split('bool BeginDraw(HWND parent', 1)[1].split('bool TryCheckListThemeBackground', 1)[0]
-        for guard in ('const bool comboField', 'if (!comboField) return false;',
+        for guard in ('const bool comboField', 'if (!comboField && !comboRow) return false;',
                       'if (s.combo && i != FillSlot && i != ExtTextSlot && i != DrawTextSlot',
                       '&& i != BitBltSlot && i != StretchBltSlot) continue;', 's.field = comboField'):
             self.assertIn(guard, begin_draw)
         self.assertIn('opaque-brush', draw)
         self.assertIn('CreateSolidColorBrushWithAlpha(lb.lbColor, 255)', draw)
+
+    def test_color_combo_popup_rows_are_fill_only_and_never_negative_id_fields(self):
+        code = read('GlassCore/src/Hooks/delphi/TListBoxDraw.cpp')
+        begin = code.split('bool BeginDraw(HWND parent', 1)[1].split('bool TryCheckListThemeBackground', 1)[0]
+        field = begin.split('const bool comboField', 1)[1].split('const bool comboRow', 1)[0]
+        self.assertIn('ODS_COMBOBOXEDIT', field)
+        self.assertNotIn('itemID', field)
+        row = begin.split('const bool comboRow', 1)[1].split('if (list)', 1)[0]
+        for guard in ('combo && !comboField', 'L"TColorBox"', 'dis->itemID != static_cast<UINT>(-1)',
+                      'ODA_DRAWENTIRE | ODA_SELECT'):
+            self.assertIn(guard, row)
+        for other in ('TComboBox', 'TDriveComboBox', 'TFilterComboBox'):
+            self.assertNotIn(other, row)
+        self.assertIn('if (comboRow && i != FillSlot) continue;', begin)
+        self.assertIn('if (!comboRow && !IsInsideDraw())', begin)
+        current = code.split('const Session* Current(', 1)[1].split('bool SystemBackground(', 1)[0]
+        self.assertIn('bool comboRowFill = false', current)
+        self.assertIn('s.combo && !s.field && !comboRowFill', current)
+        self.assertEqual(code.count('Current(dc, true)'), 1)
+        query = code.split('bool IsInsideDraw() noexcept', 1)[1].split('bool BeginDraw(', 1)[0]
+        self.assertIn('for (const auto& s : g_stack)', query)
+        self.assertIn('if (!s.combo || s.field) return true;', query)
+
+    def test_color_combo_row_fills_keep_clip_rgb_native_errors_and_finite_extents(self):
+        code = read('GlassCore/src/Hooks/delphi/TListBoxDraw.cpp')
+        fill = code.split('int WINAPI MyFill(HDC dc', 1)[1].split('BOOL WINAPI MyExtText(HDC dc', 1)[0]
+        row = fill.split('if (s.combo && !s.field)', 1)[1].split('if (s.combo)', 1)[0]
+        for guard in ('!s.selected && EqualRect(r, &s.item) && SystemBackground(lb.lbColor)',
+                      'const int result = orig(dc, r, brush)', 'const DWORD error = GetLastError()',
+                      'const BOOL cleared = result && width > 0 && width <= INT_MAX',
+                      'height > 0 && height <= INT_MAX', 'static_cast<long long>(r->right) - r->left',
+                      'static_cast<long long>(r->bottom) - r->top', 'SetLastError(entryError)',
+                      'CreateSolidColorBrushWithAlpha(lb.lbColor, 255)', 'opaque.reset()', 'SetLastError(error)'):
+            self.assertIn(guard, row)
+        for forbidden in ('GetClientRect', 'SaveDC', 'SelectClipRgn', 'IntersectClipRect', 'GetClipBox',
+                          'ComboFillBounds', 'ExtTextOutWithAlpha', 'BitBlt', 'BackgroundAlpha', '0xFFFFFF'):
+            self.assertNotIn(forbidden, row)
+        self.assertIn('EqualRect(&clipped, r)', fill.split('if (s.combo && !s.field)', 1)[0])
+
+    def test_tcombo_list_ctlcolor_is_native_first_own_attached_popup_only(self):
+        code = read('WndCompat/Popup/ComboLBox/ComboBoxSubclass.cpp')
+        case = code.split('case WM_CTLCOLORLISTBOX:', 1)[1].split('case WM_LBUTTONDOWN:', 1)[0]
+        for guard in ('Shared::InjectionMode::Full', 'IsWindowClass(hWnd, L"TComboBox")',
+                      'GlassIsBackdropAllowedForHwnd(hWnd)', 'GlassIsBackdropAllowedForHwnd(list)',
+                      'IsWindowClass(list, L"ComboLBox")', 'ComboLBox_IsAttached(list)',
+                      'GetComboBoxInfo(hWnd, &info)', 'info.hwndCombo == hWnd && info.hwndList == list',
+                      'const LRESULT original = native()', 'const bool eligible = isOwnList()',
+                      'eligible && solid && bk != CLR_INVALID', 'lb.lbStyle == BS_SOLID',
+                      '(lb.lbColor & 0xFFFFFFu) == windowColor && (bk & 0xFFFFFFu) == windowColor',
+                      'if (black && SetBkColor(dc, 0) != CLR_INVALID)', 'SetLastError(originalError)'):
+            self.assertIn(guard, case)
+        self.assertEqual(case.count('DefSubclassProc('), 1)
+        self.assertLess(case.index('const LRESULT original = native()'), case.index('const COLORREF bk = GetBkColor(dc)'))
+        self.assertLess(case.index('const LRESULT original = native()'), case.index('const bool eligible = isOwnList()'))
+        for forbidden in ('SetTextColor', 'SetBkMode', 'PatBlt', 'FillRect', 'SelectClipRgn', 'DrawText'):
+            self.assertNotIn(forbidden, case)
+
+    def test_tcombo_list_debug_probe_is_local_and_bounded_without_global_hooks(self):
+        code = read('WndCompat/Popup/ComboLBox/ComboBoxSubclass.cpp')
+        case = code.split('case WM_CTLCOLORLISTBOX:', 1)[1].split('case WM_LBUTTONDOWN:', 1)[0]
+        for marker in ('#if defined(_DEBUG)', 'now - epoch >= 1000', 'budget = 16', '--budget',
+                       '[WndCompat][DelphiComboList] CTLCOLOR', 'list=0x%p dc=0x%p',
+                       'bk=0x%08X brush=0x%p', 'eligible=%d replaced=%d'):
+            self.assertIn(marker, case)
+        self.assertNotIn('GLASS_DELPHI_DRAW_PROBE', case)
+        for forbidden in ('DebugDetourHooks', 'SetEnabled', 'RegisterPaintProvider', 'RegisterCompatDCProvider'):
+            self.assertNotIn(forbidden, case)
+        harness = read('WndCompat/tests/combo_list_ctlcolor_test.py')
+        self.assertIn('#include "WndCompat/Popup/ComboLBox/ComboBoxSubclass.cpp"', harness)
+        self.assertIn('DebugProbe', harness)
 
     def test_vcl_combo_classification_and_combo_alpha_paths(self):
         classifier = read('WndCompat/Tracker/WindowClassifier.cpp')
@@ -1345,7 +1415,7 @@ class DelphiPipelineContract(unittest.TestCase):
 
     def test_targeted_vcl_edit_probes_and_combo_ctlcolor(self):
         combo = read("WndCompat/Popup/ComboLBox/ComboBoxSubclass.cpp")
-        ctl = combo.split('case WM_CTLCOLOREDIT:', 1)[1].split('case WM_LBUTTONDOWN:', 1)[0]
+        ctl = combo.split('case WM_CTLCOLOREDIT:', 1)[1].split('case WM_CTLCOLORLISTBOX:', 1)[0]
         for guard in ('Shared::InjectionMode::Full', 'GlassIsBackdropAllowedForHwnd(hWnd)',
                       'IsDelphiComboBox(hWnd)', 'info.hwndItem != edit', 'L"Edit"',
                       'DefSubclassProc', 'lb.lbStyle == BS_SOLID', 'GetSysColor(COLOR_WINDOW)',

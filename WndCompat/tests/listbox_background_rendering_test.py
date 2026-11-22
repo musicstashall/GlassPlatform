@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile complete production TListBoxDraw.cpp in Release and Debug/probe.
+"""Compile complete production TListBoxDraw.cpp in Release, Debug and Debug/probe.
 
 Check background brush alpha, native arguments, session/DC isolation and refs.
 These are environment doubles, not MSVC/Win32 GDI/DWM or PE/IAT acceptance.
@@ -40,7 +40,8 @@ class ListBoxBackgroundRenderingTest(unittest.TestCase):
         cls.binaries = {}
         for mode, flags in (
             ('Release', ['-O2']),
-            ('Debug', ['-O0', '-g', '-D_DEBUG', '-DGLASS_DELPHI_DRAW_PROBE']),
+            ('Debug', ['-O0', '-g', '-D_DEBUG']),
+            ('DebugProbe', ['-O0', '-g', '-D_DEBUG', '-DGLASS_DELPHI_DRAW_PROBE']),
         ):
             binary = tmp / f'listbox-background-{mode}'
             result = subprocess.run(compiler + [
@@ -73,6 +74,14 @@ class ListBoxBackgroundRenderingTest(unittest.TestCase):
     def test_missing_slot_shutdown_and_captured_original(self): self.run_case('lifecycle')
     def test_reentry_stack_growth_and_exact_supplied_memory_dc(self): self.run_case('reentry-memory')
     def test_native_graphics_and_text_measurement_do_not_get_background_alpha(self): self.run_case('graphics')
+    def test_color_combo_rows_zero_through_seven_on_window_and_memory_dc(self): self.run_case('combo-rows')
+    def test_color_combo_white_black_system_swatches_and_selection_are_opaque(self): self.run_case('combo-swatches')
+    def test_combo_negative_id_focus_is_not_a_field_and_real_fields_are_unchanged(self): self.run_case('combo-focus')
+    def test_color_combo_exact_class_action_mode_parent_kind_and_geometry(self): self.run_case('combo-gates')
+    def test_color_combo_surface_coverage_respects_partial_complex_and_empty_clip(self): self.run_case('combo-clip')
+    def test_color_combo_original_result_error_failures_and_pattern_passthrough(self): self.run_case('combo-failures')
+    def test_color_combo_nested_inherited_text_and_image_slots_stay_native(self): self.run_case('combo-nesting')
+    def test_color_combo_dc_thread_reentry_missing_slot_shutdown_and_ref_balance(self): self.run_case('combo-isolation')
 
 
 if __name__ == '__main__':
