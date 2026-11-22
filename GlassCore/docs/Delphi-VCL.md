@@ -6028,3 +6028,169 @@ ComboLBox/SearchBox/TButtonedEdit не менялись. Платформу не
 их binaries удалены. Изображения и прочие вложения сохранены. BWM.txt не
 изменён, SHA256 по-прежнему
 `bf679ce9c8a29e0d6b4ac8e3dce73cad4f52e454de0961a28e9840133f1e547f`.
+
+## Тест 117: exact TPage — согласованный text-only EXE-IAT DrawTextA
+
+После §116 пользователь **локально проверил**
+`D:\Programs\Restorator 2007\Restorator.exe`: **PE32, machine=0x14C, Windows
+GUI**, именованный импорт **user32.dll!DrawTextA**, hint=0, рядом DrawMenuBar /
+DrawIconEx; других DrawText* в импортах нет. Это сообщение пользователя,
+не самостоятельный разбор EXE в Arena: самого PE-файла здесь нет. Такой
+импорт позволяет обоснованно проверить IAT-вариант; отсутствие импорта больше
+не является гипотезой для этого EXE. Наличие записи само по себе не доказывает
+прохождение через неё каждого вызова; нативные API и классы захватов описаны
+с оговорками в §116.
+
+Пользователю предложена отдельная альтернатива: **только exact TPage получает
+EXE-IAT DrawTextA**, TPanel сохраняет опубликованный export-detour; без общего
+panel-background допуска, с native fallback и проверкой вложенностей.
+Пользователь ответил **«выполняй»**. Это явное новое согласование IAT-варианта,
+а не реализация первоначального предложения TPage export lease из §116.
+Донор BWM для TPage/TPanel использует export Detours (§115–116); **IAT для TPage
+здесь выбран отдельно по согласованию**, не объявляется точным переносом BWM.
+
+### Реализованный маршрут и изоляция
+
+- `GlassShared/include/GlassDelphiPanel.h`: добавлен отдельный
+  **IsDelphiPageAnsiPaintWindow**, exact case-insensitive TPage и только
+  **WM_PAINT / WM_PRINTCLIENT**. Оба прежних общих panel predicates
+  **побайтово неизменны**: TPage не становится фоном панели, TPageControl /
+  TTabSheet / suffix/substring-классы не приобретают этот маршрут.
+- `WndCompat/Root/DelphiPanelPaint.h`: существующий runtime Begin/End bridge
+  допускает этот text-only predicate наряду с прежними панелями. Full,
+  backdrop, shutdown, наличие обеих экспортированных функций и snapshot End
+  сохранены. **WM_ERASEBKGND страницы остаётся в прежнем root policy**;
+  новый GetDC/CompatDC provider не добавлен. Peer ABI/import-library не менялись.
+- `GlassCore/src/Hooks/delphi/TPanelDraw.cpp`: отдельный private
+  **HookDispatcher<1,3> g_pageTextDispatcher** на **entry-point EXE**, ровно
+  один API **DrawTextA** (user32 и два прежних API-set aliases). Все IAT-записи
+  идут штатным dispatcher/registry путём; прямого GetIAT/WriteMemory,
+  переустановки чужого occupant или перекрёстных hook-export API нет.
+- Page lease фиксируется по **GetRef(after) > GetRef(before)** под общим lock,
+  а не по boolean EnableHook: false может означать уже приобретённый nested
+  ref. Session имеет отдельный **pageAnsiTextAcquired**, diagnostic mask
+  **0x20**; mask **0x10** и export lifetime TPanel сохранены. End/failed stack
+  push освобождают только фактически приобретённые refs; Shutdown снимает
+  отдельный page dispatcher. Отсутствующий import/EXE или failed registration
+  даёт **отказ Begin без phantom session и без автоматического page Detours**.
+- Для TPage не приобретается ни один из четырёх прежних background/image
+  IAT-слотов. Дополнительно сохранён отдельный **panelBackground** session gate
+  в IsBackgroundRect: даже уже активные из внешнего TPanel FillRect/PatBlt/
+  ETO_OPAQUE hooks не могут перекрасить страницу. StretchBlt по-прежнему требует
+  свой acquired slot и exact nested TPanel; themed container allowlist не
+  расширен. Общие RootWindowHooks/RootGdiHooks/RootSubclass/WindowClassifier и
+  PaintDispatcher этим шагом не изменены.
+
+### ANSI-семантика, original и пересечение с TPanel
+
+Прежнее ANSI glyph body выделено в один private **DrawAnsiText** с явными
+route **PanelExport / PageIat**; WINAPI wrappers выбирают только свой route.
+Это локальное повторное использование уже принятого decoder/compositor,
+**не общий A/W или ANSI-process/profile redesign**. Собственный lease,
+exact class/message, TLS, valid HWND, Full/backdrop, owned window DC /
+tracked top-session MEMDC / supplied print DC и reentry проверяются на вызове.
+
+Прежние selected-font charset → codepage, explicit ANSI byte bounds,
+embedded NUL/count=-1, DBCS и **реальная UTF-16 длина**, transparent glyphs,
+caller RECT isolation и SaveDC/RestoreDC сохранены. CALCRECT/MODIFYSTRING/
+NOCLIP, неподдерживаемые arguments/mapping, conversion/SaveDC/mode/renderer
+failures идут в original; положительный, нулевой и отрицательный native/
+renderer results не переинтерпретируются. Entry/exit LastError сохраняются.
+Непрозрачные донорские text-rectangle fills не перенесены; alpha=100,
+DoubleBuffered, изображения и общий W-текст не переработаны.
+
+**Page original получается только через GetOrg своего IAT dispatcher**, не
+через panel trampoline вместо registry. Пока original существует, fallback
+вызывает именно его один раз с исходными arguments. Для stale/missing page
+original доступен API export fallback, но не повторный вызов своего IAT;
+этот путь не выдаёт разрешение на compositor. TPanel продолжает пользоваться
+своим resolved address / Detours trampoline независимо от наличия EXE import.
+
+Разведены два принципиально разных случая:
+
+1. **Внутренний TPage под TPanel:** page IAT рисует глифы один раз. При owned
+   native fallback guard блокирует повторную композицию через original,
+   возможный активный panel export или повторный вход из original.
+2. **Внутренний TPanel под TPage:** IAT страницы ещё активен на EXE, но page
+   handler **не владеет этим вызовом**. Он не выставляет native-reentry guard
+   принудительно, а отдаёт registry original; тот может штатно дойти до
+   действующего TPanel export renderer. Иначе универсальный guard скрывал бы
+   уже работавший текст панели.
+
+HookDispatcher/IATRegistry исходники и intended first-active-occupant контракт
+не менялись и не обходились. Portable dispatcher double моделирует ref-delta
+и first-active occupant; это **не проверка исполнения фактического Windows
+реестра/его цепочки** и не исправление известного расхождения registry/docs.
+Наличие acquired lease также не обещает, что конкурирующий native-only IAT
+occupant отдаст этому renderer управление. DDH и optional probe не менялись,
+DDH_All не включается автоматически; загадка отсутствующего probe Begin из
+§116 не объявляется решённой новым production-перехватом.
+
+### Диагностика для последующей Windows-проверки
+
+Ограниченные metadata-only сообщения, без содержимого строк:
+
+- **text-iat api=DrawTextA class=TPage enable=1**, HWND, EXE,
+  **acquired=0/1 refs=N** — попытка получить lease; enable=0 показывает release.
+- **Begin class="TPage"**, msg=0xF или 0x318, **acquired=0x20** — успешная
+  text-only message session, не mask фоновых слотов.
+- **text api=DrawTextA**, HWND/HDC, **ansiCount / wideCount / cp**, flags,
+  RECT/result/hr, **transparent=1 route=page-iat** — фактическое исполнение
+  compositor path. У TPanel suffix **route=panel-export**.
+- **text-native ... reason=... route=page-iat** — arguments/conversion/render
+  fallback после допуска; без Acquire/Begin отсутствие API log не трактуется
+  как отсутствие нативного DrawTextA.
+
+Бюджет API-логов остаётся 16/сек/поток; IAT lease metadata имеет отдельный
+канал, не забирающий API budget. Эти строки — **ожидаемые маркеры**, не новый
+снятый в Windows журнал. В обычной проверке не требуется DDH_All/optional probe.
+
+### Выполненные проверки и пределы результата
+
+- **До production-правки:** все три конфигурации компилировались; прежние
+  **31×3 PASS**, первые **19 новых TPage-сценариев ×3 ожидаемо RED** именно
+  на выполнении admission/bridge, не на ошибке компиляции.
+- **После:** **51×3 PASS** — прежние 31 и 20 новых, Release/Debug/Debug+probe,
+  C++20/`-Werror`. Полный production TPanelDraw и настоящий WndCompat bridge;
+  root themed gate/handler по-прежнему компилируются из production snippets.
+  Debug+probe здесь проверяет совместимость defines, не исполнение реальной
+  optional probe Begin. Проверены 219/176-byte fixtures, exact negatives,
+  print/gates, missing import/
+  registration/original/export, runtime DC/TLS, charset/counts, native once,
+  state/LastError, lease/ref/shutdown, обе вложенности и original reentry.
+- **ASan+UBSan / leak detection: 51×3 PASS**, flags
+  `-fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie`,
+  detect_leaks/abort_on_error/halt_on_error включены.
+- **126 source contracts PASS**: шесть новых; четыре старых адаптированы к
+  text-only predicate/shared glyph body, остальные 116 не переписаны.
+- Соседние suites PASS: настоящий **DDH 18**, optional probe **19**, VCL images
+  **14**, ListView images **13**, ButtonGroups **9**, CoolBar **9**, BomeMemo
+  **14**, ListBox **21×3**, CTLCOLOR **13×3**, input icons **28×3** в конфигурациях
+  соответствующих runners. Это не запрос новой пользовательской приёмки
+  закрытых ComboLBox/SearchBox/TButtonedEdit.
+- **32/32 компилируемых мутанта отвергнуты исполнением**: неверные exact class/
+  message/bridge/core/API/wrapper gates; потеря ref-delta/release/shutdown;
+  page background acquisition/унаследованный background gate; подмена lease/
+  registry original; подавление nested TPanel; отсутствие/залипание native guard;
+  LastError, UTF-16 count, CALCRECT, DC restore/transparency, TLS, print DC и
+  двойной native call. Compile failures и runtime timeouts не засчитывались;
+  у всех итоговых 32 есть успешная компиляция и ненулевой runtime exit.
+
+Сверка с **3e514cd**: scope **8 существовавших файлов**, новых/удалённых tracked
+файлов нет; остальные **1786** из 1794 побайтово неизменны. В production
+сохранены **18 прежних panel/DC/background/image/decoder/theme функций** и
+четыре прежние IAT dependency rows; прежние lifecycle bodies отличаются только
+page cache/release, ANSI glyph tail — только route metadata. Panel background
+class predicates не расширены. Все прежние C++-сценарии (**31**), их Context и
+runner methods побайтово сохранены. Предыдущие разделы документа также
+побайтово сохранены; UTF-8 без BOM, Python AST,
+`git diff --check` проверены. Разовые скрипты/manifest/mutation sources/binaries
+удалены после сверки; BWM и изображения сохранены, старые логи не восстановлены.
+
+**Windows/MSVC/Win32 ABI, настоящий EXE IAT/Detours/NLS/GDI/uxtheme/DWM и
+визуальный результат недоступны в Arena и не проверены.** Restorator PE32
+нужен соответствующий **Win32/x86 комплект DLL**; это не предложение проверять
+его через x64-only DLL. Платформу не запускали/останавливали, DLL не освобождали.
+Готова согласованная реализация для последующей пользовательской сборки:
+проверить появление двух абзацев TPage и сохранность текущей подложки/флажков.
+До такой проверки **исчезновение текста не объявляется визуально исправленным**.

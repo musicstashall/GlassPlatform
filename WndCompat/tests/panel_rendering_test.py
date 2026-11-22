@@ -3,8 +3,9 @@
 
 The root themed-text gate and IAT handler are also compiled directly from
 production source excerpts. The complete TPanelDraw unit is compiled in three
-configurations, including its user32 DrawTextA export detour and ANSI decoding.
-Checks export acquisition/trampoline lifetime, routing, DIB bytes, options and
+configurations, including its TPanel user32 export detour, exact TPage EXE-IAT
+route and shared ANSI glyph decoding. Checks acquisition/ref/trampoline lifetime,
+first-occupant and hybrid routing, DIB bytes, options and
 scoped state, not Windows NLS tables, pixels, executable Detours patches,
 real IAT chains, uxtheme alpha, or MSVC build compatibility.
 """
@@ -171,6 +172,67 @@ class PanelRenderingTest(unittest.TestCase):
 
     def test_ansi_other_thread_cannot_use_the_owning_thread_panel_context(self):
         self.run_case('ansi-tls')
+
+
+    def test_page_route_uses_only_exe_iat_for_both_native_paragraph_counts(self):
+        self.run_case('page-route')
+
+    def test_page_print_bridge_and_full_backdrop_shutdown_export_gates(self):
+        self.run_case('page-print-gates')
+
+    def test_page_class_and_message_gates_do_not_expand_background_or_themed_policy(self):
+        self.run_case('page-classes')
+
+    def test_page_missing_import_or_registration_failure_keeps_native_message_route(self):
+        self.run_case('page-import-failures')
+
+    def test_page_iat_does_not_need_panel_export_resolution_or_detours(self):
+        self.run_case('page-export-independent')
+
+    def test_page_text_requires_own_window_tracked_memory_or_explicit_print_dc(self):
+        self.run_case('page-dcs')
+
+    def test_page_ansi_bounds_font_codepages_dbcs_and_real_utf16_counts(self):
+        self.run_case('page-ansi')
+
+    def test_page_measurement_mutation_invalid_mapping_and_geometry_stay_native_once(self):
+        self.run_case('page-native-args')
+
+    def test_page_transparent_glyphs_restore_dc_clip_rect_and_entry_exit_error(self):
+        self.run_case('page-state-error')
+
+    def test_page_conversion_and_renderer_failures_restore_state_before_native_once(self):
+        self.run_case('page-fallbacks')
+
+    def test_page_nested_false_enable_refs_and_foreign_context_are_balanced(self):
+        self.run_case('page-nested')
+
+    def test_page_inner_session_cannot_use_outer_panel_background_or_themed_hooks(self):
+        self.run_case('page-no-background')
+
+    def test_page_outer_iat_delegates_nested_tpanel_to_unchanged_export_route(self):
+        self.run_case('page-nested-panel')
+
+    def test_page_native_fallback_and_reentry_cross_panel_export_only_once(self):
+        self.run_case('page-hybrid-fallback')
+
+    def test_page_iat_respects_first_occupant_and_independent_peer_lifetime(self):
+        self.run_case('page-occupants')
+
+    def test_page_native_fallback_uses_registry_original_and_stale_handler_is_safe(self):
+        self.run_case('page-original')
+
+    def test_page_owned_native_fallback_blocks_compositor_reentry_via_its_original(self):
+        self.run_case('page-original-reentry')
+
+    def test_page_shutdown_releases_only_its_iat_refs_and_can_restart(self):
+        self.run_case('page-shutdown')
+
+    def test_page_reentry_and_metadata_log_budget_do_not_change_execution(self):
+        self.run_case('page-reentry')
+
+    def test_page_iat_cannot_use_a_different_threads_session(self):
+        self.run_case('page-tls')
 
 
 if __name__ == '__main__':
