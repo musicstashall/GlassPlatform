@@ -4459,3 +4459,91 @@ Portable doubles проверяют аргументы, состояние и о
 строк, чёрный фон, выделение с фокусом/без, прокрутка и текст; остальные VCL
 списки и поля combo — контроль отсутствия изменений. При расхождении формат:
 **скриншот → «Логи при отображении» → «Логи с зондом при отображении элемента»**.
+
+## Тест 105: LogViewer-20 — иконки TButtonedEdit/TSearchBox остаются открытой задачей
+
+Пользователь подтвердил результат TListBox из теста 104. Отдельно сообщил,
+что у изображений TButtonedEdit/TSearchBox сохраняются белый фон и просвечивание.
+Это **не подтверждение работоспособности** прежней реализации иконок из теста 88.
+В этом шаге выполнен разбор; production-код ещё не менялся.
+
+Входящий `LogViewer-20.log`: 27 697 bytes, 111 строк, SHA-256
+`13e922deded43e42c870b9ecb68ee66b623e6b7e150eee054ca200dfdfa4855a`.
+Два фрагмента одного PID/TID: TButtonedEdit 10:59:42.268–10:59:43.286,
+TSearchBox 11:00:18.273–11:00:20.280. Исходный файл после сохранения выводов
+удалён из входящих вложений согласно правилам репозитория; копия не создавалась.
+
+### Подтверждено журналом и текущим кодом
+
+- В 10:59:42.277 Root сообщает `hwndDC=0x0081124A`,
+  **`cls="TEditButton.TGlyph"`**. В `TInputIcons.cpp::IconOwner` принимается
+  только `HasClass(window, L"TGlyph")`; квалифицированное имя будет отвергнуто
+  следующей проверкой, поскольку это не TButtonedEdit и не TSearchBox.
+  Это конкретная ошибка exact-class gate, а не повод для substring matching.
+  Прежнее предположение «ожидаемый raw class TGlyph» в тесте 88 неверно для
+  присланного приложения. В этом фрагменте нет DelphiInputIcon для TButtonedEdit;
+  отсутствие записи само по себе не доказывает отсутствие ImageList API.
+- У TSearchBox в 11:00:18.279 есть
+  `[DelphiInputIcon] hwnd=0x0028112A dc=0x10012164 rect=[108,3,124,19]
+  style=0x0 draw=1 commit=0x00000000`. Здесь production ImageList hook
+  **достигнут**, native draw и EndBufferedPaint вернули успех. Это не общий
+  сбой инжекции и не отсутствие маршрута TSearchBox.
+- Прямоугольник изображения — 16×16. Следующая запись ReleaseDC того же окна
+  и DC содержит clip `[104,2,128,21]` — область 24×19 вокруг кнопки.
+  Сам по себе clip не доказывает, что она залита, но эти области не равны.
+- Текущий TryDraw обнуляет **только bounds изображения**, сохраняет alpha
+  ImageList через `ILD_TRANSPARENT | ILD_PRESERVEALPHA` и принимает результат,
+  как только нашёл **один** alpha-байт >0. Это исключает лишь полностью
+  невидимый буфер; не доказывает ни A255 у тела иконки, ни правильную маску,
+  ни отсутствие белых RGB, ни корректность premultiplication.
+  Constant alpha=255 при последующей композиции не превращает частичную
+  per-pixel alpha в 255. В журнале нет RGB/alpha-статистики этого буфера.
+- В обоих фрагментах суммарно 16 TextResult с `hr=0`, `fallback=0`;
+  ошибок TextResult нет. Это результат текстового конвейера, не изображений.
+  Обычные 1×1 clip сразу после CreateCompatibleDC не доказывают, что фактический
+  bitmap последующей операции тоже 1×1. Оснований менять renderer текста или
+  общую DoubleBuffered по этому журналу нет.
+
+### Сопоставление с VCL, не runtime-доказательство версии приложения
+
+В опубликованном Delphi Berlin reference:
+
+- [`Vcl.ExtCtrls.pas`, 8407–8463](https://github.com/bergsteiger/realwork/blob/master/common/components/rtl/external/Embarcadero/DelphiBerlin/vcl/Vcl.ExtCtrls.pas#L8407-L8463):
+  TEditButton.TGlyph получает непосредственного parent=FEditControl. Paint
+  сначала выполняет `Canvas.FillRect(ClientRect)` цветом поля и только затем
+  `FButton.Images.Draw`. То есть белая подложка может быть **отдельной заливкой**,
+  не пикселями ресурса иконки.
+- [`Vcl.WinXCtrls.pas`, 2094–2117 и 2174–2244](https://github.com/bergsteiger/realwork/blob/master/common/components/rtl/external/Embarcadero/DelphiBerlin/vcl/Vcl.WinXCtrls.pas#L2094-L2244):
+  TSearchBox рисует кнопку в GetWindowDC, ограничивает clip областью FButtonRect,
+  отдельно заливает её цветом поля / hot / pressed, а затем рисует ImageList.
+  Custom styles имеют отдельную DrawElement-ветку. Текущий TInputIcons не
+  перехватывает FillRect: прозрачный ImageList поверх уже белой подложки не
+  обязан убрать эту подложку. Точные FillRect текущего приложения в логе
+  не записаны; источник каждого белого пикселя пока не установлен.
+
+Blob SHA reference: ExtCtrls `473040dd5a566a5ac6f98e530cc29f0b5656a43f`,
+WinXCtrls `fd5164437510ab2216b386b162c9f7bdbbc31ce6`. Это сопоставление исходников,
+не доказательство, что пользовательская сборка использует именно Berlin.
+
+### Следующий узкий шаг — на согласование
+
+1. Исправить exact gate для `TEditButton.TGlyph`, сохранив проверку
+   непосредственного TButtonedEdit-parent, Edit-mark, Full/backdrop и DC gates;
+   не искать `TGlyph` подстрокой и не переименовывать control kinds.
+2. В том же TInputIcons добавить ограниченную диагностику именно этих кнопок:
+   исходные FillRect (RGB/геометрия/clip, без подмены), различение API ImageList,
+   owner и raw class, размеры и alpha0/alpha255/alphaPartial/whiteNonzeroAlpha
+   перед commit. Нельзя по одному успешному commit утверждать, что образ
+   уже непрозрачен или фон удалён. После этого отделить исправление подложки
+   от исправления legacy image alpha/маски; не делать весь прямоугольник A255
+   и не применять общий white/black colour-key к деталям рисунка.
+3. Дополнить проверки настоящим квалифицированным классом, отдельной подложкой
+   и смешанными alpha-данными; сохранить native параметры, reentry/fallback,
+   clipping и shutdown. Разделить этот шаг и последующее изменение pixel policy
+   на отдельные коммиты. Принятые ListView/Toolbar/Panel/TListBox не переделывать.
+
+Контрольный запуск на текущем неизменённом production: contracts **96/96**,
+input icon doubles **6/6 × Release/Debug — PASS**. Старый icon double создаёт
+ровно один непрозрачный чёрный пиксель и использует raw `TGlyph`; он не проверял
+новый фактический класс, белую отдельную подложку или Windows pixels. Эти PASS
+не опровергают наблюдение пользователя. MSVC/Win32 GDI/DWM здесь не проверялись.
