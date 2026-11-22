@@ -2487,5 +2487,213 @@ class DelphiPipelineContract(unittest.TestCase):
             self.assertIn(marker, body)
         self.assertIn('RegisterPostPaintProvider({ Root_OnDelphiGridAfterBeginPaint })', root)
 
+    def test_restorator_images_gate_is_exact_class_exe_caller_instance_and_empty_tree(self):
+        code = read('GlassCore/src/Hooks/delphi/RestoratorImages.cpp')
+        host = code.split('Host HostOf(HWND hwnd) noexcept', 1)[1].split('void OnBegin(', 1)[0]
+        for cls in ('TResTreeView', 'TImgViewBox'):
+            self.assertIn('_wcsicmp(name, L"' + cls + '") == 0', host)
+        self.assertEqual(code.count('L"TResTreeView"'), 2)  # the gate and its diagnostic label
+        self.assertEqual(code.count('L"TImgViewBox"'), 2)
+        for forbidden in ('wcsstr', 'wcsncmp', 'find(', 'Restorator.exe', 'GetModuleFileNameW',
+                          'L"TScrollBox"', 'L"TTreeView"', 'L"TPanel"', 'GlassGetWindowKind'):
+            self.assertNotIn(forbidden, code)
+        begin = code.split('void OnBegin(HWND hwnd, HMODULE caller) noexcept', 1)[1].split('void OnEnd(', 1)[0]
+        for marker in ('g_shutdown.load', 'host == Host::None', 'exe && caller == exe',
+                       'GlassCore::Root::IsFullInjectionMode()',
+                       'GlassShared::GlassIsBackdropAllowedForHwnd(hwnd)',
+                       'GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)) == exe',
+                       'eligible && host == Host::Tree ? static_cast<unsigned>(TreeView_GetCount(hwnd)) : 0',
+                       'eligible && !items && Acquire(session.generation)',
+                       'g_sessions.push_back(session)',
+                       'if (session.leased) Release(session.generation); return;'):
+            self.assertIn(marker, begin)
+        # Every exact-class BeginPaint is recorded before the lease decides anything.
+        self.assertLess(begin.index('host == Host::None'), begin.index('Acquire(session.generation)'))
+        end = code.split('void OnEnd(HWND hwnd, HMODULE) noexcept', 1)[1].split('void Startup() noexcept', 1)[0]
+        for marker in ('g_sessions.rbegin()', 'if (it->hwnd != hwnd) continue;',
+                       'g_sessions.erase((it + 1).base())', 'if (session.leased) Release(session.generation);'):
+            self.assertIn(marker, end)
+        self.assertEqual(code.count('RegisterPaintProvider({OnBegin, OnEnd})'), 1)
+        for forbidden in ('RegisterGetDCProvider', 'RegisterCompatDCProvider', 'RegisterPostPaintProvider'):
+            self.assertNotIn(forbidden, code)
+
+    def test_restorator_images_lease_two_private_gdi32_export_detours_in_one_transaction(self):
+        code = read('GlassCore/src/Hooks/delphi/RestoratorImages.cpp')
+        for marker in ('GetModuleHandleW(L"gdi32.dll")', 'GetProcAddress(gdi32, "BitBlt")',
+                       'GetProcAddress(gdi32, "StretchBlt")', 'decltype(&::BitBlt) g_actualBitBlt{}',
+                       'decltype(&::StretchBlt) g_actualStretchBlt{}'):
+            self.assertIn(marker, code)
+        self.assertEqual(code.count('Detours::Write('), 2)
+        self.assertEqual(code.count('Detours::Attach('), 2)
+        self.assertEqual(code.count('Detours::Detach('), 2)
+        for forbidden in ('HookDispatcher', 'IATRegistry', 'EnableHook', 'DetourFindFunction',
+                          'gdi32full', 'ext-ms-win-gdi'):
+            self.assertNotIn(forbidden, code)
+        acquire = code.split('bool Acquire(unsigned& generation) noexcept', 1)[1].split('void Release(', 1)[0]
+        for marker in ('g_lock.lock_exclusive()', '!g_actualBitBlt || !g_actualStretchBlt',
+                       'if (!g_attached)', 'if (SUCCEEDED(hr)) g_attached = true;',
+                       'if (FAILED(hr)) return false;', '++g_refs; generation = g_generation;'):
+            self.assertIn(marker, acquire)
+        self.assertLess(acquire.index('if (FAILED(hr)) return false;'), acquire.index('++g_refs'))
+        self.assertLess(acquire.index('&PictureBitBlt'), acquire.index('&PictureStretchBlt'))
+        release = code.split('void Release(unsigned generation) noexcept', 1)[1].split('enum class Host', 1)[0]
+        for marker in ('g_lock.lock_exclusive()', 'generation != g_generation) return;',
+                       'if (g_refs && --g_refs == 0) Detach();'):
+            self.assertIn(marker, release)
+        detach = code.split('bool Detach() noexcept', 1)[1].split('bool Acquire(', 1)[0]
+        for marker in ('if (!g_attached) return true;', 'if (SUCCEEDED(hr)) g_attached = false;',
+                       '&PictureBitBlt', '&PictureStretchBlt'):
+            self.assertIn(marker, detach)
+        startup = code.split('void Startup() noexcept', 1)[1].split('void Shutdown() noexcept', 1)[0]
+        for marker in ('if (!g_shutdown.load(std::memory_order_acquire)) return;', 'if (!g_attached)',
+                       'g_shutdown.store(false, std::memory_order_release);'):
+            self.assertIn(marker, startup)
+        self.assertLess(startup.index('if (!g_attached)'), startup.index('GetProcAddress(gdi32, "BitBlt")'))
+        self.assertLess(startup.index('RegisterPaintProvider'), startup.index('g_shutdown.store(false'))
+        shutdown = code.split('void Shutdown() noexcept', 1)[1]
+        for marker in ('g_shutdown.store(true, std::memory_order_release);', 'g_refs = 0; ++g_generation;',
+                       'Detach();', 'g_sessions.clear();'):
+            self.assertIn(marker, shutdown)
+        self.assertLess(shutdown.index('g_shutdown.store(true'), shutdown.index('g_lock.lock_exclusive()'))
+
+    def test_restorator_image_blit_needs_srccopy_into_its_own_paint_dc_and_stays_one_native_call(self):
+        code = read('GlassCore/src/Hooks/delphi/RestoratorImages.cpp')
+        session = code.split('HWND SessionWindow(void* returnAddress) noexcept', 1)[1].split('template <typename Native>', 1)[0]
+        for marker in ('g_inside', 'g_sessions.empty()', '!g_sessions.back().leased', 'g_shutdown.load',
+                       'exe && DetourGetContainingModule(returnAddress) == exe ? g_sessions.back().hwnd : nullptr'):
+            self.assertIn(marker, session)
+        reject = code.split('LPCWSTR Reject(const Blit& blit, BITMAP& info) noexcept', 1)[1].split('bool CutSelectedCopy(', 1)[0]
+        for marker in ('if (blit.rop != SRCCOPY) return L"rop";', 'GlassCore::Root::IsFullInjectionMode()',
+                       '!IsWindow(blit.hwnd)', 'GlassShared::GlassIsBackdropAllowedForHwnd(blit.hwnd)',
+                       'WindowFromDC(blit.dc) != blit.hwnd',
+                       '!GlassCore::PaintDispatcher::IsTopWindowDrawingSession(blit.hwnd)',
+                       '!GlassCore::PaintDispatcher::IsPaintStackDcForHwnd(blit.hwnd, blit.dc)',
+                       '!blit.source || blit.source == blit.dc', 'return RejectBitmap(blit.source, info);'):
+            self.assertIn(marker, reject)
+        # A memory DC is never a destination here, tracked for the window or not:
+        # the owner test precedes the stack test and no ambient host is consulted.
+        self.assertLess(reject.index('WindowFromDC(blit.dc) != blit.hwnd'), reject.index('IsPaintStackDcForHwnd'))
+        for forbidden in ('OBJ_MEMDC', 'GetStackOwnerForDc', 'GetPaintSessionHostHwnd', 'IsCurrentPaintDcForHwnd'):
+            self.assertNotIn(forbidden, code)
+        draw = code.split('BOOL DrawPicture(const Blit& blit, bool extents, const Native& native)', 1)[1].split('template <typename Fn> Fn Actual(', 1)[0]
+        for marker in ('g_inside = true;', 'wil::scope_exit([]() noexcept { g_inside = false; })',
+                       'LPCWSTR reason = extents ? Reject(blit, info) : L"extents";',
+                       'GlassCore::GdiUtils::OpaqueBitmapSource picture{blit.source};',
+                       'if (!picture) reason = L"copy";',
+                       'else if (!CutSelectedCopy(blit.source, info)) reason = L"background";',
+                       'else { result = native(); error = GetLastError(); }',
+                       'if (reason) { result = native(); error = GetLastError(); }',
+                       'TakeDiag(1)', 'SetLastError(error);'):
+            self.assertIn(marker, draw)
+        self.assertEqual(draw.count('native()'), 2)
+        self.assertLess(draw.index('TakeDiag(1)'), draw.index('SetLastError(error);'))
+        # The return address is the detour's own caller: taken in each detour body, nowhere else.
+        self.assertEqual(code.count('_ReturnAddress()'), 2)
+        bit = code.split('BOOL WINAPI PictureBitBlt(HDC dc, int x, int y, int w, int h, HDC source, int sx, int sy, DWORD rop)\n', 1)[1].split('BOOL WINAPI PictureStretchBlt(HDC dc,', 1)[0]
+        stretch = code.split('HDC source, int sx, int sy, int sw, int sh, DWORD rop)\n        {', 1)[1].split('// Caller holds g_lock exclusively.', 1)[0]
+        for body, call, extents in (
+                (bit, 'return actual(dc, x, y, w, h, source, sx, sy, rop);', 'w && h, native);'),
+                (stretch, 'return actual(dc, x, y, w, h, source, sx, sy, sw, sh, rop);', 'w && h && sw && sh, native);')):
+            for marker in ('const DWORD entryError = GetLastError();', 'void* const returnAddress = _ReturnAddress();',
+                           'if (!actual) return FALSE;', 'SetLastError(entryError);', call,
+                           'const HWND hwnd = SessionWindow(returnAddress);', 'if (!hwnd) return native();', extents):
+                self.assertIn(marker, body)
+            self.assertLess(body.index('_ReturnAddress()'), body.index('const auto native = [&]'))
+        self.assertIn('Actual(g_actualBitBlt)', bit)
+        self.assertIn('Actual(g_actualStretchBlt)', stretch)
+        for forbidden in ('::BitBlt(', '::StretchBlt(', 'GdiAlphaBlend', 'AlphaBlend(', 'PatBlt(', 'BLACKNESS',
+                          'SetStretchBltMode', 'SetMapMode', 'SelectObject(', 'CreateDIBSection(', 'GetDIBits(',
+                          'DeleteObject(', 'CreateCompatibleDC('):
+            self.assertNotIn(forbidden, code)
+
+    def test_restorator_image_policy_is_a_module_local_matte_removal_over_the_shared_opaque_copy(self):
+        code = read('GlassCore/src/Hooks/delphi/RestoratorImages.cpp')
+        for marker in ('constexpr unsigned kBackground = 16;', 'constexpr unsigned kInk = 32;',
+                       'constexpr unsigned kSolidSide = 5;', 'constexpr std::uint64_t kMaxPixels = 1u << 22;'):
+            self.assertIn(marker, code)
+        policy = code.split('bool CutBlackBackground(DWORD* pixels, size_t width, size_t height)', 1)[1].split('struct Blit', 1)[0]
+        for marker in ('if (Level(pixels[y * width + x]) <= kBackground) ++dark;',
+                       'if (dark * 4 < outline * 3) return false;',
+                       'mark[i] = level > kInk ? Ink : level > kBackground ? Weak : BYTE{};',
+                       'if (m != Weak) continue;', 'if (rows == kSolidSide) m |= Corner;',
+                       'if (down < kSolidSide) m |= Solid;', 'if (m & (Solid | Open)) return;',
+                       'if (!(mark[i] & Open)) continue;',
+                       'pixels[i] = (mark[i] & Ink) ? (pixels[i] & 0x00FFFFFFu) | (Level(pixels[i]) << 24) : 0u;'):
+            self.assertIn(marker, policy)
+        # The outline test comes before any allocation or pixel write.
+        self.assertLess(policy.index('return false;'), policy.index('std::vector<BYTE> mark(count);'))
+        self.assertEqual(policy.count('pixels[i] ='), 1)
+        bitmap = code.split('LPCWSTR RejectBitmap(HDC source, BITMAP& info) noexcept', 1)[1].split('LPCWSTR Reject(const Blit& blit', 1)[0]
+        for marker in ('GetObjectW(bitmap, sizeof(dib), &dib)', 'size != sizeof(dib) && size != sizeof(BITMAP)',
+                       'info.bmWidth <= 0 || info.bmHeight <= 0', '> kMaxPixels', 'return L"size";',
+                       'size == sizeof(dib) && info.bmBitsPixel == 32 && info.bmBits && GdiFlush()',
+                       'if (bytes[i * 4 + 3]) return L"alpha";'):
+            self.assertIn(marker, bitmap)
+        self.assertLess(bitmap.index('return L"size";'), bitmap.index('GdiFlush()'))
+        copy = code.split('bool CutSelectedCopy(HDC source, const BITMAP& original) noexcept', 1)[1].split('HWND SessionWindow(', 1)[0]
+        for marker in ('GetObjectW(copy, sizeof(dib), &dib) != sizeof(dib)', 'info.bmBitsPixel != 32',
+                       'info.bmWidth != original.bmWidth || info.bmHeight != original.bmHeight',
+                       'try', 'catch (...) { return false; }'):
+            self.assertIn(marker, copy)
+        for forbidden in ('ApplyBlackKeyAlpha', 'ApplyIconBackgroundAlpha', 'SpriteEffect', 'Promise32BPP',
+                          'HasAlphaChannel(', 'PrepareBitmapForAlphaBlend', 'QueryIconBackgroundColorRemoval',
+                          'Gdip', 'TreeViewControl::', 'DelphiPanel::', 'ToolbarControl::', 'ListViewControl::'):
+            self.assertNotIn(forbidden, code)
+        # The policy lives only here: shared helpers and the tree hooks do not learn about it.
+        for path in ('GlassCore/src/Subsystems/OpaqueBitmapSource.cpp', 'GlassCore/src/Subsystems/GdiHookUtils.cpp',
+                     'GlassShared/src/BitmapUtils.cpp', 'GlassCore/src/Hooks/TreeViewHooks.cpp',
+                     'GlassCore/src/Hooks/delphi/TPanelDraw.cpp', 'GlassCore/src/Hooks/RootGdiHooks.cpp'):
+            for forbidden in ('RestoratorImages', 'CutBlackBackground', 'TImgViewBox'):
+                self.assertNotIn(forbidden, read(path))
+        self.assertNotIn('OHK_BITBLT', read('GlassCore/src/Hooks/TreeViewHooks.cpp'))
+
+    def test_restorator_images_are_registered_and_bracketed_by_the_paint_dispatcher_lifetime(self):
+        for project in ('GlassCore/GlassCore.vcxproj', 'GlassCore/GlassCore.vcxproj.filters'):
+            text = read(project)
+            self.assertEqual(text.count(r'src\Hooks\delphi\RestoratorImages.cpp'), 1)
+            self.assertEqual(text.count(r'Include\Hooks\delphi\RestoratorImages.h'), 1)
+            ET.fromstring(text.encode('utf-8'))
+        engine = read('GlassCore/src/Core/Engine.cpp')
+        self.assertIn('#include <Hooks/delphi/RestoratorImages.h>', engine)
+        self.assertEqual(engine.count('GlassCore::RestoratorImages::Startup();'), 1)
+        self.assertEqual(engine.count('GlassCore::RestoratorImages::Shutdown();'), 1)
+        self.assertLess(engine.index('GlassCore::RestoratorImages::Startup();'),
+                        engine.index('GlassCore::PaintDispatcher::Startup();'))
+        self.assertLess(engine.index('GlassCore::RestoratorImages::Shutdown();'),
+                        engine.index('GlassCore::PaintDispatcher::Shutdown();'))
+        header = read('GlassCore/Include/Hooks/delphi/RestoratorImages.h')
+        self.assertIn('namespace GlassCore::RestoratorImages', header)
+        self.assertEqual(re.findall(r'\bvoid (\w+)\(\) noexcept;', header), ['Startup', 'Shutdown'])
+
+    def test_restorator_image_suite_compiles_complete_production_over_the_strict_bitmap_doubles(self):
+        test = read('WndCompat/tests/restorator_images_rendering_tests.cpp')
+        for item in ('GlassShared/src/BitmapUtils.cpp', 'GlassCore/src/Subsystems/OpaqueBitmapSource.cpp',
+                     'GlassCore/src/Hooks/delphi/RestoratorImages.cpp'):
+            self.assertEqual(test.count('#include "../../' + item + '"'), 1)
+        # Only the Detours wrapper is renamed for the production unit; nothing else is redefined around it.
+        unit = test.split('#include "../../GlassCore/src/Subsystems/OpaqueBitmapSource.cpp"\n', 1)[1].split('#include <cstdlib>', 1)[0]
+        self.assertEqual(unit, '#define Detours RestoratorDetours\n'
+                               '#include "../../GlassCore/src/Hooks/delphi/RestoratorImages.cpp"\n'
+                               '#undef Detours\n')
+        shim = read('WndCompat/tests/restorator_images_test_shim.h')
+        self.assertIn('#include "vcl_images_test_shim.h"', shim)
+        for marker in ('namespace GlassCore::Hooks::RestoratorDetours', 'if (failCommit) return E_FAIL;',
+                       'assert(!installed);', 'assert(installed == op.hook);'):
+            self.assertIn(marker, shim)
+        # The expected bytes are stated by the tests; the algorithm is not copied into them.
+        for text in (test, shim):
+            for forbidden in ('bool CutBlackBackground', 'kSolidSide', 'kBackground', 'kInk', 'Ri::Level',
+                              'Ri::CutBlackBackground'):
+                self.assertNotIn(forbidden, text)
+        runner = read('WndCompat/tests/restorator_images_rendering_test.py')
+        for marker in ("'Release'", "'Debug'", "'-D_DEBUG'", "'-DGLASS_DELPHI_DRAW_PROBE'", "'-Werror'",
+                       "'-std=c++20'"):
+            self.assertIn(marker, runner)
+        for forbidden in ('read_text', 'source.split(', 'code.split(', '-Wno-error'):
+            self.assertNotIn(forbidden, runner)
+        cases = re.findall(r'\{"([a-z-]+)",\w+\}', test)
+        self.assertEqual(len(cases), 12)
+        self.assertEqual(sorted(cases), sorted(re.findall(r"self\.run_case\('([a-z-]+)'\)", runner)))
+
 if __name__ == "__main__":
     unittest.main()

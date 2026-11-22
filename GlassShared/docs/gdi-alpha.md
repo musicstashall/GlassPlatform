@@ -34,4 +34,14 @@ stock/OEM не преобразуются.
 [Delphi-VCL, тест 101](../../GlassCore/docs/Delphi-VCL.md#тест-101-непрозрачность-изображений-ttoolbar-и-вложенного-tpanel--native-bwm-пути)
 и [тест 102](../../GlassCore/docs/Delphi-VCL.md#тест-102-tlistview--native-maskblt-паритет-restorator).
 
+Ещё один потребитель — `GlassCore::RestoratorImages`: стартовые
+картинки-подсказки Restorator в `TResTreeView` и `TImgViewBox`, SRCCOPY
+`BitBlt`/`StretchBlt` из EXE. Helper не менялся и по-прежнему отдаёт A=255 с
+неизменным RGB. Чёрную подложку удаляет сам модуль — только в полученной копии
+и только если контур картинки чёрный; иначе копия отбрасывается и native читает
+bitmap приложения. Копия с A=255 как есть там не выводится, поэтому источником
+может быть и клиентский буфер. Это локальная политика одного модуля, не общий
+black-key:
+[Delphi-VCL, тест 119](../../GlassCore/docs/Delphi-VCL.md#тест-119-restorator--стартовые-картинки-trestreeview-и-timgviewbox-без-чёрной-подложки).
+
 При добавлении новых хуков ищи **существующий** паттерн в ближайшем `*Hooks.cpp` или в GlassShared, а не новый стек на GDI+.
