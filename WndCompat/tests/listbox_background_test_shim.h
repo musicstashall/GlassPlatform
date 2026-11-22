@@ -8,7 +8,7 @@
 #define LONG_MIN (-2147483647L - 1)
 
 using WCHAR = wchar_t;
-inline constexpr UINT ODT_LISTBOX = 2, ODT_COMBOBOX = 3, ODA_DRAWENTIRE = 1;
+inline constexpr UINT ODT_LISTBOX = 2, ODT_COMBOBOX = 3, ODA_DRAWENTIRE = 1, ODA_SELECT = 2, ODA_FOCUS = 4;
 inline constexpr UINT ODS_SELECTED = 1, ODS_FOCUS = 0x10, ODS_DISABLED = 4, ODS_COMBOBOXEDIT = 0x1000;
 inline constexpr UINT TA_UPDATECP = 1, ETO_PDY = 0x2000;
 inline constexpr UINT BS_NULL = 1, BS_PATTERN = 3, OBJ_PEN = 1, PS_SOLID = 0;
@@ -49,6 +49,19 @@ namespace ListBackgroundTest
     inline bool reentered = false;
     inline std::unordered_map<HDC, RECT> clips;
     inline std::unordered_map<HDC, std::vector<RECT>> savedClips;
+    inline HDC blackDc{};
+    inline RECT blackRect{};
+    inline DWORD nativeError = 0x51, fillEntryError = 0;
+    inline int clipChanges = 0;
+    // Optional deterministic surface: replay only the supplied native rectangle,
+    // brush alpha and actual clip, including holes. Not a Windows rasterizer.
+    struct Surface
+    {
+        int width{}, height{};
+        std::vector<DWORD> pixels;
+        std::vector<RECT> holes;
+    };
+    inline std::unordered_map<HDC, Surface> surfaces;
 }
 inline BOOL EqualRect(const RECT* a, const RECT* b)
 { return a && b && a->left == b->left && a->top == b->top && a->right == b->right && a->bottom == b->bottom; }
@@ -76,6 +89,7 @@ inline BOOL ListRestoreDC(HDC dc, int saved)
 }
 inline int IntersectClipRect(HDC dc, int l, int t, int r, int b)
 {
+    ++ListBackgroundTest::clipChanges;
     if (ListBackgroundTest::failClip) return ERROR;
     const RECT input{l,t,r,b}, clip = ListClip(dc);
     return IntersectRect(&ListBackgroundTest::clips[dc], &clip, &input) ? SIMPLEREGION : NULLREGION;
@@ -85,17 +99,43 @@ inline UINT GetTextAlign(HDC) { return ListBackgroundTest::align; }
 inline COLORREF GetPixel(HDC, int, int) { return CLR_INVALID; }
 inline COLORREF ListGetSysColor(int index)
 { return index == COLOR_HIGHLIGHT ? ListBackgroundTest::highlight : PanelGetSysColor(index); }
+inline void ListPaintPixels(HDC dc, const RECT* r, COLORREF color, BYTE alpha)
+{
+    using namespace ListBackgroundTest;
+    const auto it=surfaces.find(dc);
+    if (it==surfaces.end() || !r) return;
+    auto& s=it->second;
+    const RECT clip=ListClip(dc);
+    for (int y=0;y<s.height;++y)
+        for (int x=0;x<s.width;++x)
+        {
+            const POINT p{x,y};
+            if (!PtInRect(r,p) || !PtInRect(&clip,p)) continue;
+            bool excluded=false;
+            for (const RECT& hole:s.holes) if (PtInRect(&hole,p)) excluded=true;
+            if (!excluded) s.pixels[y*s.width+x]=(static_cast<DWORD>(alpha)<<24)|(color&0xFFFFFFu);
+        }
+}
 inline int ListFillRect(HDC dc, const RECT* r, HBRUSH brush)
 {
     using namespace ListBackgroundTest;
+    fillEntryError=GetLastError();
     ++fills; lastDc=dc; lastRect = r ? *r : RECT{}; lastBrush=brush;
     lastColor=brush ? brush->lbColor : CLR_INVALID;
     const auto it=alphas.find(brush); fillAlpha=it == alphas.end() ? -1 : int(it->second);
+    if (!failFill) ListPaintPixels(dc,r,lastColor,fillAlpha<0 ? 0 : BYTE(fillAlpha));
     if (duringFill && !reentered) { reentered=true; duringFill(); reentered=false; }
+    SetLastError(nativeError);
     return failFill ? 0 : 7;
 }
-inline BOOL ListPatBlt(HDC, int, int, int, int, DWORD rop)
-{ assert(rop == BLACKNESS); ++ListBackgroundTest::blackens; return !ListBackgroundTest::failBlack; }
+inline BOOL ListPatBlt(HDC dc, int x, int y, int w, int h, DWORD rop)
+{
+    using namespace ListBackgroundTest;
+    assert(rop == BLACKNESS); ++blackens; blackDc=dc; blackRect={x,y,x+w,y+h};
+    if (!failBlack) ListPaintPixels(dc,&blackRect,0,0);
+    SetLastError(0xdead);
+    return !failBlack;
+}
 inline BOOL ListExtTextOutW(HDC, int, int, UINT options, const RECT*, LPCWSTR text, UINT count, const INT* dx)
 {
     using namespace ListBackgroundTest;
@@ -135,7 +175,7 @@ namespace Shared::WinApiUtils
     inline HBRUSH ListCreateAlphaBrush(COLORREF color, BYTE alpha)
     {
         using namespace ListBackgroundTest;
-        ++brushCalls; lastAlpha=alpha;
+        ++brushCalls; lastAlpha=alpha; SetLastError(0xbeef);
         if (failBrush) return nullptr;
         auto* brush = new LOGBRUSH{BS_PATTERN,color}; alphas[brush]=alpha; ++liveBrushes; return brush;
     }
@@ -145,7 +185,7 @@ namespace wil
     struct ListBrushDeleter
     {
         void operator()(HBRUSH brush) const
-        { assert(ListBackgroundTest::alphas.erase(brush)==1); --ListBackgroundTest::liveBrushes; delete brush; }
+        { assert(ListBackgroundTest::alphas.erase(brush)==1); --ListBackgroundTest::liveBrushes; delete brush; SetLastError(0xfee); }
     };
     using unique_hbrush = std::unique_ptr<LOGBRUSH,ListBrushDeleter>;
 }

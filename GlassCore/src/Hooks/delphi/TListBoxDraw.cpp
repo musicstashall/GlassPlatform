@@ -72,8 +72,8 @@ namespace GlassCore::DelphiListBox
             // Keep the supplied full-row brush colour in this draw only.
             // A black text DC alone may be Root's COLOR_WINDOW mapping.
             COLORREF rowBackground{CLR_INVALID};
-            // ODT_COMBOBOX field/item session (TColorBox, TDriveComboBox,
-            // TFilterComboBox). The bounds cover only the supplied DC area.
+            // ODT_COMBOBOX fields (TColorBox/TDriveComboBox/TFilterComboBox),
+            // or FillRect-only TColorBox popup rows, on the supplied DC area.
             bool combo{};
             bool field{};
             RECT bounds{};
@@ -216,10 +216,13 @@ namespace GlassCore::DelphiListBox
             auto lock = g_lock.lock_shared();
             return g_dispatcher.GetOrg<index, T>();
         }
-        const Session* Current(HDC dc) noexcept
+        const Session* Current(HDC dc, bool comboRowFill = false) noexcept
         {
             if (g_shutdown.load(std::memory_order_acquire) || g_inHook || g_stack.empty()) return nullptr;
             const auto& s = g_stack.back();
+            // A TColorBox popup row owns only FillRect. Text/image hooks may
+            // still be armed by an outer session; never apply the field path.
+            if (s.combo && !s.field && !comboRowFill) return nullptr;
             return dc && dc == s.dc ? &s : nullptr;
         }
         bool SystemBackground(COLORREF c) noexcept
@@ -731,9 +734,10 @@ namespace GlassCore::DelphiListBox
 
         int WINAPI MyFill(HDC dc, const RECT* r, HBRUSH brush)
         {
+            const DWORD entryError = GetLastError();
             auto orig = Original<FillSlot, decltype(&::FillRect)>();
             if (!orig) return FillRect(dc, r, brush);
-            const auto* current = Current(dc);
+            const auto* current = Current(dc, true);
             if (!current || !r || !brush) return orig(dc, r, brush);
             const Session s = *current;
             RECT clipped{};
@@ -743,6 +747,44 @@ namespace GlassCore::DelphiListBox
             LOGBRUSH lb{};
             if (GetObjectW(brush, sizeof(lb), &lb) != sizeof(lb) || lb.lbStyle != BS_SOLID)
                 return orig(dc, r, brush);
+            if (s.combo && !s.field)
+            {
+                // Popup row, not the closed field: only an exact, unselected
+                // full-row system fill is background. All inset samples keep
+                // their RGB/A255, including white, black and system colours.
+                g_inHook = true;
+                auto guard = wil::scope_exit([]() noexcept { g_inHook = false; });
+                if (!s.selected && EqualRect(r, &s.item) && SystemBackground(lb.lbColor))
+                {
+                    SetLastError(entryError);
+                    const int result = orig(dc, r, brush);
+                    const DWORD error = GetLastError();
+                    // Native failure must not become a successful clear. Keep
+                    // its result/error even if the optional clear itself fails.
+                    const long long width = static_cast<long long>(r->right) - r->left;
+                    const long long height = static_cast<long long>(r->bottom) - r->top;
+                    const BOOL cleared = result && width > 0 && width <= INT_MAX
+                        && height > 0 && height <= INT_MAX && PatBlt(dc, r->left, r->top,
+                            static_cast<int>(width), static_cast<int>(height), BLACKNESS);
+#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
+                    LogComboFill(s, dc, *r, lb, cleared ? L"row-system-background" : L"row-native-or-clear-failed");
+#endif
+                    (void)cleared;
+                    SetLastError(error);
+                    return result;
+                }
+                wil::unique_hbrush opaque{
+                    Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(lb.lbColor, 255) };
+                SetLastError(entryError);
+                const int result = opaque ? orig(dc, r, opaque.get()) : orig(dc, r, brush);
+                const DWORD error = GetLastError();
+#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
+                LogComboFill(s, dc, *r, lb, opaque ? L"row-opaque-brush" : L"row-original");
+#endif
+                opaque.reset();
+                SetLastError(error);
+                return result;
+            }
             if (s.combo)
             {
                 // Owner-draw combo field. A system-coloured fill covering the
@@ -929,7 +971,15 @@ namespace GlassCore::DelphiListBox
             }
         }
     }
-    bool IsInsideDraw() noexcept { return !g_stack.empty(); }
+    bool IsInsideDraw() noexcept
+    {
+        // Existing callers suppress their text renderer for the full owner-draw
+        // pipeline. A new FillRect-only row must not claim that text ownership;
+        // keep any pre-existing outer list/field scope visible to those callers.
+        for (const auto& s : g_stack)
+            if (!s.combo || s.field) return true;
+        return false;
+    }
     bool BeginDraw(HWND parent, const DRAWITEMSTRUCT* dis) noexcept
     {
         if (g_shutdown.load(std::memory_order_acquire) || !GlassCore::Root::IsFullInjectionMode()
@@ -943,10 +993,13 @@ namespace GlassCore::DelphiListBox
         const bool combo = dis->CtlType == ODT_COMBOBOX;
         const bool color = list && _wcsicmp(cls, L"TColorListBox") == 0;
         const bool check = list && _wcsicmp(cls, L"TCheckListBox") == 0;
-        // Only the field owner-draw is intercepted. Dropdown rows keep the
-        // existing ComboLBox path and VCL's own text/selection drawing.
-        const bool comboField = combo && (dis->itemID == static_cast<UINT>(-1)
-            || (dis->itemState & ODS_COMBOBOXEDIT) != 0);
+        // itemID=-1 also occurs on popup focus-only notifications; only the
+        // explicit state bit proves a closed-field draw. TColorBox rows have
+        // their own FillRect-only scope; other combos keep their previous path.
+        const bool comboField = combo && (dis->itemState & ODS_COMBOBOXEDIT) != 0;
+        const bool comboRow = combo && !comboField && _wcsicmp(cls, L"TColorBox") == 0
+            && dis->itemID != static_cast<UINT>(-1)
+            && (dis->itemAction & (ODA_DRAWENTIRE | ODA_SELECT)) != 0;
         if (list)
         {
             if (!color && !check && _wcsicmp(cls, L"TListBox") != 0
@@ -959,14 +1012,15 @@ namespace GlassCore::DelphiListBox
         {
             // TComboBox is deliberately excluded: its field text is already
             // painted correctly through the child Edit and themed field path.
-            if (!comboField) return false;
+            if (!comboField && !comboRow) return false;
             if (_wcsicmp(cls, L"TColorBox") != 0 && _wcsicmp(cls, L"TDriveComboBox") != 0
                 && _wcsicmp(cls, L"TFilterComboBox") != 0) return false;
             if (GlassShared::GlassGetWindowKind(dis->hwndItem) != GlassShared::GlassControlKind::ComboBox)
                 return false;
         }
-        if (g_stack.empty())
+        if (!comboRow && !IsInsideDraw())
         {
+            // A FillRect-only outer row has no icon context to inherit.
             // Значки строк: Root\Control\ListBox; значок поля — ...\ComboBox.
             // Ключа может не быть — тогда фон значка определяется по пикселям.
             if (list)
@@ -1001,6 +1055,8 @@ namespace GlassCore::DelphiListBox
             g_dispatcher.moduleAddress = mod;
             for (size_t i = 0; i < Count; ++i)
             {
+                // Leave the existing ComboLBox text/icon/selection path alone.
+                if (comboRow && i != FillSlot) continue;
                 // Combo field: FillRect plus the text APIs that VCL uses for
                 // the field (ExtTextOutW strips the opaque background, DrawTextW
                 // renders glyphs). Rectangle stays with VCL.
