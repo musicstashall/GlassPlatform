@@ -290,7 +290,7 @@ class DelphiPipelineContract(unittest.TestCase):
                           'ColorTreatAsTransparent', 'ExtTextOut', 'reinterpret_cast<PVOID>(BitBlt)',
                           'BufferedPaintSetAlpha'):
             self.assertNotIn(forbidden, code)
-        self.assertNotRegex(code, r'\.rgb(?:Reserved|Red|Green|Blue)\s*=(?!=)')
+        self.assertNotRegex(code, r'\.rgb(?:Red|Green|Blue)\s*=(?!=)')
         self.assertIn('g_entryPointModule', code)
         self.assertNotIn('RegisterModulePrewarmHandler', code)  # no IAT writes under loader lock
 
@@ -300,7 +300,7 @@ class DelphiPipelineContract(unittest.TestCase):
                          'ILD_MASK | ILD_ROP | ILD_DPISCALE', 'ILD_TRANSPARENT | ILD_PRESERVEALPHA',
                          'BPBF_TOPDOWNDIB', 'AC_SRC_OVER, 0, 255, AC_SRC_ALPHA',
                          'BufferedPaintClear(buffer, nullptr)', 'EndBufferedPaint(buffer, drawn)',
-                         'GetBufferedPaintBits(buffer, &pixels, &stride)', 'if (!hasAlpha) return std::nullopt',
+                         'GetBufferedPaintBits(buffer, &pixels, &stride)', 'if (!hasAlpha)',
                          'if (buffer) EndBufferedPaint(buffer, FALSE)', 'auto work = *params',
                          'work.hdcDst = memory; work.fStyle = flags', 'params->cbSize != sizeof(*params)',
                          'GetProcAddress(module, "ImageList_GetIconSize")', 'g_dispatcher.DisableAllHooks()'):
@@ -314,6 +314,67 @@ class DelphiPipelineContract(unittest.TestCase):
         runner = read('WndCompat/tests/input_icons_test.py')
         self.assertIn("for debug in (False, True)", runner)
         self.assertIn('GlassCore/src/Hooks/delphi/TInputIcons.cpp', runner)
+
+    def test_vcl_input_rgb_only_mask_branch_is_bounded_and_excludes_searchbox_and_existing_alpha(self):
+        code = read('GlassCore/src/Hooks/delphi/TInputIcons.cpp')
+        draw = code.split('template<typename Paint> std::optional<BOOL> TryDraw(', 1)[1].split('BOOL WINAPI Draw(HIMAGELIST images', 1)[0]
+        for marker in ('width > 1024 || height > 1024', 'ILD_MASK | ILD_ROP | ILD_DPISCALE',
+                       'if (!flushed) return std::nullopt', 'row < height && !hasAlpha', 'col < width',
+                       'pixels[static_cast<size_t>(row) * stride + col].rgbReserved',
+                       'if (!hasAlpha)', '!HasClass(owner, L"TButtonedEdit")',
+                       '!RestoreLegacyMaskAlpha(dc, bounds, pixels, stride, width, height, style, paint)',
+                       'legacyMask = true', 'legacyMask=%d'):
+            self.assertIn(marker, draw)
+        self.assertLess(draw.index('if (!hasAlpha)'), draw.index('!HasClass(owner, L"TButtonedEdit")'))
+        self.assertLess(draw.index('!HasClass(owner, L"TButtonedEdit")'), draw.index('!RestoreLegacyMaskAlpha('))
+        self.assertLess(draw.index('!RestoreLegacyMaskAlpha('), draw.index('EndBufferedPaint(buffer, drawn)'))
+        self.assertEqual(code.count('!RestoreLegacyMaskAlpha('), 1)
+        self.assertNotRegex(draw, r'\.rgb(?:Reserved|Red|Green|Blue)\s*=(?!=)')
+        # Actual caller lambdas, not a second hand-built ImageList/bitmap path.
+        for marker in ('return orig(images, index, memory, x, y, flags)',
+                       'return orig(images, index, memory, x, y, width, height, background, foreground, flags)',
+                       'auto work = *params', 'work.hdcDst = memory; work.fStyle = flags', 'return orig(&work)'):
+            self.assertIn(marker, code)
+
+    def test_vcl_input_mask_coverage_comes_from_the_same_native_draw_on_two_mattes(self):
+        code = read('GlassCore/src/Hooks/delphi/TInputIcons.cpp')
+        helper = code.split('template<typename Paint> bool RestoreLegacyMaskAlpha(', 1)[1].split('template<typename Paint> std::optional<BOOL> TryDraw(', 1)[0]
+        for marker in ('BeginBufferedPaint(dc, &bounds, BPBF_TOPDOWNDIB, &params, &memory)',
+                       'if (!matte || !memory)', 'EndBufferedPaint(matte, FALSE)',
+                       'wil::scope_exit([matte]', 'BufferedPaintClear(matte, nullptr)',
+                       'GetBufferedPaintBits(matte, &white, &whiteStride)',
+                       '!white || whiteStride < width || !GdiFlush()',
+                       'white[static_cast<size_t>(row) * whiteStride + col] = RGBQUAD{255, 255, 255, 0}',
+                       '!paint(memory, style | ILD_TRANSPARENT | ILD_PRESERVEALPHA) || !GdiFlush()',
+                       'RGBQUAD& dark = black[static_cast<size_t>(row) * blackStride + col]',
+                       'const RGBQUAD& light = white[static_cast<size_t>(row) * whiteStride + col]',
+                       'const int delta = light.rgbBlue - dark.rgbBlue', 'delta < 0',
+                       'light.rgbGreen - dark.rgbGreen != delta', 'light.rgbRed - dark.rgbRed != delta',
+                       'const int alpha = 255 - delta', 'dark.rgbBlue > alpha',
+                       'dark.rgbReserved = static_cast<BYTE>(alpha)'):
+            self.assertIn(marker, helper)
+        self.assertEqual(helper.count('!GdiFlush()'), 2)
+        self.assertLess(helper.index('!GdiFlush()'), helper.index('RGBQUAD{255, 255, 255, 0}'))
+        self.assertLess(helper.index('!paint('), helper.index('const int delta'))
+        self.assertLess(helper.index('const int delta'), helper.index('dark.rgbReserved ='))
+        body = re.sub(r'//[^\n]*|/\*.*?\*/', '', helper, flags=re.S)
+        for forbidden in ('EndBufferedPaint(matte, TRUE)', 'BufferedPaintSetAlpha', 'BitBlt(', 'MaskBlt(',
+                          'ImageList_GetImageInfo', 'GetDIBits', 'ColorTreatAsTransparent',
+                          'ILD_MASK', 'CreateSolidBrush', 'SelectClipRgn', 'IntersectClipRect'):
+            self.assertNotIn(forbidden, body)
+        self.assertNotRegex(helper, r'dark\.rgb(?:Blue|Green|Red)\s*=(?!=)')
+        self.assertNotRegex(helper, r'\.rgb(?:Blue|Green|Red)\s*==')  # no RGB colour-key test
+
+    def test_vcl_input_rgb_mask_behavioral_fixture_uses_independent_native_masks_and_failure_cases(self):
+        runner = read('WndCompat/tests/input_icons_test.py')
+        for marker in ('struct MaskIcon', 'std::vector<bool> solid', 'void NativeMask(',
+                       '!icon.solid.at(source)', 'dst.rgbReserved=0',
+                       'Mock::whitePadding=4', 'Mock::poisonPadding=true',
+                       'test_rgb_only_native_mask_retains_opaque_black_white_colors_and_transparent_holes',
+                       'test_rgb_only_mask_branch_preserves_index_overlay_crop_state_colors_and_caller_params',
+                       'test_rgb_only_branch_leaves_searchbox_alpha_icons_unsupported_styles_and_reentry_alone',
+                       'test_rgb_only_secondary_buffer_failures_discard_and_repeat_the_original_native_call'):
+            self.assertIn(marker, runner)
 
     def test_vcl_input_button_background_uses_proven_direct_child_bounds_and_client_dc(self):
         code = read('GlassCore/src/Hooks/delphi/TInputIcons.cpp')
@@ -395,7 +456,7 @@ class DelphiPipelineContract(unittest.TestCase):
             self.assertNotIn(forbidden, probe)
         self.assertNotRegex(probe, r'\.rgb(?:Reserved|Red|Green|Blue)\s*=(?!=)')
         draw = code.split('template<typename Paint> std::optional<BOOL> TryDraw(', 1)[1].split('BOOL WINAPI Draw(HIMAGELIST images', 1)[0]
-        for after in ('if (!flushed) return std::nullopt', 'if (!hasAlpha) return std::nullopt',
+        for after in ('if (!flushed) return std::nullopt', 'if (!hasAlpha)',
                       'const HRESULT committed = EndBufferedPaint(buffer, drawn)'):
             self.assertLess(draw.index('ProbePixels(api,'), draw.index(after))
         for api in ('ImageList_Draw', 'ImageList_DrawEx', 'ImageList_DrawIndirect'):

@@ -4843,3 +4843,108 @@ Windows framebuffer). Pixel probe остаётся read-only; бюджеты 24 
 PE/IAT concurrency или визуальную приёмку. На Windows остаётся проверить
 первое отображение → hide → show обеих кнопок и частичный repaint; сами RGB-only
 картинки до следующего implementation-коммита ещё идут через native fallback.
+
+## Тест 109: TButtonedEdit — mask-aware восстановление alpha у RGB-only ImageList
+
+Это **второй согласованный implementation-коммит** после фонового §108.
+Он добавляет отдельную `RestoreLegacyMaskAlpha` только для exact TButtonedEdit
+(самого owner или его прямого glyph) и только когда успешный первый native draw
+после GetBufferedPaintBits/GdiFlush дал **A=0 во всём изображении без padding**.
+Прежние Full/Edit/backdrop/proven-DC/reentry/shutdown ограничения и bounds
+1…1024 × 1…1024 сохранены. `ILD_MASK/ILD_ROP/ILD_DPISCALE` остаются native.
+**Любая ненулевая alpha в первом проходе сохраняет прежний путь без перезаписи
+байтов. TSearchBox не получает новую ветку, в том числе при синтетическом A0.**
+
+### Покрытие от native mask, а не RGB color-key
+
+Первый проход уже нарисован native ImageList на очищенном чёрном DIB. Если
+alpha отсутствует, тот же сохранённый `paint` вызывается ещё раз в отдельный
+BPBF_TOPDOWNDIB с контрольным белым RGB. Это повтор **той же нативной операции**,
+а не подмена иконки, новый индекс, чтение bitmap strip или самостоятельная
+интерпретация overlay/disabled-state. Штатный renderer сам применяет маску.
+Документированный `ILD_TRANSPARENT` использует mask независимо от фонового
+цвета; см. [ImageList_DrawEx, fStyle](https://github.com/MicrosoftDocs/sdk-api/blob/docs/sdk-api-src/content/commctrl/nf-commctrl-imagelist_drawex.md).
+Как и раньше, к исходному fStyle добавляются только
+`ILD_TRANSPARENT | ILD_PRESERVEALPHA`; запрос не заменяется на `ILD_MASK`.
+
+Оба прохода получают тот же native index, x/y, исходные cx/cy и цвета.
+Indirect снова копируется из caller: xBitmap/yBitmap, overlay bits, fState,
+Frame, crEffect, dwRop и остальные поля сохранены; меняются только временный
+hdcDst и те же два флага. Caller-структура не модифицируется. Контрольный DIB
+**никогда не коммитится**; финальный transfer остаётся существующим
+EndBufferedPaint/AC_SRC_ALPHA для первого буфера.
+
+Для каждого RGB-канала допустимого source-over/mask результата:
+
+```
+black = premultiplied foreground
+white = black + (255 - coverage)
+delta = white.B - black.B = white.G - black.G = white.R - black.R
+alpha = 255 - delta
+```
+
+Проверяется неотрицательность и одинаковость delta всех трёх каналов, затем
+premultiplied bounds. RGB первого прохода остаётся **нетронутым**, записывается
+только вычисленная alpha. Поэтому:
+
+- чёрная деталь: black=0, white=0 → **A255**, не прозрачный black-key;
+- белая деталь: black=255, white=255 → **A255**, не прозрачный white-key;
+- прозрачная дырка native mask: black=0, white=255 → **A0**;
+- частичное native покрытие/Frame сохраняет вычисленную частичную alpha,
+  а не принудительные 255. В полностью прозрачном значке не появляется фон;
+  полностью покрытый прямоугольник разрешён только если его так реально
+  нарисовал native renderer, а не по наличию ненулевого RGB.
+
+Первый и контрольный DIB могут иметь **разные stride**: каждый индексируется
+своим stride, обход ограничен width/height и не использует/не переписывает padding.
+Перед CPU-подготовкой контрольного RGB и перед его чтением выполняется GdiFlush.
+Одновременно живут не больше двух paint buffers. Ошибка второго buffer/DC/clear/
+bits/stride/flush/native draw либо несовместимый destination-dependent/XOR
+результат отменяет ветку: оба временных буфера discarded, затем original
+повторяется на **исходном HDC с исходными параметрами**. В частности, не
+угадывается alpha при несовпавших delta, включая возможное неоднозначное
+округление сложных составных эффектов. Это намеренно ограниченный путь, не
+универсальная эмуляция всех ROP/ImageList-реализаций.
+
+При успешном commit возвращается LastError **первого** native draw, а не
+контрольного прохода/cleanup/логирования. В обычном Debug `stage=result` добавлено
+`legacyMask=1` для восстановленной маски, `0` для прежнего alpha-пути.
+Opt-in `stage=pixels` по-прежнему read-only и показывает исходные native байты
+**до** восстановления: сочетание A0 в нём и последующего `legacyMask=1` ожидаемо.
+Текст/RenderText, DoubleBuffered, фоновый renderer §108, SearchBox и принятые
+ListBox/ListView/ToolBar/Panel/прочие controls не переделывались.
+
+### Проверки и оставшаяся Windows-приёмка
+
+- Новые mask/preserved-params тесты дали **RED во всех трёх сборках** до
+  production-изменения: прежний код отбрасывал RGB-only буфер.
+- Полный production `TInputIcons.cpp`: **22/22 × Release / Debug / Debug+probe —
+  PASS**, также ASan/UBSan. Все прежние 18 сценариев, включая фон §108, сохранены.
+- Native double теперь действительно применяет **отдельную бинарную маску**
+  к текущему RGB destination и оставляет alpha нулевой, а не возвращает заранее
+  ожидаемую alpha. Проверены чёрные/белые/цветные детали и дырки с теми же RGB,
+  полностью чёрный/белый/пустой/покрытый значок, оба glyph-алиаса и owner.
+- Исполнены все три API, overlay из другого index, crop и нестандартные поля
+  Indirect, ILS_ALPHA/Frame=128 и ILS_SATURATE; caller-params сравниваются по всем
+  полям без зависимости от struct padding. Padding DIB отравлен ненулевой alpha;
+  stride первого и второго проходов различается и остаётся нетронутым.
+- 11 вариантов secondary failure/несовместимого покрытия проверяют discard,
+  исходные native параметры/fStyle на fallback и отсутствие частичного commit.
+  Контрольный draw отдаёт LastError=124, первый — 123: наружу сохраняется **123**.
+  SearchBox A0, прежние mixed-alpha байты, неподдержанные стили и reentry проверены.
+- Source contracts **103/103 — PASS**. Read-only контракт pixel probe не ослаблен;
+  запись alpha разрешена только новому helper, не общему alpha-пути.
+- Девять полных production-мутантов отвергнуты **поведенчески в Release и
+  Debug+probe**: rectangle-A255, black-key, white-key, чужой stride, включение
+  SearchBox, вмешательство в nonzero-alpha путь, потеря overlay, commit после
+  secondary failure и потеря native LastError. Mutation scratch удалён.
+- Контрольные runners вновь PASS: ListBox background **13**, VCL images **14**,
+  ListView images **13**, Panel **12**, ButtonGroups **9**, CoolBar **9**, BomeMemo **14**.
+
+Это переносимые Win32/IAT doubles и source contracts, **не** настоящие MSVC,
+Windows comctl32/uxtheme/GDI/DWM или проверка PE/IAT concurrency. Визуальный
+результат ещё не принят пользователем. После обоих implementation-коммитов
+на Windows проверить первое отображение TButtonedEdit, обе кнопки с разными
+картинками/состояниями, hide → show и частичный repaint; контроль — неизменённый
+SearchBox. Новый захват исходного LogViewer-21 для реализации не требовался;
+сохранённые выводы §107 и image-60 остаются основанием этого изменения.

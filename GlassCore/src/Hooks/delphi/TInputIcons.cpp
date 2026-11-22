@@ -263,7 +263,7 @@ namespace GlassCore::DelphiInputIcons
             const bool available = drawn && SUCCEEDED(bitsResult) && pixels && stride >= width && flushed;
             unsigned a0 = 0, a255 = 0, apart = 0, white = 0, nonPremul = 0;
             // Read the complete image, excluding row padding. No alpha/RGB writes
-            // or policy decisions; the existing any-alpha fallback stays below.
+            // or policy decisions; alpha/legacy-mask handling stays below.
             if (available)
                 for (int row = 0; row < height; ++row)
                     for (int col = 0; col < width; ++col)
@@ -286,6 +286,53 @@ namespace GlassCore::DelphiInputIcons
                 static_cast<unsigned>(bitsResult), flushed, available ? 1 : 0, stride, a0, a255, apart, white, nonPremul);
         }
 #endif
+
+        template<typename Paint> bool RestoreLegacyMaskAlpha(HDC dc, const RECT& bounds,
+            RGBQUAD* black, int blackStride, int width, int height, UINT style, Paint& paint)
+        {
+            // The first native RGB-only pass was drawn on transparent black.
+            // Replay that SAME operation on white: the native mask (including
+            // holes, overlay and state) determines which destination pixels survive.
+            // This is coverage recovery, never a black/white RGB colour key and
+            // never a request for ILD_MASK that would bypass native image states.
+            BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+            BP_PAINTPARAMS params{sizeof(params), 0, nullptr, &blend};
+            HDC memory{};
+            HPAINTBUFFER matte = BeginBufferedPaint(dc, &bounds, BPBF_TOPDOWNDIB, &params, &memory);
+            if (!matte || !memory)
+            {
+                if (matte) EndBufferedPaint(matte, FALSE);
+                return false;
+            }
+            auto discardMatte = wil::scope_exit([matte] { EndBufferedPaint(matte, FALSE); });
+            RGBQUAD* white{};
+            int whiteStride{};
+            if (FAILED(BufferedPaintClear(matte, nullptr))
+                || FAILED(GetBufferedPaintBits(matte, &white, &whiteStride))
+                || !white || whiteStride < width || !GdiFlush()) return false;
+            for (int row = 0; row < height; ++row)
+                for (int col = 0; col < width; ++col)
+                    white[static_cast<size_t>(row) * whiteStride + col] = RGBQUAD{255, 255, 255, 0};
+            if (!paint(memory, style | ILD_TRANSPARENT | ILD_PRESERVEALPHA) || !GdiFlush()) return false;
+            for (int row = 0; row < height; ++row)
+                for (int col = 0; col < width; ++col)
+                {
+                    RGBQUAD& dark = black[static_cast<size_t>(row) * blackStride + col];
+                    const RGBQUAD& light = white[static_cast<size_t>(row) * whiteStride + col];
+                    const int delta = light.rgbBlue - dark.rgbBlue;
+                    // A valid source-over RGB/mask operation has the same
+                    // nonnegative white-minus-black contribution in all channels.
+                    // Unsupported XOR/colour-dependent results stay native.
+                    if (delta < 0 || light.rgbGreen - dark.rgbGreen != delta
+                        || light.rgbRed - dark.rgbRed != delta) return false;
+                    const int alpha = 255 - delta;
+                    if (dark.rgbBlue > alpha || dark.rgbGreen > alpha || dark.rgbRed > alpha) return false;
+                    // RGB over black is already premultiplied. Both opaque black
+                    // and opaque white survive; untouched transparent holes get A0.
+                    dark.rgbReserved = static_cast<BYTE>(alpha);
+                }
+            return true;
+        }
 
         template<typename Paint> std::optional<BOOL> TryDraw(
             HIMAGELIST images, HDC dc, int x, int y, int width, int height, UINT style, void* nativeApi,
@@ -336,11 +383,12 @@ namespace GlassCore::DelphiInputIcons
                 if (SUCCEEDED(bitsResult) && pixels && stride >= width) flushed = GdiFlush();
             }
 #if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-            // Log before commit AND before the unchanged unavailable/no-alpha
-            // fallback, so absence of pixels is not confused with an empty icon.
+            // Log the original native bytes before commit or legacy-mask recovery,
+            // so missing pixels are not confused with an empty/RGB-only icon.
             ProbePixels(api, owner, target, images, index, dc, bounds, style, drawn,
                 bitsResult, flushed, pixels, stride, width, height);
 #endif
+            [[maybe_unused]] bool legacyMask = false;
             if (drawn)
             {
                 if (!flushed) return std::nullopt;
@@ -352,9 +400,14 @@ namespace GlassCore::DelphiInputIcons
                             hasAlpha = true;
                             break;
                         }
-                // A legacy renderer may ignore PRESERVEALPHA. Do not report a
-                // successful invisible icon; discard it and use the native call.
-                if (!hasAlpha) return std::nullopt;
+                // Keep all existing nonzero-alpha bytes and SearchBox behaviour.
+                // Only a bounded TButtonedEdit RGB-only result gets mask recovery.
+                if (!hasAlpha)
+                {
+                    if (!HasClass(owner, L"TButtonedEdit")
+                        || !RestoreLegacyMaskAlpha(dc, bounds, pixels, stride, width, height, style, paint)) return std::nullopt;
+                    legacyMask = true;
+                }
             }
             const HRESULT committed = EndBufferedPaint(buffer, drawn);
             buffer = nullptr;
@@ -368,8 +421,8 @@ namespace GlassCore::DelphiInputIcons
                 --budget;
                 wchar_t cls[64]{};
                 GetClassNameW(target, cls, _countof(cls));
-                DebugLog(DBG_NORMAL, L"[GlassCore][DelphiInputIcon] stage=result api=%s hwnd=0x%p target=0x%p class=\"%s\" dc=0x%p images=0x%p index=%d rect=[%ld,%ld,%ld,%ld] style=0x%X draw=%d commit=0x%08lX",
-                    api, owner, target, cls, dc, images, index, bounds.left, bounds.top, bounds.right, bounds.bottom, style, drawn, committed);
+                DebugLog(DBG_NORMAL, L"[GlassCore][DelphiInputIcon] stage=result api=%s hwnd=0x%p target=0x%p class=\"%s\" dc=0x%p images=0x%p index=%d rect=[%ld,%ld,%ld,%ld] style=0x%X draw=%d commit=0x%08lX legacyMask=%d",
+                    api, owner, target, cls, dc, images, index, bounds.left, bounds.top, bounds.right, bounds.bottom, style, drawn, committed, legacyMask ? 1 : 0);
             }
 #endif
             SetLastError(error);
