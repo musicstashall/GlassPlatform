@@ -4313,3 +4313,62 @@ repaint/resize; контрольные SysListView32/WinForms и приняты�
 `opaqueCopy=1` подтверждает подготовку источника, **не** финальный Windows PASS;
 отсутствие строки не доказывает отсутствия исходного API. Формат отчёта:
 **скриншот → «Логи при отображении» → «Логи с зондом при отображении элемента»**.
+
+## Тест 103: Win32 — экспорт owner-draw мостов VCL
+
+Пользователь сообщил об отсутствии Glass у `TListBox`, `TCheckListBox`,
+`TColorListBox`, `TColorBox`, `TBitBtn`, `TDriveComboBox`, `TDirectoryListBox`
+и `TFileListBox` в Debug|32. Все восемь точных классов уже распознаются
+классификатором; их owner-draw обработчики присутствуют в `RootSubclass.cpp`.
+Найдена общая статическая ошибка не в renderer, а на границе peer DLL.
+
+`WndCompat` ищет Begin/End через `GetProcAddress` по неукрашенным именам.
+В `Exports.cpp` функции определены как `extern "C" __declspec(dllexport)`
+с `WINAPI`, но шесть имён не были перечислены в `GlassCore.def`:
+
+- `GlassCore_BeginDelphiBitBtnDraw` / `GlassCore_EndDelphiBitBtnDraw`;
+- `GlassCore_BeginDelphiListBoxDraw` / `GlassCore_EndDelphiListBoxDraw`;
+- `GlassCore_BeginDelphiListBoxProbe` / `GlassCore_EndDelphiListBoxProbe`.
+
+На x86 одного `dllexport` недостаточно: stdcall-имена имеют вид `_Name@8`
+для Begin и `_Name@0` для End. Поиск другого имени возвращает nullptr;
+WndCompat не открывает Glass-сессию и оставляет нативную отрисовку. Та же
+ошибка делает недоступным owner-draw мост необязательного зонда. Это относится
+**к обоим Win32-конфигам**, не только Debug; x64 использует иной ABI имён.
+Существующая пара Panel уже была в `.def` и не меняется.
+
+Исправление production — **ровно шесть записей** в `GlassCore.def`.
+Сигнатуры, ABI `GlassCoreProviders`, WM_DRAWITEM/DefSubclassProc, scope guards,
+классификация, mode/backdrop/DC/parent gates, renderer, ModuleHandler и
+IATRegistry не менялись. Сессия combo по-прежнему ограничена полем;
+TListBox без owner-draw также имеет отдельный нативный путь. Поэтому устранение
+этого разрыва не объявляется доказательством исправления каждого видимого
+симптома, общей DoubleBuffered или отдельного Debug|Win32 AV.
+
+### Проверки и границы результата
+
+- До правки `.def` новый контракт упал **ровно на шести отсутствующих именах**;
+  проверки сигнатур и подключения `.def` в четырёх конфигурациях уже проходили.
+- После правки **92/92 source contracts — PASS**. Проверяются фактические
+  literal `GlassCore_*` lookup-имена во всех production `.cpp`/`.h` WndCompat,
+  единственная именованная запись без NONAME, обязательные шесть мостов,
+  их C/BOOL-or-void/WINAPI/noexcept сигнатуры и `GlassCore.def` в Link для
+  Debug/Release × Win32/x64 без дополнительного условия на Link/сам файл.
+- In-memory отрицательные проверки: удаление, декорирование, NONAME и дубликат
+  каждого из шести имён; новый незаявленный lookup; отсутствие, подмена или
+  условное подключение `.def` в каждом конфиге; cdecl вместо WINAPI у каждой
+  функции. Все **47 мутаций отвергнуты**; шесть корректных named internal aliases
+  приняты. Файлы для мутаций не создавались.
+- Контрольные VCL images **14/14 × Release/Debug**, ListView images
+  **13/13 × Release/Debug**, panels **12/12 × baseline/Debug**, Bome memo
+  **14/14**, button groups **9/9 × Release/Debug**, TCoolBar **9/9**,
+  input icons **6/6** — PASS. Это portable doubles, не проверка PE export table.
+
+**MSVC Win32/x64, реальный GetProcAddress и визуальный результат здесь
+не проверены.** На Windows после пересборки пользователь проверяет шесть
+неукрашенных имён в таблице экспортов фактически используемой GlassCore.dll,
+затем перечисленные контролы; в Debug при owner-draw ожидаются production
+`[GlassCore][DelphiListDraw]` / `[GlassCore][DelphiBitBtn] DrawItem begin`.
+Probe остаётся opt-in (`_DEBUG` + `GLASS_DELPHI_DRAW_PROBE`); наличие экспорта
+само по себе не включает зонд. Если симптомы сохранятся, формат runtime-отчёта:
+**скриншот → «Логи при отображении» → «Логи с зондом при отображении элемента»**.

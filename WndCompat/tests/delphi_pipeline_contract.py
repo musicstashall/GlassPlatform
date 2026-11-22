@@ -3,6 +3,7 @@ from pathlib import Path
 import os
 import re
 import unittest
+import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -307,6 +308,65 @@ class DelphiPipelineContract(unittest.TestCase):
         runner = read('WndCompat/tests/input_icons_test.py')
         self.assertIn("for debug in (False, True)", runner)
         self.assertIn('GlassCore/src/Hooks/delphi/TInputIcons.cpp', runner)
+
+    def test_runtime_core_lookups_have_unique_undecorated_named_exports(self):
+        # Check actual callers, not just declarations: WINAPI dllexport alone
+        # leaves _Name@N on x86. NONAME and duplicate entries are not a fix.
+        requested = {}
+        for path in sorted((ROOT / 'WndCompat').rglob('*')):
+            if path.suffix not in ('.cpp', '.h') or 'tests' in path.relative_to(ROOT).parts:
+                continue
+            source = read(path.relative_to(ROOT))
+            for name in re.findall(r'\bGetProcAddress\s*\([^;]*?"(GlassCore_\w+)"', source):
+                requested.setdefault(name, []).append(str(path.relative_to(ROOT)))
+        required = {'GlassCore_' + phase + 'Delphi' + bridge
+                    for phase in ('Begin', 'End')
+                    for bridge in ('BitBtnDraw', 'ListBoxDraw', 'ListBoxProbe')}
+        self.assertTrue(required <= requested.keys(), required - requested.keys())
+        export_sections = re.split(r'(?m)^[ \t]*EXPORTS[ \t]*$', read('GlassCore/GlassCore.def'))
+        self.assertEqual(len(export_sections), 2)
+        entries = {}
+        for line in export_sections[1].splitlines():
+            declaration = line.split(';', 1)[0].strip()
+            match = re.fullmatch(r'(GlassCore_\w+)([ \t=].*)?', declaration)
+            if match:
+                entries.setdefault(match[1], []).append((match[2] or '').split())
+        for name, callers in sorted(requested.items()):
+            with self.subTest(export=name, callers=callers):
+                matches = entries.get(name, [])
+                self.assertEqual(len(matches), 1, 'Expected one named .def export for ' + name)
+                self.assertNotIn('NONAME', matches[0])
+
+    def test_delphi_owner_draw_export_signatures_match_runtime_callers(self):
+        exports = read('GlassCore/src/Core/Exports.cpp')
+        for bridge in ('BitBtnDraw', 'ListBoxDraw', 'ListBoxProbe'):
+            with self.subTest(bridge=bridge):
+                prefix = r'extern\s+"C"\s+__declspec\(dllexport\)\s+'
+                self.assertRegex(exports, prefix + r'BOOL\s+WINAPI\s+GlassCore_BeginDelphi' + bridge +
+                                 r'\s*\(\s*HWND\s+\w+\s*,\s*const\s+DRAWITEMSTRUCT\s*\*\s*\w+\s*\)\s*noexcept\s*\{')
+                self.assertRegex(exports, prefix + r'void\s+WINAPI\s+GlassCore_EndDelphi' + bridge +
+                                 r'\s*\(\s*\)\s*noexcept\s*\{')
+
+    def test_core_export_definition_is_used_in_all_four_build_configurations(self):
+        project = ET.fromstring(read('GlassCore/GlassCore.vcxproj'))
+        ns = {'msb': 'http://schemas.microsoft.com/developer/msbuild/2003'}
+        configurations = {'Debug|Win32', 'Release|Win32', 'Debug|x64', 'Release|x64'}
+        declared = {node.get('Include')
+                    for node in project.findall('msb:ItemGroup/msb:ProjectConfiguration', ns)}
+        self.assertEqual(declared, configurations)
+        for config in sorted(configurations):
+            with self.subTest(configuration=config):
+                condition = "'$(Configuration)|$(Platform)'=='" + config + "'"
+                groups = [node for node in project.findall('msb:ItemDefinitionGroup', ns)
+                          if node.get('Condition') == condition]
+                self.assertEqual(len(groups), 1)
+                links = groups[0].findall('msb:Link', ns)
+                self.assertEqual(len(links), 1)
+                self.assertFalse(links[0].get('Condition'))
+                definitions = links[0].findall('msb:ModuleDefinitionFile', ns)
+                self.assertEqual(len(definitions), 1)
+                self.assertFalse(definitions[0].get('Condition'))
+                self.assertEqual((definitions[0].text or '').strip(), 'GlassCore.def')
 
     def test_vcl_list_owner_draw_probe_is_passthrough_and_scoped(self):
         code = read('GlassCore/src/Hooks/delphi/TListBoxProbe.cpp')
