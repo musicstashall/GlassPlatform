@@ -32,6 +32,7 @@ class PanelRenderingTest(unittest.TestCase):
             'Tracker/WinEventHandler.h', 'Core/Intercept/HookDispatcher.h',
             'Module/ModuleHandler.h', 'Subsystems/PaintDispatcher.h',
             'Subsystems/RootSwcaGradient.h', 'Subsystems/RenderText.h',
+            'Subsystems/OpaqueBitmapSource.h',
         ):
             path = stubs / header
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -70,7 +71,7 @@ class PanelRenderingTest(unittest.TestCase):
     def test_custom_alpha_100_system_black_and_nonaccumulating_repaints(self):
         self.run_case('alpha-colors')
 
-    def test_tpanel_only_exempts_window_while_category_group_and_frames_keep_legacy_defaults(self):
+    def test_tpanel_category_panels_and_frames_blacken_both_current_system_defaults(self):
         self.run_case('panel-default-scope')
 
     def test_native_brush_apis_and_preserved_chrome(self):

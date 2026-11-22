@@ -155,18 +155,18 @@ namespace
                 CHECK(p[3] == 100 && PanelTest::blendMode.SourceConstantAlpha == 255);
             }
         };
-        // Only exact TPanel changes the previous WINDOW/BTNFACE rule. A group
-        // client's solid fill is tested here, not its child's gradient header.
+        // BWM defaults now match for exact TPanel, category panels and frames.
+        // This is the client fill, not a child's gradient header or an image.
         for (LPCWSTR name : {L"TPanel", L"TCategoryPanelGroup", L"TCategoryPanel", L"TFrame"})
         {
             check(name, GetSysColor(COLOR_WINDOW), false);
-            check(name, GetSysColor(COLOR_BTNFACE), _wcsicmp(name, L"TPanel") == 0);
+            check(name, GetSysColor(COLOR_BTNFACE), false);
             check(name, RGB(72,144,216), true);
             check(name, RGB(0,0,0), true);
         }
         PanelTest::windowColor = RGB(20,21,22); PanelTest::faceColor = RGB(40,41,42);
         check(L"TPanel", GetSysColor(COLOR_WINDOW), false);
-        check(L"TPanel", GetSysColor(COLOR_BTNFACE), true);
+        check(L"TPanel", GetSysColor(COLOR_BTNFACE), false);
         check(L"TPanel", RGB(255,255,255), true);
         check(L"TFrame", GetSysColor(COLOR_BTNFACE), false);
         // When the two current system RGBs coincide, WINDOW still wins.

@@ -254,6 +254,7 @@
     <ClCompile Include="src\Hooks\RootWindowHooks.cpp" />
     <ClCompile Include="src\Hooks\RootGdiHooks.cpp" />
     <ClCompile Include="src\Subsystems\GdiHookUtils.cpp" />
+    <ClCompile Include="src\Subsystems\OpaqueBitmapSource.cpp" />
     <ClCompile Include="src\Hooks\UiRibbonHooks.cpp" />
     <ClCompile Include="src\Subsystems\Settings.cpp" />
     <ClCompile Include="src\Subsystems\Tooltip.cpp" />
@@ -286,6 +287,7 @@
     <ClInclude Include="Include\Hooks\RootGdiHooks.h" />
     <ClInclude Include="Include\Hooks\TaskbarHooks.h" />
     <ClInclude Include="Include\Subsystems\GdiHookUtils.h" />
+    <ClInclude Include="Include\Subsystems\OpaqueBitmapSource.h" />
     <ClInclude Include="Include\Hooks\UiRibbonHooks.h" />
     <ClInclude Include="Include\Hooks\Static.h" />
     <ClInclude Include="Include\Hooks\TreeView.h" />

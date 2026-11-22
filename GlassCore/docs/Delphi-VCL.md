@@ -4083,3 +4083,128 @@ x86) показывает три записи `user32.dll`: первая — 5 �
 `GetSysColor` остаётся внутри сессии. StretchBlt, GDI+ и финальный
 DoubleBuffered-блит приложения не трогались. Визуальный PASS ждёт перезагрузки
 x86 `GlassCore.dll`.
+
+## Тест 101: непрозрачность изображений TToolBar и вложенного TPanel — native BWM-пути
+
+Шаг выполнен **поверх `e6f3614`**: пользовательский обход повторных import
+дескрипторов, переименование BomeMemo и selection из тестов 99–100 сохранены.
+`ModuleHandler`, IATRegistry/HookHelper, BomeMemo, общий text renderer и общий
+DoubleBuffered/final-blit pipeline этим шагом не меняются.
+
+### Что подтверждено в доноре
+
+`BWM.txt` (SHA-256 `bf679ce9c8a29e0d6b4ac8e3dce73cad4f52e454de0961a28e9840133f1e547f`):
+
+| Ветка | Включение | Рисование |
+|-------|-----------|-----------|
+| `RestoratorPaintHandler.cpp:17039–17043`, ctrl, caller EXE, exact TToolBar | `comctl32!MaskBlt` + GDI+ lifetime | `RestoratorWinHooks.cpp:18474–18502`: временный bitmap, **настоящий MaskBlt**, исходные маска, mask offsets и ROP |
+| `17087–17095`, window, caller EXE, exact TPanel с непосредственным parent TPanel | EXE `StretchBlt` + GDI+ lifetime | `18411–18472`: временный bitmap, **настоящий StretchBlt**, исходные координаты, signed extents и ROP |
+
+Соседняя ветка `17076–17081` для `TImgViewBox/TScrollBox` существует, но **не
+расширяет scope этого шага**. Она не добавлена автоматически ко всем frames,
+панелям и scroll-hosts. В supplied snapshot отсутствует `Common/Utils.hpp`
+с определением `GdipCreateBitmapAlpha`; её внутренний default-алгоритм не
+считается проверенным. В Glass непрозрачная подготовка задана явно на GDI+DIB,
+без GDI+ и без blanket black-key.
+
+### Общая подготовка и сохранение native-семантики
+
+Добавлен `GdiUtils::OpaqueBitmapSource` (`Subsystems/OpaqueBitmapSource.h/.cpp`),
+общий для двух путей, **не вызов одного контрольного модуля из другого**:
+
+- Только цветной bitmap memory-DC, planes=1, bpp=8…32; OEM/stock и 1/4-bpp
+  маски не преобразуются. Размеры и переполнение stride/byte count проверяются.
+- `GdiFlush`, временная собственная 1×1 заглушка в source DC, затем top-down
+  32bpp DIB и `GetDIBits`. Исходный bitmap на время чтения **снят с DC**, как
+  требует API. Нулевой/частичный read отвергается; требуется всё число строк.
+- Во временной копии **RGB без изменений, A=255**, включая чёрные пиксели и
+  исходные zero/partial alpha. Это политика opaque-источника native ROP, не
+  интерпретация любого black как фона и не проверка meaningful alpha по strip.
+- Копия временно выбирается в **тот же source DC**: сохраняются его palette,
+  mapping/origins, brush/font и цвета. После draw выбирается оригинальный
+  bitmap, затем RAII удаляет копию. Bitmap приложения не изменяется и не удаляется.
+- Исходные dest/source HDC, координаты, маска и ROP передаются дальше. Поэтому
+  меняется подготовка bitmap, а не операция рисования или её clipping/coverage.
+  При ошибке подготовки исходник восстановлен до единственного native draw.
+  Native FALSE не превращается в повторный draw; результат и LastError сохранены.
+
+`Promise32BPP` и другие его потребители не менялись: там сохраняется alpha
+32bpp источников. Новая утилита не равна `ApplyBlackKeyAlpha` и не вызывает
+`HasAlphaChannel`, `SpriteEffect`, AlphaBlend или глобальную нормализацию DC.
+
+### TToolBar — control path
+
+`ToolbarHooks.cpp` теперь различает VCL и прежний common-controls renderer.
+Exact TToolBar с HINSTANCE=EXE, Full/backdrop и caller EXE (также известные
+comctl32 callers) приобретает `MaskBlt` на **обоих известных** new/legacy
+comctl32, без повторного ref, если это один модуль. Не EXE!MaskBlt и не только
+`caller == g_comctl32New`: именно этот пробел закрывает EXE paint-путь VCL.
+
+Для MaskBlt нужен собственный ref текущей TLS-сессии, её HWND, top paint owner
+и доказанный destination DC из PaintDispatcher; memory-DC дополнительно должен
+принадлежать этому HWND. Чужой DC/поток, mode/backdrop, reentry, иной HINSTANCE
+или неготовая вложенная VCL-сессия дают native. Exact-класс создаёт barrier и
+при неудачном приобретении: внешний process-wide IAT не разрешает перейти в
+старый generic alpha/black-key renderer. End освобождает **снимок полученных
+module refs**, в том числе после вложенного false-возврата EnableHook(true).
+
+VCL MaskBlt использует opaque-копию + оригинал с исходной маской. Его BitBlt
+и 1bpp-проходы остаются native, не подавляются флагом прежнего alpha-direct.
+Обычный `ToolbarWindow32` и его принятые alpha/chroma-настройки не переделаны;
+VCL-путь не требует настройки удаления цвета и не вырезает чёрные детали.
+
+### TPanel — window/panel path и фон
+
+В существующий EXE panel dispatcher добавлен отдельный `StretchSlot` (бит 8).
+Он приобретается **только при WM_PAINT точного TPanel внутри TPanel** с
+HINSTANCE=EXE. Это не новый общий GetDC/compatible-DC или print/erase image hook.
+Остальные панели/frames сохраняют свои background/text пути без этого ref.
+
+В теле — проверка собственного acquired-бита, exact-классов, Full/backdrop,
+DC текущего top paint и MM_TEXT. Масштабирование, зеркальные signed extents,
+source offsets и исходный ROP сохраняются native StretchBlt-ом. При 1bpp-маске,
+self-copy, нулевых extents, чужом DC или ошибке подготовки — исходный draw.
+
+**Консервативное отличие от донора:** bitmap размера всего client панели
+не нормализуется, даже при partial copy: это может быть VCL framebuffer.
+Настоящее изображение того же размера здесь тоже неоднозначно и остаётся
+native. Ограничение сознательное; это **не решение общей DoubleBuffered**.
+Не выключается DoubleBuffered приложения, не задаётся A100/A255 всему окну,
+не подавляется поздний SetAlpha255 и не меняется финальная композиция формы.
+
+По согласованной поправке к фону exact TPanel теперь, как прочие панели,
+чернит и текущий `COLOR_WINDOW`, и **`COLOR_BTNFACE`**. Остальной RGB, включая
+custom black, остаётся tint **A=100**. Bevel/chrome и небольшие заливки не
+включены в client-background policy. Изображение не получает A=100 фона.
+
+### Проверки и следующая Windows-проверка
+
+- Contracts **83/83** — PASS. Enum/dependency-порядок, узкие routes, native
+  аргументы, refs/barriers, один helper, registration в projects/filters закреплены.
+- Новый `vcl_images_rendering_test.py`: **14/14 × Release/Debug** — PASS;
+  те же **14/14 × Release/Debug под ASan+UBSan** — PASS. Компилируются полные
+  production BitmapUtils/OpaqueBitmapSource/ToolbarHooks/TPanelDraw, не копии
+  этих алгоритмов. Проверяются bytes, black/garbage alpha, DIB/DDB, masks/ROP,
+  offsets/mirroring, чужие DC/TLS, missing/failed registration, nested ref,
+  native FALSE/LastError, setup failures, reentry и освобождение bitmap.
+- Panels **12/12 × Release/Debug**, Bome memo **14/14** (runtime Release/Debug
+  и compile-negative WIL), button groups **9/9 × Release/Debug**,
+  TCoolBar **9/9**, input icons **6/6** — PASS.
+- Doubles не проверяют реальные PE/IAT trampolines, driver conversion palettes,
+  alpha от native GDI ROP в Windows и DWM. **MSVC Win32/x64 и визуальный PASS
+  здесь недоступны**, остаются обязательными на целевой системе.
+
+Диагностика ограничена по частоте: `[Toolbar] Begin ... vclIcons ... maskModules`,
+`[TToolBar] MaskBlt ... mask ... rop ... opaqueCopy ... result`,
+`[DelphiPanel] Begin ... acquired` и `image api=StretchBlt ... bpp ... srcRect ...`.
+`opaqueCopy=1` означает подготовку источника, **не** финальный Windows/DWM PASS.
+`image-native ... reason=client-sized-source` объясняет сознательный пропуск
+клиентского буфера; отсутствие строки image само по себе не доказывает,
+что ни один API не перехвачен.
+
+После пересборки/перезагрузки x86 GlassCore проверить TToolBar и панель с
+изображением в Restorator: чёрные детали, прозрачность **по маске**, цветной
+рисунок без просвечивания, crop/scale, resize и повторный repaint. Формат
+runtime-отчёта прежний: **скриншот → «Логи при отображении» → «Логи с зондом
+при отображении элемента»**. Для неоднозначного client-sized источника отдельно
+понадобится определить image-vs-framebuffer, а не снимать защиту вслепую.

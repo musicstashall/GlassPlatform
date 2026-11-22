@@ -12,4 +12,24 @@
 - **`Shared::BitmapUtils`** — [`GlassShared/include/BitmapUtils.h`](GlassShared/include/BitmapUtils.h), [`GlassShared/src/BitmapUtils.cpp`](GlassShared/src/BitmapUtils.cpp): `Promise32BPP` (конвертация в 32bpp DIBSECTION с сохранением альфы), `HasAlphaChannel`, `SpriteEffect` / правка пикселей на месте для масок и «вырезания» фона.
 - **Вывод с учётом альфа-канала битмапа** — типично `GdiAlphaBlend` (`msimg32.lib`, `BLENDFUNCTION`), см. поясняющие комментарии в [`GlassCore/src/Hooks/ListViewHooks.cpp`](GlassCore/src/Hooks/ListViewHooks.cpp) (там же зафиксировано отличие от BWM: после конвертации нельзя полагаться на обычный `BitBlt` для премультиплированной альфы).
 
+### Непрозрачный источник для native ROP — не color-key
+
+`GlassCore::GdiUtils::OpaqueBitmapSource`
+([header](../../GlassCore/Include/Subsystems/OpaqueBitmapSource.h),
+[source](../../GlassCore/src/Subsystems/OpaqueBitmapSource.cpp)) используется
+только проверенными VCL-путями `TToolBar!MaskBlt` (импорт в comctl32) и EXE
+`StretchBlt` изображения `TPanel` внутри `TPanel`. Он временно снимает bitmap
+с memory-DC для корректного `GetDIBits`, создаёт top-down 32bpp копию, требует
+полный read и задаёт ей A=255 **без изменения RGB**, включая чёрные пиксели.
+Затем исходный native API получает прежние source DC, mask/ROP/геометрию;
+при выходе исходный bitmap выбран обратно, копия удалена. 1/4-bpp маски и
+stock/OEM не преобразуются.
+
+Это **отдельная политика opaque-копии**, а не замена preserve-alpha
+`Promise32BPP`, не `ApplyBlackKeyAlpha` и не AlphaBlend произвольного strip.
+Границы class/module/session/DC и исключение клиентского framebuffer задаёт
+вызывающий hook. Нельзя применять этот helper к общему final blit или всему
+окну ради DoubleBuffered. Подробности/ограничения —
+[Delphi-VCL, тест 101](../../GlassCore/docs/Delphi-VCL.md#тест-101-непрозрачность-изображений-ttoolbar-и-вложенного-tpanel--native-bwm-пути).
+
 При добавлении новых хуков ищи **существующий** паттерн в ближайшем `*Hooks.cpp` или в GlassShared, а не новый стек на GDI+.

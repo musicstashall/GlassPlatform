@@ -8,6 +8,7 @@
 #include <Module/ModuleHandler.h>
 #include <Subsystems/PaintDispatcher.h>
 #include <Subsystems/RenderText.h>
+#include <Subsystems/OpaqueBitmapSource.h>
 #include <Subsystems/RootSwcaGradient.h>
 #include <GlassDelphiPanel.h>
 #include <GlassBackdropMark.h>
@@ -27,10 +28,11 @@ namespace GlassCore::DelphiPanel
     {
         using namespace GlassCore::Hooks;
         using namespace std::literals;
-        enum : size_t { FillSlot, PatSlot, ExtSlot, Count };
+        enum : size_t { FillSlot, PatSlot, ExtSlot, StretchSlot, Count };
         int WINAPI PanelFill(HDC, const RECT*, HBRUSH);
         BOOL WINAPI PanelPat(HDC, int, int, int, int, DWORD);
         BOOL WINAPI PanelExt(HDC, int, int, UINT, const RECT*, LPCWSTR, UINT, const INT*);
+        BOOL WINAPI PanelStretch(HDC, int, int, int, int, HDC, int, int, int, int, DWORD);
         const HookDispatcherDependency<Count, 3> g_dep{{
             std::tuple{std::array{"user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv},
                 "FillRect", reinterpret_cast<PVOID>(PanelFill)},
@@ -38,6 +40,8 @@ namespace GlassCore::DelphiPanel
                 "PatBlt", reinterpret_cast<PVOID>(PanelPat)},
             std::tuple{std::array{"gdi32.dll"sv, "gdi32full.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv},
                 "ExtTextOutW", reinterpret_cast<PVOID>(PanelExt)},
+            std::tuple{std::array{"gdi32.dll"sv, "gdi32full.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv},
+                "StretchBlt", reinterpret_cast<PVOID>(PanelStretch)},
         }};
         // One known source, EXE (as in LogViewer-16). The dispatcher, not a
         // return address in an IAT trampoline, supplies the correct original.
@@ -57,8 +61,8 @@ namespace GlassCore::DelphiPanel
 
         bool TakeDiag(size_t channel) noexcept
         {
-            static thread_local ULONGLONG epoch[3]{};
-            static thread_local unsigned budget[3]{};
+            static thread_local ULONGLONG epoch[4]{};
+            static thread_local unsigned budget[4]{};
             const ULONGLONG now = GetTickCount64();
             if (!epoch[channel] || now - epoch[channel] >= 1000)
             { epoch[channel] = now; budget[channel] = 16; }
@@ -69,6 +73,17 @@ namespace GlassCore::DelphiPanel
         {
             auto lock = g_lock.lock_shared();
             return g_dispatcher.template GetOrg<slot, Fn>();
+        }
+        bool IsNestedImagePanel(HWND hwnd) noexcept
+        {
+            wchar_t name[64]{}, parentName[64]{};
+            const HMODULE exe = GlassCore::ModuleHandler::g_entryPointModule;
+            return exe && IsWindow(hwnd)
+                && reinterpret_cast<HMODULE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)) == exe
+                && GetClassNameW(hwnd, name, static_cast<int>(_countof(name)))
+                && _wcsicmp(name, L"TPanel") == 0
+                && GetClassNameW(GetParent(hwnd), parentName, static_cast<int>(_countof(parentName)))
+                && _wcsicmp(parentName, L"TPanel") == 0;
         }
         bool IsPanelDc(HDC dc) noexcept
         {
@@ -116,13 +131,10 @@ namespace GlassCore::DelphiPanel
         bool ApplyBackground(HDC dc, const RECT& r, COLORREF color, const wchar_t* api) noexcept
         {
             const COLORREF rgb = color & 0xFFFFFFu;
-            // Exact TPanel: only COLOR_WINDOW is a transparent default. Keep
-            // the earlier BTNFACE exemption for the other panels and frames.
-            wchar_t cls[64]{};
-            GetClassNameW(g_stack.back().hwnd, cls, static_cast<int>(_countof(cls)));
-            const bool windowOnlyDefault = _wcsicmp(cls, L"TPanel") == 0;
+            // Оба системных фона — прозрачная база, в том числе exact TPanel
+            // (BWM). Произвольный RGB, включая чёрный, остаётся tint A=100.
             const bool system = rgb == (GetSysColor(COLOR_WINDOW) & 0xFFFFFFu)
-                || (!windowOnlyDefault && rgb == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFFu));
+                || rgb == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFFu);
             bool ok = false;
             if (system) ok = Blacken(dc, r);
             else
@@ -189,6 +201,57 @@ namespace GlassCore::DelphiPanel
             g_inHook = true;
             auto leave = wil::scope_exit([]() noexcept { g_inHook = false; });
             return ApplyBackground(dc, r, color, L"PatBlt") ? TRUE : orig(dc, x, y, w, h, rop);
+        }
+        // BWM window + caller EXE, exact TPanel внутри TPanel. Это подготовка
+        // отдельного изображения, не общий финальный blit DoubleBuffered.
+        BOOL WINAPI PanelStretch(HDC dc, int x, int y, int w, int h,
+            HDC source, int sx, int sy, int sw, int sh, DWORD rop)
+        {
+            const DWORD entryError = GetLastError();
+            const auto orig = Original<StretchSlot, decltype(&::StretchBlt)>();
+            const auto native = [&] {
+                SetLastError(entryError);
+                return orig ? orig(dc, x, y, w, h, source, sx, sy, sw, sh, rop)
+                    : ::StretchBlt(dc, x, y, w, h, source, sx, sy, sw, sh, rop);
+            };
+            if (g_inHook || !IsPanelDc(dc) || !g_stack.back().acquired[StretchSlot]
+                || g_stack.back().message != WM_PAINT || !IsNestedImagePanel(g_stack.back().hwnd)
+                || !GlassCore::PaintDispatcher::IsTopWindowDrawingSession(g_stack.back().hwnd)
+                || !GlassCore::PaintDispatcher::IsPaintStackDcForHwnd(g_stack.back().hwnd, dc)
+                || !source || source == dc || !w || !h || !sw || !sh
+                || GetMapMode(dc) != MM_TEXT || GetMapMode(source) != MM_TEXT
+                || GetCurrentObject(source, OBJ_BITMAP) == GetCurrentObject(dc, OBJ_BITMAP))
+                return native();
+            const HWND hwnd = g_stack.back().hwnd;
+            BITMAP bitmap{}; RECT client{};
+            if (GetObjectW(GetCurrentObject(source, OBJ_BITMAP), sizeof(bitmap), &bitmap) != sizeof(bitmap)
+                || !GetClientRect(hwnd, &client)) return native();
+            // Даже partial final-copy может читать полноразмерный буфер.
+            // Его назначение неоднозначно: не делать всё окно A=255.
+            if (bitmap.bmWidth == client.right-client.left && bitmap.bmHeight == client.bottom-client.top)
+            {
+                if (TakeDiag(3))
+                    DebugLog(DBG_NORMAL,
+                        L"[GlassCore][DelphiPanel] image-native api=StretchBlt hwnd=0x%p dc=0x%p src=0x%p size=[%ld,%ld] rop=0x%08X reason=client-sized-source",
+                        hwnd, dc, source, bitmap.bmWidth, bitmap.bmHeight, rop);
+                return native();
+            }
+            g_inHook = true;
+            auto leave = wil::scope_exit([]() noexcept { g_inHook = false; });
+            BOOL result{}; DWORD error{}; bool prepared{};
+            {
+                GlassCore::GdiUtils::OpaqueBitmapSource image{source};
+                prepared = static_cast<bool>(image);
+                result = native(); // mask/ROP, масштаб и знаки extents сохраняются
+                error = GetLastError();
+            }
+            if (TakeDiag(3))
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiPanel] image api=StretchBlt hwnd=0x%p dc=0x%p src=0x%p bpp=%u dst=[%d,%d,%d,%d] srcRect=[%d,%d,%d,%d] rop=0x%08X opaqueCopy=%d result=%d",
+                    hwnd, dc, source, unsigned(bitmap.bmBitsPixel),
+                    x, y, w, h, sx, sy, sw, sh, rop, prepared ? 1 : 0, result);
+            SetLastError(error);
+            return result;
         }
         BOOL WINAPI PanelExt(HDC dc, int x, int y, UINT options, const RECT* r,
             LPCWSTR text, UINT count, const INT* dx)
@@ -271,6 +334,9 @@ namespace GlassCore::DelphiPanel
             if (g_shutdown.load(std::memory_order_acquire) || !g_dispatcher.moduleAddress) return false;
             for (size_t i = 0; i < Count; ++i)
             {
+                // Только донорский paint-путь изображения. Erase/PrintClient,
+                // frames и остальные panel-классы этот импорт не приобретают.
+                if (i == StretchSlot && (message != WM_PAINT || !IsNestedImagePanel(hwnd))) continue;
                 const int before = g_dispatcher.GetRef(i);
                 g_dispatcher.EnableHook(i, true);
                 s.acquired[i] = g_dispatcher.GetRef(i) > before;

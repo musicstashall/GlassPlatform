@@ -4,8 +4,22 @@
 #include "coolbar_test_shim.h"
 using BYTE = std::uint8_t;
 using ULONG_PTR = std::uintptr_t;
-struct TestBitmap { std::array<BYTE, 4> pixel{}; };
+using LONG_PTR = std::intptr_t;
+struct BITMAP
+{
+    LONG bmType{}, bmWidth{1}, bmHeight{1}, bmWidthBytes{4};
+    std::uint16_t bmPlanes{1}, bmBitsPixel{32};
+    void* bmBits{};
+};
+struct TestBitmap
+{
+    std::array<BYTE, 4> pixel{};
+    BITMAP info{};
+    std::vector<BYTE> pixels;
+    BYTE* Data() { return pixels.empty() ? pixel.data() : pixels.data(); }
+};
 using HBITMAP = TestBitmap*;
+inline constexpr int MM_TEXT = 1, OBJ_BITMAP = 7, GWLP_HINSTANCE = -6;
 struct BITMAPINFOHEADER
 {
     DWORD biSize{}; LONG biWidth{}, biHeight{}; unsigned short biPlanes{}, biBitCount{};
@@ -34,7 +48,46 @@ namespace PanelTest
     inline std::array<BYTE, 4> blendPixel{};
     inline std::function<void()> duringBlend;
     inline HGDIOBJ stockBitmap = reinterpret_cast<HGDIOBJ>(std::uintptr_t(1));
+    inline std::unordered_map<HWND, HWND> parents;
+    inline std::unordered_map<HWND, HMODULE> instances;
+    inline std::unordered_map<HDC, int> maps;
+    inline DWORD error{};
 }
+inline HWND GetParent(HWND w) { return PanelTest::parents.count(w) ? PanelTest::parents.at(w) : nullptr; }
+inline LONG_PTR GetWindowLongPtrW(HWND w, int index)
+{
+    assert(index == GWLP_HINSTANCE);
+    return reinterpret_cast<LONG_PTR>(PanelTest::instances.count(w) ? PanelTest::instances.at(w)
+        : GlassCore::ModuleHandler::g_entryPointModule);
+}
+inline int GetMapMode(HDC dc) { return PanelTest::maps.count(dc) ? PanelTest::maps.at(dc) : MM_TEXT; }
+inline DWORD GetLastError() { return PanelTest::error; }
+inline void SetLastError(DWORD error) { PanelTest::error = error; }
+inline HGDIOBJ PanelCurrentObject(HDC dc, UINT type)
+{
+    if (type == OBJ_BITMAP)
+        return PanelTest::bitmaps.count(dc) ? PanelTest::bitmaps.at(dc) : PanelTest::stockBitmap;
+    return GetCurrentObject(dc, type);
+}
+inline int GetObjectW(HGDIOBJ object, int bytes, void* out)
+{
+    if (bytes != sizeof(BITMAP)) return GetObjectW(static_cast<HBRUSH>(object), bytes, out);
+    if (reinterpret_cast<ULONG_PTR>(object) <= 5) return 0;
+    *static_cast<BITMAP*>(out) = static_cast<HBITMAP>(object)->info; return bytes;
+}
+inline BOOL StretchBlt(HDC, int, int, int, int, HDC, int, int, int, int, DWORD) { return TRUE; }
+#if !defined(GLASS_TEST_REAL_OPAQUE_BITMAP)
+// Background/caption suite never prepares images. The dedicated VCL image
+// suite defines this macro and compiles the real source/selection helper.
+namespace GlassCore::GdiUtils
+{
+    struct OpaqueBitmapSource
+    {
+        explicit OpaqueBitmapSource(HDC) {}
+        explicit operator bool() const { return false; }
+    };
+}
+#endif
 inline COLORREF PanelGetSysColor(int i)
 { return i == COLOR_WINDOW ? PanelTest::windowColor : PanelTest::faceColor; }
 inline BOOL PanelGetClientRect(HWND w, LPRECT r)
@@ -171,6 +224,7 @@ namespace GlassCore::Text
         return PanelTest::bufferResult;
     }
 }
+#define GetCurrentObject PanelCurrentObject
 #define GetSysColor PanelGetSysColor
 #define GetClientRect PanelGetClientRect
 #define GetModuleHandleW PanelGetModuleHandleW

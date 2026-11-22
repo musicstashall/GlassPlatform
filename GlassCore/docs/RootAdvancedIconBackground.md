@@ -33,13 +33,24 @@ Menu-ключи на эти поверхности **не** влияют (см. 
 | Ribbon (24 bpp path) | `UiRibbonHooks.cpp` | только `Promise32BPP` (фон сохраняется) | `PrepareBitmapForAlphaBlend` с `chromaKey` |
 | ListView (BitBlt/StretchBlt non-alpha) | `ListViewHooks.cpp` | black-key (чёрный фон ImageList → прозрачный) | `SpriteEffect` (настроенный chroma) |
 | TreeView (MaskBlt non-alpha) | `TreeViewHooks.cpp` | black-key | `SpriteEffect` |
-| Toolbar (MaskBlt/BitBlt non-alpha) | `ToolbarHooks.cpp` | black-key | `SpriteEffect` |
+| ToolbarWindow32 (MaskBlt/BitBlt non-alpha) | `ToolbarHooks.cpp` | black-key | `SpriteEffect` |
+| TToolBar (VCL native MaskBlt) | `ToolbarHooks.cpp` + `OpaqueBitmapSource` | opaque 32bpp copy, настоящая маска/ROP | тот же native mask-путь, не chroma |
 | Button (comctl32 BitBlt non-alpha) | `ButtonHooks.cpp` | black-key | `SpriteEffect` |
 | MFC Afx toolbar (16×16) | `RootGdiHooks.cpp` | black-key (без настройки/UI) | — |
 | Static с изображением | `WndCompat/Controls/StaticSubclass.cpp` | только `Promise32BPP` (alpha=255, цвет не удаляется) | `SpriteEffect` |
 
-Общий код GlassCore-хуков: `GdiUtils::ApplyBlackKeyAlpha` / `GdiUtils::ApplyIconBackgroundAlpha`
-(`GlassCore/src/Subsystems/GdiHookUtils.cpp`). 32 bpp иконки с нативной альфой не трогаются.
+Общий код прежних alpha/chroma-хуков: `GdiUtils::ApplyBlackKeyAlpha` /
+`GdiUtils::ApplyIconBackgroundAlpha` (`GlassCore/src/Subsystems/GdiHookUtils.cpp`).
+В этих путях 32 bpp иконки с нативной альфой не трогаются.
+
+**Отдельный VCL opaque-путь:** exact `TToolBar` с HINSTANCE=EXE в Full/backdrop
+использует native `comctl32!MaskBlt` и временную 32bpp копию с A=255, сохраняя
+чёрные детали и прозрачность по исходной маске. Он не требует удаления цвета
+через GlassSettings и не применяет этот chroma-key к изображению. EXE
+`StretchBlt` изображения вложенного `TPanel` использует ту же подготовку без
+новой настройки панели; неоднозначный client-sized bitmap остаётся native.
+Это не глобальная смена `Promise32BPP`, common-controls renderer или решения
+DoubleBuffered; см. [Delphi-VCL, тест 101](Delphi-VCL.md#тест-101-непрозрачность-изображений-ttoolbar-и-вложенного-tpanel--native-bwm-пути).
 
 ### Static (`STM_SETIMAGE`)
 

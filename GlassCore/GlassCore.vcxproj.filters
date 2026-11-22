@@ -256,6 +256,9 @@
     <ClCompile Include="src\Subsystems\GdiHookUtils.cpp">
       <Filter>src\Subsystems</Filter>
     </ClCompile>
+    <ClCompile Include="src\Subsystems\OpaqueBitmapSource.cpp">
+      <Filter>src\Subsystems</Filter>
+    </ClCompile>
     <ClCompile Include="src\Subsystems\Menu.cpp">
       <Filter>src\Subsystems</Filter>
     </ClCompile>
@@ -514,6 +517,9 @@
       <Filter>Include\Subsystems</Filter>
     </ClInclude>
     <ClInclude Include="Include\Subsystems\GdiHookUtils.h">
+      <Filter>Include\Subsystems</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Subsystems\OpaqueBitmapSource.h">
       <Filter>Include\Subsystems</Filter>
     </ClInclude>
     <ClInclude Include="Include\Subsystems\Menu.h">

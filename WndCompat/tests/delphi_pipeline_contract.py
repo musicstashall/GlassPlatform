@@ -1429,7 +1429,7 @@ class DelphiPipelineContract(unittest.TestCase):
         root = read('WndCompat/Root/RootSubclass.cpp').split('LRESULT CALLBACK RootSubclassProcShared(', 1)[1]
         self.assertLess(root.index('WndCompat::TryHandleDelphiPanelPaint('), root.index('case WM_ERASEBKGND:'))
 
-    def test_panel_background_uses_real_alpha_and_scopes_window_only_default_to_exact_tpanel(self):
+    def test_panel_background_uses_real_alpha_and_both_system_defaults_for_exact_tpanel(self):
         code = read('GlassCore/src/Hooks/delphi/TPanelDraw.cpp')
         self.assertIn('kCustomBackgroundAlpha = 100', code)
         for api in ('"FillRect"', '"PatBlt"', '"ExtTextOutW"', 'GdiAlphaBlend',
@@ -1440,9 +1440,9 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertEqual(policy.count('GetSysColor('), 2)
         self.assertIn('GetSysColor(COLOR_WINDOW)', policy)
         self.assertIn('GetSysColor(COLOR_BTNFACE)', policy)
-        self.assertIn('GetClassNameW(g_stack.back().hwnd, cls,', policy)
-        self.assertIn('const bool windowOnlyDefault = _wcsicmp(cls, L"TPanel") == 0;', policy)
-        self.assertIn('|| (!windowOnlyDefault && rgb == (GetSysColor(COLOR_BTNFACE)', policy)
+        self.assertNotIn('windowOnlyDefault', policy)
+        self.assertNotIn('GetClassNameW', policy)
+        self.assertIn('|| rgb == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFFu)', policy)
         self.assertIn('pixel[3] = kCustomBackgroundAlpha', policy)
         cache = read('GlassCore/src/Hooks/RootWindowHooks.cpp')
         self.assertIn('if (!GlassShared::IsDelphiPanelClassName(cls)\n'
@@ -1473,6 +1473,115 @@ class DelphiPipelineContract(unittest.TestCase):
         engine = read('GlassCore/src/Core/Engine.cpp')
         self.assertIn('GlassCore::DelphiPanel::Startup();', engine)
         self.assertIn('GlassCore::DelphiPanel::Shutdown();', engine)
+
+    def test_opaque_bitmap_source_is_a_scoped_gdi_copy_not_a_pixel_color_key(self):
+        code = read('GlassCore/src/Subsystems/OpaqueBitmapSource.cpp')
+        header = read('GlassCore/Include/Subsystems/OpaqueBitmapSource.h')
+        for marker in ('GetObjectType(source) != OBJ_MEMDC', 'info.bmPlanes != 1',
+                       'info.bmBitsPixel < 8', 'info.bmBitsPixel > 32',
+                       'info.bmWidth <= 0 || info.bmHeight <= 0',
+                       'std::numeric_limits<size_t>::max', 'std::numeric_limits<LONG>::max',
+                       'GdiFlush()', 'CreateBitmap(1, 1, 1, 1, nullptr)',
+                       'SelectObject(source, placeholder.get())', 'SelectObject(source, original)',
+                       'CreateDIBSection(source, &dib', 'dib.bmiHeader.biBitCount = 32',
+                       'dib.bmiHeader.biHeight = -info.bmHeight',
+                       'data, &dib, DIB_RGB_COLORS) != info.bmHeight',
+                       'pixels[i] |= 0xFF000000u', 'SelectObject(source, copy.get())',
+                       'SelectObject(m_dc, m_original)', 'm_bitmap = std::move(copy)'):
+            self.assertIn(marker, code)
+        self.assertLess(code.index('SelectObject(source, placeholder.get())'), code.index('GetDIBits(source,'))
+        self.assertIn('wil::unique_hbitmap m_bitmap', header)
+        self.assertIn('OpaqueBitmapSource(const OpaqueBitmapSource&) = delete', header)
+        for forbidden in ('ApplyBlackKeyAlpha', 'SpriteEffect', 'HasAlphaChannel(', 'GdiAlphaBlend(',
+                          'Gdip', 'BufferedPaintSetAlpha', 'SetBkColor(', 'SetMapMode('):
+            self.assertNotIn(forbidden, code)
+
+    def test_ttoolbar_vcl_exe_route_and_native_barrier_do_not_reuse_generic_alpha_renderer(self):
+        code = read('GlassCore/src/Hooks/ToolbarHooks.cpp')
+        gate = code.split('static bool IsVclToolbarWindow(', 1)[1].split('static bool TakeVclImageDiag(', 1)[0]
+        for marker in ('StrEqI(name, L"TToolBar")', 'GWLP_HINSTANCE', 'caller == exe',
+                       'IsFullInjectionMode()', 'GlassIsBackdropAllowedForHwnd(hwnd)',
+                       'g_shutdown.load', 'g_inOpaqueIcon', 'GetMapMode(dc) != MM_TEXT',
+                       's.iconModules[0]', 's.iconModules[1]', 'IsTopWindowDrawingSession(s.hwnd)',
+                       'IsPaintStackDcForHwnd(s.hwnd, dc)', 'GetStackOwnerForDc(dc) == s.hwnd'):
+            self.assertIn(marker, gate)
+        self.assertNotIn('GetPaintSessionHostHwnd', gate)
+        begin = code.split('static void OnBeginGlobal(', 1)[1].split('static void OnEndGlobal(', 1)[0]
+        for marker in ('session.vclIcons = IsVclToolbarWindow(hWnd)',
+                       'session.vclIcons && IsVclToolbarIconSession(hWnd, callerMod)',
+                       'g_comctl32New', 'g_comctl32Legacy', 'modules[i] != modules[0]',
+                       'EnableHooksOnModule(modules[i], OHK_MASKBLT, true)', 'g_modStack.push_back(session)'):
+            self.assertIn(marker, begin)
+        self.assertNotIn('OHK_BITBLT', begin)
+        self.assertNotIn('OHK_MASKBLT, true)', begin.split('if (session.vclIcons', 1)[0])
+        enable = code.split('static bool EnableHooksOnModule(', 1)[1].split('// ── DisableAllOverallHooks', 1)[0]
+        self.assertIn('const int before = it->second.GetRef(index)', enable)
+        self.assertIn('it->second.GetRef(index) > before', enable)
+        end = code.split('static void OnEndGlobal(', 1)[1].split('//  Lifecycle', 1)[0]
+        self.assertIn('session.iconModules[i-1]', end)
+        self.assertNotIn('g_comctl32', end)
+
+    def test_ttoolbar_opaque_path_preserves_mask_rop_and_does_not_suppress_native_bitblt(self):
+        code = read('GlassCore/src/Hooks/ToolbarHooks.cpp')
+        mask = code.split('BOOL WINAPI Overall_MyMaskBlt(\n', 1)[1].split('// ── BitBlt', 1)[0]
+        vcl = mask.split('if (g_modStack.back().vclIcons)', 1)[1].split('if (!IsToolbarGlassSessionAllowedForHdc(hdcDest))', 1)[0]
+        for marker in ('OpaqueBitmapSource image{hdcSrc}', 'IsVclToolbarIconDc(hdcDest, callerMod)',
+                       'hbmMask, xMask, yMask, rop)', 'result = native()',
+                       'error = GetLastError()', 'SetLastError(error)', 'TakeVclImageDiag()'):
+            self.assertIn(marker, vcl)
+        self.assertEqual(vcl.count('result = native()'), 1)
+        for forbidden in ('GdiAlphaBlend', 'HasAlphaChannel', 'ApplyIconBackgroundAlpha',
+                          'g_toolbarSuppressMaskBitBlt'):
+            self.assertNotIn(forbidden, vcl)
+        bit = code.split('BOOL WINAPI Overall_MyBitBlt(\n', 1)[1].split('// ── CreateSolidBrush', 1)[0]
+        self.assertIn('if (g_modStack.back().vclIcons)\n            return orig(', bit)
+        self.assertIn('GdiAlphaBlend', bit)  # existing common-controls renderer retained
+
+    def test_panel_image_slot_is_paint_only_exact_nested_exe_tpanel_and_preserves_native_stretch(self):
+        code = read('GlassCore/src/Hooks/delphi/TPanelDraw.cpp')
+        enum = code.split('enum : size_t {', 1)[1].split('Count };', 1)[0]
+        table = code.split('g_dep{{', 1)[1].split('}};', 1)[0]
+        self.assertEqual(len(re.findall(r'\b\w+Slot\b', enum)), 4)
+        self.assertEqual(re.findall(r'"([A-Za-z0-9]+)", reinterpret_cast<PVOID>', table),
+                         ['FillRect', 'PatBlt', 'ExtTextOutW', 'StretchBlt'])
+        gate = code.split('bool IsNestedImagePanel(', 1)[1].split('bool IsPanelDc(', 1)[0]
+        for marker in ('g_entryPointModule', 'GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)',
+                       '_wcsicmp(name, L"TPanel") == 0', 'GetParent(hwnd)',
+                       '_wcsicmp(parentName, L"TPanel") == 0'):
+            self.assertIn(marker, gate)
+        self.assertNotIn('wcsstr', gate)
+        self.assertIn('i == StretchSlot && (message != WM_PAINT || !IsNestedImagePanel(hwnd))', code)
+        image = code.split('BOOL WINAPI PanelStretch(HDC dc,', 1)[1].split('BOOL WINAPI PanelExt(HDC dc,', 1)[0]
+        for marker in ('Original<StretchSlot, decltype(&::StretchBlt)>', 'IsPanelDc(dc)',
+                       'g_stack.back().acquired[StretchSlot]', 'IsNestedImagePanel(g_stack.back().hwnd)',
+                       'IsTopWindowDrawingSession', 'IsPaintStackDcForHwnd', 'GetMapMode(source) != MM_TEXT',
+                       'bitmap.bmWidth == client.right-client.left', 'bitmap.bmHeight == client.bottom-client.top',
+                       'OpaqueBitmapSource image{source}', 'source, sx, sy, sw, sh, rop)',
+                       'SetLastError(error)', 'TakeDiag(3)'):
+            self.assertIn(marker, image)
+        for forbidden in ('GdiAlphaBlend', 'ApplyBlackKeyAlpha', 'HasAlphaChannel', '_ReturnAddress'):
+            self.assertNotIn(forbidden, image)
+        self.assertEqual(image.count('result = native()'), 1)
+
+    def test_vcl_images_reuse_one_helper_and_compile_full_production_with_strict_wil_double(self):
+        for project in ('GlassCore/GlassCore.vcxproj', 'GlassCore/GlassCore.vcxproj.filters'):
+            for item in (r'src\Subsystems\OpaqueBitmapSource.cpp', r'Include\Subsystems\OpaqueBitmapSource.h'):
+                self.assertIn(item, read(project))
+        for item in ('GlassCore/src/Hooks/ToolbarHooks.cpp', 'GlassCore/src/Hooks/delphi/TPanelDraw.cpp'):
+            self.assertIn('GlassCore::GdiUtils::OpaqueBitmapSource image{', read(item))
+        test = read('WndCompat/tests/vcl_images_rendering_tests.cpp')
+        for item in ('GlassShared/src/BitmapUtils.cpp', 'GlassCore/src/Subsystems/OpaqueBitmapSource.cpp',
+                     'GlassCore/src/Hooks/ToolbarHooks.cpp', 'GlassCore/src/Hooks/delphi/TPanelDraw.cpp'):
+            self.assertIn(item, test)
+        runner = read('WndCompat/tests/vcl_images_rendering_test.py')
+        for marker in ("'Release'", "'Debug'", "'-D_DEBUG'", "'-DGLASS_DELPHI_DRAW_PROBE'", "'-Werror'"):
+            self.assertIn(marker, runner)
+        shim = read('WndCompat/tests/vcl_images_test_shim.h')
+        self.assertIn('#include "panel_test_shim.h"', shim)
+        self.assertIn('assert(selected != bmp)', shim)
+        self.assertIn('registrationFailures', shim)
+        # The shared forwarding double already rejects WIL-invalid lvalue callbacks.
+        self.assertIn('auto scope_exit(F&& fn)', read('WndCompat/tests/coolbar_test_shim.h'))
 
     def test_delphi_grid_clears_repaint_area_after_beginpaint(self):
         root = read("GlassCore/src/Hooks/RootWindowHooks.cpp")

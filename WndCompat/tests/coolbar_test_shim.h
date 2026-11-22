@@ -75,7 +75,7 @@ inline constexpr UINT SMTO_ABORTIFHUNG = 2;
 inline constexpr int DBG_NORMAL = 1, DBG_WARNING = 2;
 inline constexpr COLORREF RGB(unsigned r, unsigned g, unsigned b) { return r | (g << 8) | (b << 16); }
 
-namespace GlassShared { enum class GlassControlKind { None, CoolBar, Root }; }
+namespace GlassShared { enum class GlassControlKind { None, CoolBar, Root, Toolbar }; }
 struct TestWindow
 {
     bool valid = true, backdrop = true;
