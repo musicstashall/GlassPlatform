@@ -7,7 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../../GlassSettings/Services/ReflectionPixelEffects.cs" Link="ReflectionPixelEffects.cs" />
-    <Compile Include="../../../GlassSettings/Services/ReflectionSourceNaming.cs" Link="ReflectionSourceNaming.cs" />
     <Compile Include="../../../GlassSettings/Services/ReflectionRenderSettings.cs" Link="ReflectionRenderSettings.cs" />
   </ItemGroup>
 </Project>

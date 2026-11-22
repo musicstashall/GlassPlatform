@@ -19,26 +19,21 @@ public static class ReflectionTextureService
     {
         if (!Path.IsPathFullyQualified(path)) return path;
         var full = Path.GetFullPath(path);
-        var roots = new[] { PlatformPaths.ReflectionCacheDirectory, PlatformPaths.ReflectionAppliedDirectory,
-            PlatformPaths.ReflectionPatternAppliedDirectory };
-        bool generated = roots.Any(root => full.StartsWith(Path.GetFullPath(root) + Path.DirectorySeparatorChar,
-            StringComparison.OrdinalIgnoreCase));
-        bool sourceCategory = IsTexture(path) || SvgReflectionRenderer.IsPattern(path);
-        if (!generated && !sourceCategory) return path;
-        var items = ThemeImageCatalog.LoadReflectionImages();
+        var directory = Path.GetFullPath(PlatformPaths.ReflectionAppliedDirectory);
+        if (!string.Equals(Path.GetDirectoryName(full), directory, StringComparison.OrdinalIgnoreCase))
+            return path;
         var state = ReflectionRenderState.Read();
-        string wanted = generated && state is not null
-            && string.Equals(Path.GetFullPath(state.Output), full, StringComparison.OrdinalIgnoreCase)
-                ? state.Source : path;
-        string stem = ReflectionSourceNaming.Stem(wanted);
-        return items.FirstOrDefault(item =>
-            (IsTexture(item.FilePath) || SvgReflectionRenderer.IsPattern(item.FilePath))
-            && string.Equals(ReflectionSourceNaming.Stem(item.FilePath), stem, StringComparison.OrdinalIgnoreCase))?.FilePath ?? path;
+        if (state is null || !string.Equals(Path.GetFullPath(state.Output), full, StringComparison.OrdinalIgnoreCase))
+            return path;
+        // Only the current publication's explicit source; no legacy paths or filename aliases.
+        return ThemeImageCatalog.LoadReflectionImages().FirstOrDefault(item =>
+            string.Equals(Path.GetFullPath(item.FilePath), Path.GetFullPath(state.Source),
+                StringComparison.OrdinalIgnoreCase))?.FilePath ?? path;
     }
 
     public static async Task<string> PrepareAsync(string source, ReflectionRenderSettings? settings = null)
     {
-        // Canonicalize even missing old Dark/Lite paths before reading their bytes.
+        // Resolve the current published canvas back to its recorded source.
         source = ResolveSource(source);
         var isSvg = SvgReflectionRenderer.IsPattern(source);
         if (!IsTexture(source) && !isSvg) return source;
@@ -111,7 +106,7 @@ public static class ReflectionTextureService
             ColorManagementMode.DoNotColorManage)).DetachPixelData();
         var canvas = await Task.Run(() =>
         {
-            ReflectionPixelEffects.Colorize(pixels, settings.ColorRgb ?? 0);
+            ReflectionPixelEffects.Colorize(pixels, settings.ColorRgb);
             if (isSvg)
             {
                 if (settings.ScalePercent != 100)

@@ -162,9 +162,3 @@ Check(tinted[3] == original[3] && tinted[7] == original[7], "tint preserves patt
 ReflectionPixelEffects.ApplyAlpha(tinted, 2, 1, new(OpacityPercent: 50), wrap: true);
 Check(tinted[3] == 100 && tinted[7] == 25, "picker opacity multiplies original alpha");
 Check(new ReflectionRenderSettings(ColorRgb: 0xFF123456).Normalize().ColorRgb == 0x123456, "stored color excludes opacity bits");
-foreach (string suffix in new[] { "_Dark", "_Lite", "" })
-{
-    Check(ReflectionSourceNaming.Stem("SilkWave" + suffix + ".svg") == "SilkWave", "SVG source aliases survive pair consolidation");
-    Check(ReflectionSourceNaming.Stem("GlassReflection_01" + suffix + ".png") == "FrostWeave", "01 texture alias survives consolidation");
-    Check(ReflectionSourceNaming.Stem("GlassReflection_02" + suffix + ".png") == "DiagonalWeave", "02 texture alias survives consolidation");
-}

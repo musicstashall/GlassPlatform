@@ -112,7 +112,7 @@ assert 'Width = 128' not in number_factory and 'NumberBoxSpinButtonPlacementMode
 print('PASS: reflection numeric inputs reuse popup Animation NumberBox style and inline steppers')
 
 assert 'GlassAlphaColorPicker' in dialog and 'IsAlphaVisible = true' in dialog
-assert 'ColorRgb' in state and 'Colorize(pixels, settings.ColorRgb ?? 0)' in service
+assert 'ColorRgb' in state and 'Colorize(pixels, settings.ColorRgb)' in service
 assert 'Reflection_PresetDark' in dialog and 'Reflection_PresetLight' in dialog
 assert 'MaxWidth = 1100' in dialog and 'Grid.SetColumn(pickerRail, 1)' in dialog
 assert 'DisplayArea.FindAll()' in desktop_preview
@@ -141,3 +141,11 @@ assert 'Directory.CreateTempSubdirectory("GlassPlatform-Reflection-")' in servic
 assert 'Directory.Delete(stagingDirectory, recursive: true)' in service
 assert 'Path.Combine(PlatformPaths.ReflectionCacheDirectory, "Staging")' not in service
 print('PASS: unique user TEMP staging directory cleaned in finally, no new LocalAppData reflection cache')
+
+paths = (root / 'GlassSettings/Core/Platform/PlatformPaths.cs').read_text()
+assert 'ReflectionCacheDirectory' not in paths + service
+assert 'ReflectionPatternAppliedDirectory' not in paths + service
+assert 'ReflectionSourceNaming' not in service
+assert '_Lite' not in state and 'uint ColorRgb = 0' in state
+assert 'state.Source' in service and 'state.Output' in service
+print('PASS: only current publication resolves its explicit source; no legacy paths, filename aliases or color migration')

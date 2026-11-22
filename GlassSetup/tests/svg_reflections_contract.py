@@ -21,9 +21,9 @@ assert 'new Svg.SvgUnit(width)' in renderer and 'document.Draw(width, height)' i
 assert 'bitmap.Save(output, ImageFormat.Png)' in renderer
 assert 'ReflectionRenderState.Save(source, output' in service
 assert 'Path.ChangeExtension(source, ".png")' in service
-assert 'ReflectionSourceNaming.Stem(item.FilePath)' in service
-assert 'PlatformPaths.ReflectionPatternAppliedDirectory' in service
-assert '"OpenGlass", "Presets", "Pattern"' in paths
+assert 'Path.GetFullPath(state.Source)' in service
+assert 'ReflectionPatternAppliedDirectory' not in service
+assert '"OpenGlass", "Presets", "Pattern"' not in paths
 assert 'var directory = Path.GetFullPath(PlatformPaths.ReflectionAppliedDirectory);' in service
 assert 'DtdProcessing.Prohibit' in renderer and 'XmlResolver = null' in renderer
 assert 'OfType<XProcessingInstruction>()' in renderer

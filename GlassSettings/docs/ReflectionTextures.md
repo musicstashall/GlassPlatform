@@ -45,13 +45,10 @@ DragonScale, MicroChevron, CircuitMaze, CrossStitch, TwillWeave. CircuitMaze
   до 8×8 (160%, а не 200%). Исключён аномальный первый столбец оригинала.
   Это соответствует переходу 1200×675 → 1920×1080.
 
-`ReflectionSourceNaming`/`ResolveSource` понимают прежние суффиксы _Dark/_Lite,
-имена 01/02 и прежние пути генерируемых PNG для выделения и защиты исходника.
-Если в установленной коллекции старые пары остались рядом с единым источником,
-каталог показывает один элемент и предпочитает файл без суффикса. Уже записанные
-DWM-пути автоматически не переписываются: новое имя используется при применении.
-Для старой валидной State-записи без ColorRgb цвет Lite восстанавливается из Source;
-явно сохранённый ColorRgb, включая чёрный, имеет приоритет.
+Старые каталоги и имена Dark/Lite, 01/02 не сопоставляются и не мигрируются.
+`ResolveSource` распознаёт только текущий опубликованный PNG в `Presets\Textured`
+по валидной State-записи и её точному пути Source. Цвет берётся из ColorRgb,
+а не выводится из имени файла. Старые DWM-пути автоматически не переписываются.
 
 ### Векторные рисунки
 
@@ -206,7 +203,7 @@ helpers и общую инвалидацию; COM-указатели освоб�
    Запись идёт через временный файл/переименование; после успеха остаётся один PNG.
    Reparse points в пути и содержимом отвергаются. Другие Presets и исходники
    не очищаются. Этот каталог — выделенная область генератора: личные файлы
-   хранить в нём нельзя. `Presets\Pattern` распознаётся только для старых путей.
+   хранить в нём нельзя.
 7. После публикации сохраняется готовое состояние, затем DWM-путь изменяется
    в [page operation pipeline](GlassSettings-page-pipeline.md):
    RegistryMutation → Cosmetic → NoticeSync (Animating при необходимости).
@@ -220,7 +217,7 @@ helpers и общую инвалидацию; COM-указатели освоб�
 значение **State**, REG_SZ JSON. Поля: Version=1, Ready, Source, Output, Width,
 Height, SourceHash, OutputHash, Settings. Settings включает ScalePercent,
 OpacityPercent, Softness, NoisePercent, NoiseType, NoiseDensity, Enabled, ColorRgb
-(RGB без альфы; nullable только для миграции старых рецептов).
+(RGB без альфы, по умолчанию чёрный).
 Прежний NoiseSize оставлен для чтения совместимых записей, игнорируется рендером
 и нормализуется в 1. При вставке «Без шума» старые ID 0..4 не перенумерованы;
 индекс ComboBox равен ID+1. Это одна запись последнего результата, не профиль
@@ -264,7 +261,7 @@ ProgramData общий для пользователей, HKCU индивиду�
 
 Основные файлы: `DwmThemeDetailPage.xaml(.cs)`, `ReflectionSettingsDialog.cs`,
 `ReflectionTextureService.cs`, `ReflectionRenderSettings.cs`,
-`ReflectionPixelEffects.cs`, `SvgReflectionRenderer.cs`, `ReflectionSourceNaming.cs`,
+`ReflectionPixelEffects.cs`, `SvgReflectionRenderer.cs`,
 `ReflectionDesktopPreview.cs`, `PlatformPaths.cs`.
 
 Переносимые проверки из корня:

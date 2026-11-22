@@ -18,7 +18,7 @@ public static class ReflectionSettingsDialog
         var initial = ReflectionRenderState.Settings;
         var scale = Number("Reflection_SettingScale", 25, 200, initial.ScalePercent);
         var picker = new GlassAlphaColorPicker { IsAlphaVisible = true };
-        picker.SetColor(((uint)Math.Round(initial.OpacityPercent * 255.0 / 100) << 24) | (initial.ColorRgb ?? 0));
+        picker.SetColor(((uint)Math.Round(initial.OpacityPercent * 255.0 / 100) << 24) | initial.ColorRgb);
         var presets = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         var darkPreset = new Button { Content = GlassSettingsResources.Get("Reflection_PresetDark") };
         var lightPreset = new Button { Content = GlassSettingsResources.Get("Reflection_PresetLight") };

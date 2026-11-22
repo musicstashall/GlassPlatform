@@ -220,8 +220,5 @@ for channel in range(3):
     assert set(twill_lite[channel::4]) == {160}
 print('PASS: approved TwillWeave geometry and synthesized theme presets')
 
-naming = (ROOT / 'GlassSettings/Services/ReflectionSourceNaming.cs').read_text()
-assert '"glassreflection_01" => "FrostWeave"' in naming
-assert '"glassreflection_02" => "DiagonalWeave"' in naming
 assert not list(assets.glob('*_Dark.*')) and not list(assets.glob('*_Lite.*'))
-print('PASS: named textures retain selection aliases for earlier generated filenames')
+print('PASS: current sources have no theme suffix pairs')
