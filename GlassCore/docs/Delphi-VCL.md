@@ -5378,11 +5378,289 @@ DoubleBuffered **не изменены**. Новых peer dependencies, DLL expo
 изменений IATRegistry нет. UTF-8 без BOM, Python AST и `git diff --check` — PASS;
 BWM.txt не изменён, изображения входящего захвата сохранены.
 
-**Визуальная приёмка ComboLBox ещё не получена.** MSVC/настоящие Windows
-GDI/comctl32/DWM и PE/IAT concurrency здесь недоступны; portable doubles и
-mutation rejection их не заменяют. На Windows проверить в прежнем порядке
-ComboBox → TColorBox → TComboBox, затем повторный показ: обычный ComboBox как
-контроль, swatches/фон/выделение/scroll TColorBox и фон списка TComboBox. При
-оставшемся белом фоне сохранить новый Debug log с DelphiComboList — это
-проверит фактический CTLCOLOR route, а не переобъявит его доказанным по LogViewer-22.
-Принятые SearchBox/TButtonedEdit не переоткрываются и отдельного захвата не требуют.
+**Визуальная приёмка ComboLBox получена:** пользователь сообщил
+**«Со списками комбо задача закрыта»**. Задача закрыта; нового захвата ComboBox,
+TColorBox или TComboBox не требуется. Принятые SearchBox/TButtonedEdit также
+не переоткрываются. MSVC/настоящие Windows GDI/comctl32/DWM и PE/IAT concurrency
+здесь не проверялись: визуальное принятие — результат проверки пользователя,
+а не вывод из portable doubles или mutation rejection.
+
+## Тест 113: ANSI-пробы и точный TPage; сверка Restorator с BWM
+
+После закрытия ComboLBox пользователь сообщил об отсутствующем в Glass тексте
+на **TPage в Restorator** и передал фрагмент журнала в сообщении. Затем отдельно
+попросил дополнить W-only зонд ANSI-функциями и сразу проверить BWM. Согласован
+план диагностики без переноса рендеринга TPage; получено **«Да, выполняй»**.
+
+### Что устанавливает исходный фрагмент
+
+Интервал **14:11:15.443–14:11:16.270**, PID **45764**, TID **57612**:
+
+- `Button BeginPaint/EndPaint`, `kind=1`, окна `0x00B20D50`, `0x00D21196` и
+  `0x0035102A`; это Button-маркер, а не установленная принадлежность TPage.
+- Два `Button Overall_MyDrawTextExW`, длины **99/142**, `format=0x102014`,
+  и themed push-button text/background part 1, states 5/2 на третьем HWND.
+- Базы `0x6A780000`/`0x6CB50000` без module map не устанавливают имена DLL.
+  Запись входа в text hook не является результатом финальной композиции.
+- В переданном фрагменте нет `DelphiDrawProbe Begin class=TPage` или ANSI API.
+  Это **не доказательство отсутствия ANSI-рисования**: в прежнем зонде не было
+  A-перехватов, а сам TPage не входил в exact class allowlist.
+
+Отдельного входящего файла этого журнала нет: исходный материал — текст
+сообщения, поэтому удалять файл лога по этому анализу не требовалось.
+
+### Что именно включает BWM для TPage
+
+Повторно прочитан защищённый **BWM.txt** (UTF-16); SHA256 неизменён:
+`bf679ce9c8a29e0d6b4ac8e3dce73cad4f52e454de0961a28e9840133f1e547f`.
+Номера ниже — строки общего reference-файла, не строки production Glass.
+
+| BWM source / строки | Установленный маршрут |
+|---|---|
+| `RestoratorWinHandler.cpp`, **17315–17324** | Для точного дочернего TPage, как для TPanel/TTabSheet/TGroupBox: `WndList::SetDataAttach` и `WinSubclassProc`. |
+| `RestoratorPaintHandler.cpp::Paint`, **17056–17096** | **window**, `callerModule == EntryPointModule`, exact TPage/TPanel: **`erase = true` и `WinHooks::DrawTextAttach(enable)`**. |
+| `RestoratorWinHooks.cpp::DrawTextAttach`, **17795–17811** | Сессионный ref-count и **Detours именно `user32!DrawTextA`**, не DrawTextW/ExW. |
+| `RestoratorWinHooks.cpp::MyDrawTextA`, **18014–18058** | Own-module passthrough; `DT_CALCRECT` остаётся native. Для OPAQUE DC чёрный/системный фон очищается BLACKNESS, custom RGB заполняется A255; затем A2W и `DrawTextWithAlpha`, при неуспехе — исходный DrawTextA. |
+| `RestoratorPaintHandler.cpp::Dc`, **17173–17185** | В window-ветке есть только TBomeMemo/TBMGutter; отдельного TPage GetDC-маршрута нет. |
+| `RestoratorPaintHandler.cpp`, **17091–17095** | **Только TPanel внутри TPanel** дополнительно включает GDI+ и StretchBlt. К TPage это условие не относится. |
+
+Это **не TPageControl**: его соседняя control-ветка 17029–17037 использует другой
+набор (UxTheme DrawTextEx и DrawThemeBackground). Reference BWM устанавливает
+направление проверки ANSI-текста, но не заменяет трассу пользовательского TPage.
+Код BWM с A2W/исходным cchText и alpha-brush здесь **не перенесён**; он требует
+отдельного проектирования ANSI-length/DC/background semantics, а не копирования
+в диагностический passthrough или расширения общего panel predicate.
+
+### Реализованный диагностический scope
+
+Production изменён только в `GlassCore/Include/Hooks/RootGdiHooks.h` и
+`GlassCore/src/Hooks/RootGdiHooks.cpp`, в существующих секциях
+**`_DEBUG && GLASS_DELPHI_DRAW_PROBE`**:
+
+- Добавлены **DrawTextA, DrawTextExA, ExtTextOutA**, а также отсутствовавшие
+  прямые **TextOutA/W и TabbedTextOutA/W**. У themed text нет A-варианта API.
+  Синхронизированы enum, объявления, dependency table и acquisition/release range;
+  FocusRect остаётся последним probe index. Всего **23** диагностических слота
+  вместо 16; вне Debug+probe прежние **30** non-probe root slots.
+- Точный case-insensitive **TPage** допущен к прежним Paint/GetDC probe-сессиям.
+  TPageControl, TPage2/MyTPage, TPanel/TNotebook и произвольные потомки по префиксу
+  не добавлены. Прежние 8 probe-классов сохранены. Регистрация провайдеров,
+  Full/backdrop gates PaintDispatcher и RootWindowHooks не менялись.
+- Новые функции передают исходные A/W pointers, counts, flags, RECT, dx,
+  DRAWTEXTPARAMS и tab stops/origin в **matching native original ровно один раз**;
+  если его нет — в соответствующий native A/W API. Сохранены native BOOL/int
+  и packed LONG, отрицательные counts, нулевые/неоконченные NUL/содержащие NUL
+  ANSI-буферы, `DT_CALCRECT`, `DT_MODIFYSTRING`, `ETO_GLYPH_INDEX/ETO_PDY`.
+  Зонд не декодирует, не измеряет, не копирует и **не записывает текст**.
+- Служебные original lookup, Begin/End и logger сохраняют LastError.
+  Это касается и прежних 16 диагностических обработчиков, включая logging
+  после CreateBrush: ошибки/успех native не подменяются ошибкой диагностики.
+  Общие renderer GetRootOrg/body функции не переписаны.
+- В `[GlassCore][DelphiDrawProbe]` добавлены **textColor/bkColor/bkMode**.
+  Для DrawText(A/W)/DrawTextEx(A/W) поле `a` — исходный signed count;
+  для ExtTextOut(A/W)/TextOut(A/W)/TabbedTextOut(A/W) `a/b` — x/y, `c` — count,
+  у TabbedTextOut `d` — число tab positions. Диагностические a/b/c/d — wide signed
+  integers: UINT_MAX ExtTextOut не превращается в отрицательную длину.
+  Фактические аргументы native остаются своих WinAPI-типов.
+- Прежний общий лимит API-записей **160/1000 ms/thread** и ref-delta release
+  сохранены. Ограничение лога никогда не подавляет сам native вызов.
+
+**Ограничения наблюдения:** это EXE **named-import IAT probe**, не глобальный
+Detours BWM. Отсутствующий импорт, вызов через GetProcAddress/BPL/чужой модуль,
+другая paint-сессия, исчерпанный log budget или первый активный IAT occupant
+могут оставить API без записи. `acquired` в Begin — число приобретённых refs,
+**не доказательство**, что каждый detour стал активным владельцем слота.
+Конкурирующий renderer не обходится. HWND текущей TLS-сессии — контекст;
+принадлежность memory DC им не доказывается, `dcWnd` записывается отдельно.
+
+### Проверки и границы результатов
+
+Новый `WndCompat/tests/vcl_draw_probe_test.py` компилирует **настоящий header,
+всю dependency table, полный production probe block и EnableRootHook body**.
+Остальные root renderers — только link-only doubles, которые падают при вызове;
+их тела в тест не копируются. Это **не компиляция всего RootGdiHooks.cpp**.
+WinAPI/dispatcher/first-occupant doubles не являются настоящими PE/IAT/GDI.
+
+- До production-правки все **4** конфигурации уже компилировались: в Debug+probe
+  получены **18 ожидаемых поведенческих RED**, проверка выключенного зонда PASS.
+- После правки — **19/19 PASS**: 18 поведенческих сценариев Debug+probe и один
+  negative-build тест для Release, Debug и Release+probe; `nm` подтверждает
+  отсутствие probe symbols в этих трёх конфигурациях.
+- Тот же набор с **ASan+UBSan / leak detection** — **PASS**; CXX использовал
+  `-fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie`.
+- **113 source contracts PASS**. Полные соседние production suites: ListBox
+  **21×3**, CTLCOLOR **13×3**, input icons **28×3**; Panel **12**, ButtonGroups **9**,
+  CoolBar **9**, BomeMemo **14**, VCL images **14**, ListView images **13** — PASS
+  в конфигурациях соответствующих runner.
+- **19 probe-block мутантов** компилировались, затем отвергались поведенчески
+  в Debug+probe: неверный class/ANSI hook; потеря count/params/dx/coordinates/
+  tab origin; потери LastError lookup/log/Begin/End; неприобретённые новые refs,
+  неверный nested ref-delta; двойной native вызов; A→W fallback; снятый budget,
+  общий вместо thread-local context и неверный BkColor в диагностике.
+  Mutation scratch script/sources/binaries удалены.
+
+**Рендеринг TPage в этом шаге не исправлялся.** Нет новых public exports,
+настроек, peer dependencies или глобальных detours. RootWindowHooks,
+PaintDispatcher, классификация/attach/subclass, общий текст, DoubleBuffered,
+TPageControl и принятые ComboLBox/SearchBox/TButtonedEdit не изменены.
+Обратная диагностическая правка, применённая только в памяти, вернула SHA256
+обоих production-файлов к исходным для этого шага; остальные **1784** ранее
+существовавших файла не изменены. Всего этот шаг затронул **7** файлов:
+2 production, документ, source contracts и 3 файла нового portable runner.
+Windows/MSVC и реальная GDI/DWM-композиция здесь недоступны; платформу не
+запускали/останавливали и DLL не освобождали. Portable GREEN — проверка
+диагностического passthrough, не визуальная приёмка TPage.
+
+После пользовательской пересборки соответствующей битности с Debug+probe
+нужен **полный журнал показа проблемной TPage**, включая
+`[GlassCore][DelphiProbeBuild] optional IAT probe compiled=1`,
+`[GlassCore][DelphiDrawProbe] Begin ... class=TPage`, API и End,
+а не только фильтр Button. Сначала проверить `api=DrawTextA` вместе с DC/RECT/
+textColor/bkColor/bkMode; при его отсутствии сохранить и остальные Begin/API
+записи, не объявляя ANSI-путь опровергнутым по молчанию зонда.
+
+## Тест 114: сессионный DrawTextA для точного TPanel, без смены подложки и A/W-политики
+
+После обсуждения ANSI/Unicode пользователь оставил действующую логику выбора
+API: **не определять «ANSI-приложение» на старте и подключать A/W по мере
+необходимости, как прежде**. Отдельно запрошен `DrawTextA` для текста TPanel.
+Согласован точечный план в шести файлах; получено **«выполняй»**.
+Это rendering-изменение **только точного TPanel**, не продолжение реализации
+TPage и не расширение diagnostic probe из §113.
+
+### Маршрут и ограничения
+
+Единственный production-файл — `GlassCore/src/Hooks/delphi/TPanelDraw.cpp`.
+В существующий private `HookDispatcher` добавлен **TextSlot / DrawTextA**
+(user32 + прежние API-set имена). Он идёт после четырёх прежних слотов:
+FillRect, PatBlt, ExtTextOutW, StretchBlt; их индексы не сдвигаются.
+Новый бит `acquired` — **0x10**. Диспетчер по-прежнему адресует только
+**EXE точки входа**, а не все DLL/BPL процесса.
+
+- Импорт приобретается только на время **WM_PAINT / WM_PRINTCLIENT** точного
+  case-insensitive **TPanel**. В WM_ERASEBKGND новый ref не берётся.
+  TPage, TPageControl, другие panel-классы, frames, TPanel2 и MyTPanel
+  не получают ANSI-slot от этого изменения. Их прежние фоновые/themed-пути
+  не расширены и не отключены.
+- В самом обработчике повторно проверяются class/message, ref текущей TLS-сессии,
+  Full/backdrop, живой HWND и прежний **IsPanelDc**: фактический window DC,
+  подтверждённый stack-owned MEMDC или явно переданный DC WM_PRINTCLIENT.
+  Один только ambient HWND не разрешает произвольный memory DC; чужой оконный
+  DC не становится panel DC из-за одной записи stack owner. Явный print target
+  сохраняет семантику существующего message bridge.
+- Вложенные сессии освобождают **только приобретённые refs по GetRef delta**.
+  `EnableHook == false` при выросшем nested ref не трактуется как отсутствие ref.
+  Сессия Frame/erase или сессия без нового TextSlot-ref не использует внешний
+  ANSI-ref для собственной отрисовки. Shutdown/missing original ведут в native.
+- Отсутствующий импорт не считается W-приложением и не создаёт нового пути.
+  First-active-occupant/IATRegistry не обходится; новые exports, Detours,
+  cross-renderer helpers и startup capability cache не вводятся.
+  Ref в `acquired` означает приобретение ссылки, **не доказательство активного
+  occupant**. Этот renderer не вызывает соседние hooks для обхода владельца.
+
+### ANSI, DC и фон
+
+Локальное преобразование использует **GetTextCharset выбранного шрифта HDC**
+и `TranslateCharsetInfo(TCI_SRCCHARSET)`. DEFAULT_CHARSET оставляет CP_ACP;
+SYMBOL_CHARSET, ошибка/неизвестный charset и ошибки конвертации — native.
+Новой общей ANSI/W-политики или изменения memo-decoder нет.
+
+Передаются исходные byte bounds в оба `MultiByteToWideChar` прохода. `count=-1`
+удаляет только включённый NUL-терминатор; explicit count не требует NUL и не
+подменяется strlen. В альфа-рендер передаётся **фактическое число UTF-16 units**,
+а не исходное число ANSI/DBCS/UTF-8 bytes. Вызовы, которые могут менять ANSI
+буфер (`DT_MODIFYSTRING`), и измерения (`DT_CALCRECT`) не конвертируются.
+
+Рендер использует прежний **DrawTextWithAlpha(..., true)** с прозрачным буфером.
+SaveDC/RestoreDC ограничивают временный TRANSPARENT mode; шрифт, текстовый цвет,
+background color, clip/viewport и сохранённые caller DC levels не меняются
+обработчиком после возврата. RECT для композитора — отдельная рабочая копия.
+**Новой очистки/заливки текста нет:** не вызываются ApplyBackground, BLACKNESS,
+FillRect, color key или opaque brush. Принятая системная прозрачная база и
+custom tint A=100 остаются за прежним panel background renderer.
+
+`DT_NOCLIP`, не-MM_TEXT DC, пустой/переполненный RECT, null/некорректные аргументы,
+неуспешный SaveDC/SetBkMode, исключение или failure HRESULT композитора дают
+native ANSI fallback с исходными pointers/count/flags/RECT и состоянием DC.
+Результат композитора (включая ноль) возвращается без искусственной замены;
+native original вызывается не более одного раза на такой fallback.
+**Внутренние fallback-и общего DrawTextWithAlpha не менялись:** в частности,
+его существующая последняя деградация в DrawTextW не превращена в новый A-путь.
+Portable tests инъектируют failure/exception на границе вызова композитора,
+а не доказывают поведение всех реальных uxtheme/GDI сбоев внутри него.
+
+На входе сохраняется LastError до original lookup; перед native восстанавливается
+входное значение, после него сохраняется значение native. Финальная RAII-защита
+работает после cleanup DC/string/logging. При compositor success остаётся
+входной LastError, а не служебная ошибка диагностики или GDI-подготовки.
+
+Диагностика **[GlassCore][DelphiPanel] text api=DrawTextA** показывает HWND/DC,
+ansiCount, wideCount, cp, flags, RECT, HRESULT/result; `text-native` — причину
+native bypass для подходящего panel DC. Отдельный канал ограничен
+**16 записями / 1000 ms / thread**; исчерпание бюджета не подавляет рисование.
+**Содержимое строк не записывается.** Успешный HRESULT маршрута не доказывает
+видимость глифов в DWM и не заменяет визуальный результат.
+
+### Сопоставление с BWM
+
+Повторно сверены §113 и защищённый BWM.txt: window/EXE exact **TPanel** получает
+`DrawTextAttach` на **DrawTextA** (17087–17090; attach 17795–17811).
+`MyDrawTextA` (18024–18055) — ориентир A→alpha/native fallback, **не копия**:
+его BLACKNESS/custom opaque фон и A2W с исходной byte-длиной не перенесены.
+GDI+/StretchBlt только для TPanel внутри TPanel (17091–17095) уже существует
+отдельно и этим ANSI-изменением не переписан. TPage по-прежнему вне panel gate.
+SHA256 reference остаётся
+`bf679ce9c8a29e0d6b4ac8e3dce73cad4f52e454de0961a28e9840133f1e547f`.
+
+### Проверки
+
+`panel_rendering_test.py` компилирует **полный production TPanelDraw.cpp**
+с настоящей dependency table/private hook и реальным WndCompat message bridge;
+root themed gate/handler по-прежнему берутся целыми production snippets.
+Не копируется реализация ANSI-handler в тест. WinAPI/NLS/dispatcher — doubles,
+с отдельной моделью ref-delta/first-active-occupant, не executable PE/IAT.
+
+- До production-правки: все три конфигурации компилировались; прежние **12×3**
+  сценариев PASS, новые **16×3** ожидаемо RED из-за отсутствующего ANSI-slot.
+- После: **28×3 PASS** — Release (`-O2`), Debug, Debug+probe, C++20/`-Werror`.
+  В том числе ANSI-only EXE; exact class/paint/print/erase gates; реальный print
+  message bridge; bounded/non-NUL/embedded-NUL/count=-1; CP1251/1252/932 и fixture
+  UTF-8→surrogate pair; шрифт DC; window/tracked MEMDC/explicit print target;
+  runtime Full/backdrop/class/shutdown; CALCRECT/MODIFYSTRING/NOCLIP/mapping;
+  geometry overflow; отсутствие изменения принятого фона/W-текста; clip/state/
+  RECT isolation; conversion/SaveDC/SetBkMode/renderer failures и исключения;
+  original/native-once/zero result/LastError; nested false-enable/ref failure;
+  competing occupant; reentry, budget и отсутствие ambient cross-thread session.
+- **ASan+UBSan / leak detection: 28×3 PASS** с
+  `-fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie`.
+- **116 source contracts PASS**: три добавлены; старый slot-shape contract
+  синхронизирован с пятым DrawTextA без ослабления проверок четырёх прежних APIs.
+- Соседние suites: probe **19**, ButtonGroups **9**, CoolBar **9**, BomeMemo **14**,
+  VCL images **14**, ListView images **13**, ListBox **21×3**, CTLCOLOR **13×3**,
+  input icons **28×3** — PASS в конфигурациях соответствующих runner.
+- **22 компилируемых мутанта отвергнуты поведенческими тестами**: неверные API/
+  exact class/acquisition/DC/session gates; потеря font codepage, UTF-16 length,
+  NUL semantics и проверки второго conversion pass; потеря MODIFYSTRING passthrough;
+  DC restore, caller RECT isolation и transparent buffer; обход original,
+  двойной native fallback; утрата entry/exit/cleanup LastError; общий вместо
+  thread-local context; нарушение бюджета и reentry guard. Compile failures
+  не засчитывались как rejection. Разовые скрипт/sources/binaries удалены.
+
+Scope подтверждён относительно рабочего дерева перед этим шагом: изменены
+ровно **шесть согласованных файлов**, остальные **1785** существовавших файлов
+не изменены. Обратная ANSI-правка только в памяти воспроизвела исходный SHA256
+всего TPanelDraw.cpp. Побайтово сохранены прежние DC/image gates, все фоновые/
+image hooks, DrawContainerThemeTextEx и EndPaint/Startup/Shutdown. Предшествующие
+разделы документа также побайтово сохранены. UTF-8 без BOM, Python AST и
+`git diff --check` — PASS; reference BWM не изменён.
+RootGdiHooks/RootWindowHooks, panel predicates/header/message bridge,
+PaintDispatcher, общий текст, DoubleBuffered и принятые ComboLBox/SearchBox/
+TButtonedEdit не изменены этим шагом.
+
+Windows/MSVC, реальные Windows NLS/GDI/uxtheme, PE/IAT concurrency и DWM здесь
+недоступны. Платформу не запускали/останавливали, DLL не освобождали.
+**Визуальная приёмка нового TPanel ANSI-текста ожидает пользовательской сборки.**
+Для неё достаточно проверить TPanel: подпись появилась, системная прозрачная
+и custom tinted подложки/скосы не изменились; в Debug при необходимости доступен
+`[GlassCore][DelphiPanel] text api=DrawTextA`. Это не запрос повторной приёмки
+ComboLBox/SearchBox/TButtonedEdit и не требование нового их захвата.

@@ -16,6 +16,8 @@
 #include <wil.h>
 #include <array>
 #include <atomic>
+#include <cstdint>
+#include <string>
 #include <tuple>
 #include <vector>
 #include <limits>
@@ -28,11 +30,12 @@ namespace GlassCore::DelphiPanel
     {
         using namespace GlassCore::Hooks;
         using namespace std::literals;
-        enum : size_t { FillSlot, PatSlot, ExtSlot, StretchSlot, Count };
+        enum : size_t { FillSlot, PatSlot, ExtSlot, StretchSlot, TextSlot, Count };
         int WINAPI PanelFill(HDC, const RECT*, HBRUSH);
         BOOL WINAPI PanelPat(HDC, int, int, int, int, DWORD);
         BOOL WINAPI PanelExt(HDC, int, int, UINT, const RECT*, LPCWSTR, UINT, const INT*);
         BOOL WINAPI PanelStretch(HDC, int, int, int, int, HDC, int, int, int, int, DWORD);
+        int WINAPI PanelDrawTextA(HDC, LPCSTR, int, LPRECT, UINT);
         const HookDispatcherDependency<Count, 3> g_dep{{
             std::tuple{std::array{"user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv},
                 "FillRect", reinterpret_cast<PVOID>(PanelFill)},
@@ -42,6 +45,8 @@ namespace GlassCore::DelphiPanel
                 "ExtTextOutW", reinterpret_cast<PVOID>(PanelExt)},
             std::tuple{std::array{"gdi32.dll"sv, "gdi32full.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv},
                 "StretchBlt", reinterpret_cast<PVOID>(PanelStretch)},
+            std::tuple{std::array{"user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv},
+                "DrawTextA", reinterpret_cast<PVOID>(PanelDrawTextA)},
         }};
         // One known source, EXE (as in LogViewer-16). The dispatcher, not a
         // return address in an IAT trampoline, supplies the correct original.
@@ -61,8 +66,8 @@ namespace GlassCore::DelphiPanel
 
         bool TakeDiag(size_t channel) noexcept
         {
-            static thread_local ULONGLONG epoch[4]{};
-            static thread_local unsigned budget[4]{};
+            static thread_local ULONGLONG epoch[5]{};
+            static thread_local unsigned budget[5]{};
             const ULONGLONG now = GetTickCount64();
             if (!epoch[channel] || now - epoch[channel] >= 1000)
             { epoch[channel] = now; budget[channel] = 16; }
@@ -265,6 +270,100 @@ namespace GlassCore::DelphiPanel
             return ApplyBackground(dc, *r, GetBkColor(dc), L"ExtTextOutW") ? TRUE
                 : orig(dc, x, y, options, r, text, count, dx);
         }
+
+        // ANSI captions are opt-in for exact TPanel only; the wider panel/frame
+        // background and themed-caption allowlists must not enrol other classes.
+        bool IsAnsiTextPanel(HWND hwnd, UINT message) noexcept
+        {
+            wchar_t name[64]{};
+            return (message == WM_PAINT || message == WM_PRINTCLIENT)
+                && GetClassNameW(hwnd, name, static_cast<int>(_countof(name)))
+                && _wcsicmp(name, L"TPanel") == 0;
+        }
+        bool IsAnsiTextRect(const RECT* rect) noexcept
+        {
+            if (!rect) return false;
+            const auto width = std::int64_t(rect->right) - rect->left;
+            const auto height = std::int64_t(rect->bottom) - rect->top;
+            return width > 0 && height > 0 && width <= (std::numeric_limits<int>::max)()
+                && height <= (std::numeric_limits<int>::max)();
+        }
+        bool DecodeAnsiPanelText(HDC dc, LPCSTR text, int count, std::wstring& wide, UINT& cp)
+        {
+            const int charset = GetTextCharset(dc);
+            if (charset < 0 || charset == SYMBOL_CHARSET) return false;
+            cp = CP_ACP;
+            if (charset != DEFAULT_CHARSET)
+            {
+                CHARSETINFO info{};
+                if (!TranslateCharsetInfo(reinterpret_cast<DWORD*>(static_cast<ULONG_PTR>(charset)),
+                    &info, TCI_SRCCHARSET)) return false;
+                cp = info.ciACP;
+            }
+            const int size = MultiByteToWideChar(cp, 0, text, count, nullptr, 0);
+            if (size <= 0) return false;
+            wide.resize(static_cast<size_t>(size));
+            if (MultiByteToWideChar(cp, 0, text, count, wide.data(), size) != size) return false;
+            if (count == -1) wide.pop_back(); // -1 includes the terminating NUL, explicit byte counts do not.
+            return !wide.empty();
+        }
+        int WINAPI PanelDrawTextA(HDC dc, LPCSTR text, int count, LPRECT rect, UINT flags)
+        {
+            const DWORD entryError = GetLastError();
+            DWORD exitError = entryError;
+            // Run last, after DC, string and logger cleanup. Native failures (or
+            // originals that leave LastError untouched) retain their own value.
+            auto preserveError = wil::scope_exit([&]() noexcept { SetLastError(exitError); });
+            const auto original = Original<TextSlot, decltype(&::DrawTextA)>();
+            const auto native = [&] {
+                SetLastError(entryError);
+                const int result = original ? original(dc, text, count, rect, flags)
+                    : ::DrawTextA(dc, text, count, rect, flags);
+                exitError = GetLastError();
+                return result;
+            };
+            if (!original || g_inHook || !IsPanelDc(dc) || !g_stack.back().acquired[TextSlot]
+                || !IsAnsiTextPanel(g_stack.back().hwnd, g_stack.back().message)) return native();
+            const HWND hwnd = g_stack.back().hwnd;
+            const auto nativeReason = [&](LPCWSTR reason) {
+                if (TakeDiag(4)) DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiPanel] text-native api=DrawTextA hwnd=0x%p dc=0x%p ansiCount=%d flags=0x%X reason=%s",
+                    hwnd, dc, count, flags, reason);
+                return native();
+            };
+            // Buffered bounds cannot reproduce DT_NOCLIP or non-MM_TEXT maps.
+            // Measurements and mutable ANSI strings must reach the ANSI original.
+            if (!text || count == 0 || count < -1 || !IsAnsiTextRect(rect)
+                || (flags & (DT_CALCRECT | DT_MODIFYSTRING | DT_NOCLIP)) || GetMapMode(dc) != MM_TEXT)
+                return nativeReason(L"arguments-flags-or-mapping");
+            std::wstring wide; UINT cp{}; bool decoded = false;
+            try { decoded = DecodeAnsiPanelText(dc, text, count, wide, cp); }
+            catch (...) { return nativeReason(L"conversion-exception"); }
+            if (!decoded) return nativeReason(L"conversion");
+            const int saved = SaveDC(dc);
+            if (!saved) return nativeReason(L"SaveDC");
+            RECT drawRect = *rect; int result = 0; HRESULT hr = E_FAIL;
+            {
+                g_inHook = true;
+                auto leave = wil::scope_exit([]() noexcept { g_inHook = false; });
+                auto restore = wil::scope_exit([&]() noexcept { RestoreDC(dc, saved); });
+                if (SetBkMode(dc, TRANSPARENT))
+                {
+                    // Glyphs only, over the accepted panel tint/transparent base.
+                    // No BWM BLACKNESS/opaque text-rect fill and no shared A/W policy.
+                    try { hr = GlassCore::Text::DrawTextWithAlpha(dc, wide.data(),
+                        static_cast<int>(wide.size()), &drawRect, flags, result, true); }
+                    catch (...) { hr = E_FAIL; }
+                }
+            }
+            if (TakeDiag(4)) DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiPanel] text api=DrawTextA hwnd=0x%p dc=0x%p ansiCount=%d wideCount=%d cp=%u flags=0x%X rect=[%ld,%ld,%ld,%ld] transparent=1 hr=0x%08X result=%d",
+                hwnd, dc, count, static_cast<int>(wide.size()), cp, flags,
+                rect->left, rect->top, rect->right, rect->bottom, static_cast<unsigned>(hr), result);
+            // Restore the original DC before any native fallback; caller RECT
+            // is never replaced by the compositor's private working copy.
+            return SUCCEEDED(hr) ? result : native();
+        }
     }
 
     HRESULT DrawContainerThemeTextEx(decltype(&::DrawThemeTextEx) original,
@@ -337,6 +436,7 @@ namespace GlassCore::DelphiPanel
                 // Только донорский paint-путь изображения. Erase/PrintClient,
                 // frames и остальные panel-классы этот импорт не приобретают.
                 if (i == StretchSlot && (message != WM_PAINT || !IsNestedImagePanel(hwnd))) continue;
+                if (i == TextSlot && !IsAnsiTextPanel(hwnd, message)) continue;
                 const int before = g_dispatcher.GetRef(i);
                 g_dispatcher.EnableHook(i, true);
                 s.acquired[i] = g_dispatcher.GetRef(i) > before;

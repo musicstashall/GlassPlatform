@@ -5,6 +5,7 @@
 #include "../Root/DelphiPanelPaint.h"
 #include <root_panel_theme_test.inc>
 #include <stdexcept>
+#include <thread>
 
 #define CHECK(expr) do { if (!(expr)) throw std::runtime_error(#expr); } while (false)
 
@@ -29,9 +30,9 @@ namespace
         TestDC dc, foreign, memory;
         RECT client{0, 0, 198, 58};
         LOGBRUSH custom{BS_SOLID, RGB(72, 144, 216)};
-        Context()
+        explicit Context(bool ansi = false)
         {
-            window.cls = L"TFrame"; other.cls = L"TButton";
+            window.cls = ansi ? L"TPanel" : L"TFrame"; other.cls = L"TButton";
             PanelTest::clients[&window] = client;
             dc.owner = &window; dc.brush = &custom;
             foreign.owner = &other; foreign.brush = &custom;
@@ -41,13 +42,15 @@ namespace
                 {"PatBlt", reinterpret_cast<void*>(&::PatBlt)},
                 {"ExtTextOutW", reinterpret_cast<void*>(&::ExtTextOutW)},
             };
+            if (ansi) module.originals["DrawTextA"] = reinterpret_cast<void*>(&ChainedPanelAnsi);
             GlassCore::ModuleHandler::g_entryPointModule = &module;
             Test::topWindow = Test::host = &window;
             Startup();
         }
         ~Context()
         {
-            Test::duringNativePaint = {}; PanelTest::duringBlend = {}; PanelTest::duringThemeBuffer = {};
+            Test::duringNativePaint = {}; Test::duringAlpha = {};
+            PanelTest::duringBlend = {}; PanelTest::duringThemeBuffer = {};
             Shutdown();
             assert(PanelTest::liveDcs == 0 && PanelTest::liveBitmaps == 0);
         }
@@ -478,6 +481,387 @@ namespace
         CHECK(Test::black == 0 && PanelTest::blends == 0);
     }
 
+    using AnsiFn = decltype(&::DrawTextA);
+    AnsiFn AnsiHook(Context& c)
+    {
+        CHECK(c.module.hooks.count("DrawTextA"));
+        return reinterpret_cast<AnsiFn>(c.module.hooks.at("DrawTextA"));
+    }
+    bool SameState(const DcState& a, const DcState& b)
+    { return a.bkMode == b.bkMode && a.text == b.text && a.background == b.background
+        && a.brush == b.brush && a.font == b.font; }
+    bool SameDetails(const PanelTest::DcDetails& a, const PanelTest::DcDetails& b)
+    { return std::memcmp(&a.clip, &b.clip, sizeof(RECT)) == 0
+        && a.viewportX == b.viewportX && a.viewportY == b.viewportY; }
+    void AnsiOnlyImportRoute()
+    {
+        Context c{true};
+        Shutdown();
+        c.module.originals = {{"DrawTextA", reinterpret_cast<void*>(&ChainedPanelAnsi)}};
+        Startup();
+        CHECK(c.module.hooks.empty());
+        RECT rect{3,4,90,20};
+        Test::duringNativePaint = [&](HWND w, UINT msg, WPARAM, LPARAM) {
+            CHECK(w == &c.window && msg == WM_PAINT);
+            CHECK(c.module.refs.at("DrawTextA") == 1);
+            CHECK(AnsiHook(c)(&c.dc, "P&anel", -1, &rect, 0x21) == 15);
+        };
+        CHECK(c.Message(WM_PAINT));
+        CHECK(c.module.hooks.empty() && c.module.refs.at("DrawTextA") == 0);
+        CHECK(Test::alphaText == 1 && PanelTest::alphaText == L"P&anel");
+        CHECK(PanelTest::alphaCount == 6 && PanelTest::alphaFlags == 0x21);
+        CHECK(PanelTest::alphaDc == &c.dc && PanelTest::nativeAnsi == 0);
+        Test::duringNativePaint = [&](HWND w, UINT msg, WPARAM wp, LPARAM lp) {
+            CHECK(w == &c.window && msg == WM_PRINTCLIENT && reinterpret_cast<HDC>(wp) == &c.memory && lp == 4);
+            CHECK(AnsiHook(c)(&c.memory,"Print",5,&rect,0) == 15);
+        };
+        CHECK(c.Message(WM_PRINTCLIENT,&c.memory,4));
+        CHECK(PanelTest::alphaDc == &c.memory && PanelTest::alphaText == L"Print");
+        CHECK(Test::alphaText == 2 && PanelTest::nativeAnsi == 0);
+        CHECK(!c.Message(WM_ERASEBKGND)); c.Refs(0);
+        CHECK(Test::black == 0 && PanelTest::blends == 0 && Test::nativeFill == 0);
+    }
+    void AnsiExactClassesAndMessages()
+    {
+        Context c{true};
+        for (LPCWSTR name : {L"TPanel", L"tPaNeL", L"TFrame", L"TSampleFrame", L"TEmbeddedForm",
+            L"TFlowPanel", L"TGridPanel", L"TStackPanel", L"TRelativePanel", L"TCategoryPanel",
+            L"TCategoryPanelGroup", L"TScrollBox", L"TPage", L"TPageControl", L"TPanel2", L"MyTPanel"})
+        {
+            c.window.cls = name;
+            for (UINT msg : {WM_PAINT, WM_PRINTCLIENT, WM_ERASEBKGND})
+            {
+                const bool expected = _wcsicmp(name, L"TPanel") == 0 && msg != WM_ERASEBKGND;
+                const bool began = BeginPaint(&c.window, msg, msg == WM_PRINTCLIENT ? &c.memory : nullptr);
+                CHECK(c.module.hooks.count("DrawTextA") == size_t(expected));
+                if (began) EndPaint();
+                c.Refs(0);
+            }
+        }
+        CHECK(!GlassShared::IsDelphiPanelClassName(L"TPage"));
+    }
+    void AnsiCountsAndUtf16Length()
+    {
+        Context c{true};
+        CHECK(BeginPaint(&c.window, WM_PAINT, nullptr));
+        const auto text = AnsiHook(c);
+        const char exact[]{'A','&','B'}; // No trailing NUL: ASan catches strlen/count regressions.
+        CHECK(text(&c.dc, exact, 3, &c.client, 0) == 15);
+        CHECK(PanelTest::alphaText == L"A&B" && PanelTest::alphaCount == 3);
+        const char embedded[]{'A',0,'B'};
+        CHECK(text(&c.dc, embedded, 3, &c.client, 0) == 15);
+        CHECK(PanelTest::alphaText == std::wstring(L"A\0B", 3));
+        CHECK(text(&c.dc, "A\0ignored", -1, &c.client, 0) == 15);
+        CHECK(PanelTest::alphaText == L"A" && PanelTest::alphaCount == 1);
+        CHECK(text(&c.dc, exact, 1, &c.client, 0) == 15 && PanelTest::alphaText == L"A");
+        TestFont japanese{128}; c.dc.font = &japanese; PanelTest::fontCharsets[&japanese] = 128;
+        const char dbcs[]{char(0x82),char(0xa0),'X'};
+        CHECK(text(&c.dc, dbcs, 3, &c.client, 0) == 15);
+        CHECK(PanelTest::alphaText == L"\u3042X" && PanelTest::alphaCount == 2 && PanelTest::codepage == 932);
+        c.dc.font = nullptr; PanelTest::systemCodepage = 65001;
+        const char utf8[]{char(0xf0),char(0x9f),char(0x99),char(0x82),'X'};
+        CHECK(text(&c.dc, utf8, 5, &c.client, 0) == 15);
+        const std::wstring utf16{wchar_t(0xd83d), wchar_t(0xde42), L'X'};
+        CHECK(PanelTest::alphaText == utf16 && PanelTest::alphaCount == 3);
+        CHECK(PanelTest::codepage == CP_ACP && PanelTest::nativeAnsi == 0);
+        const int before = Test::alphaText;
+        CHECK(text(&c.dc, "", -1, &c.client, 0) == 43);
+        CHECK(Test::alphaText == before && PanelTest::nativeAnsi == 1);
+        EndPaint(); c.Refs(0);
+    }
+    void AnsiSelectedFontCodepage()
+    {
+        Context c{true}; TestFont font{204}; c.dc.font = &font;
+        PanelTest::fontCharsets[&font] = 204;
+        CHECK(BeginPaint(&c.window, WM_PAINT, nullptr)); const auto text = AnsiHook(c);
+        const char cyrillic[]{char(0xcf),char(0xf0)};
+        CHECK(text(&c.dc, cyrillic, 2, &c.client, 0) == 15);
+        CHECK(PanelTest::codepage == 1251 && PanelTest::alphaText == L"\u041f\u0440");
+        CHECK(PanelTest::alphaState.font == &font && Test::alphaFont == &font);
+        PanelTest::fontCharsets[&font] = 0;
+        CHECK(text(&c.dc, "caf\xe9", 4, &c.client, 0) == 15);
+        CHECK(PanelTest::codepage == 1252 && PanelTest::alphaText == L"caf\u00e9");
+        PanelTest::fontCharsets[&font] = DEFAULT_CHARSET;
+        const int translations = PanelTest::translations;
+        CHECK(text(&c.dc, "ACP", -1, &c.client, 0) == 15 && PanelTest::codepage == CP_ACP);
+        CHECK(PanelTest::translations == translations);
+        for (int charset : {SYMBOL_CHARSET, -1, 254})
+        {
+            PanelTest::fontCharsets[&font] = charset;
+            const int alpha = Test::alphaText, native = PanelTest::nativeAnsi;
+            CHECK(text(&c.dc, cyrillic, 2, &c.client, 0) == 43);
+            CHECK(Test::alphaText == alpha && PanelTest::nativeAnsi == native+1);
+        }
+        EndPaint(); c.Refs(0);
+    }
+    void AnsiDcOwnership()
+    {
+        Context c{true}; RECT rect{2,3,90,20};
+        CHECK(BeginPaint(&c.window, WM_PAINT, nullptr)); const auto text = AnsiHook(c);
+        const auto expect = [&](HDC dc, bool alpha) {
+            const int before = Test::alphaText, native = PanelTest::nativeAnsi;
+            CHECK(text(dc, "Panel", 5, &rect, 0) == (alpha ? 15 : 43));
+            CHECK(Test::alphaText == before+int(alpha) && PanelTest::nativeAnsi == native+int(!alpha));
+        };
+        Test::host = &c.other; expect(&c.dc, true); // Native message bracket, not an ambient host guess.
+        expect(&c.foreign, false); expect(&c.memory, false); expect(nullptr, false);
+        Test::stackOwners[&c.memory] = &c.window; expect(&c.memory, true);
+        Test::topWindow = &c.other; expect(&c.memory, false);
+        Test::topWindow = &c.window; Test::stackOwners[&c.memory] = &c.other; expect(&c.memory, false);
+        Test::stackOwners[&c.memory] = &c.window;
+        Test::stackOwners[&c.foreign] = &c.window; expect(&c.foreign, false);
+        EndPaint();
+        Test::stackOwners.clear();
+        CHECK(BeginPaint(&c.window, WM_PRINTCLIENT, &c.memory));
+        expect(&c.memory, true); expect(&c.foreign, false); EndPaint();
+        CHECK(BeginPaint(&c.window, WM_PRINTCLIENT, &c.foreign));
+        expect(&c.foreign, true); expect(&c.memory, false); EndPaint(); c.Refs(0);
+    }
+    void AnsiRuntimeGates()
+    {
+        Context c{true};
+        Test::full = false; CHECK(!BeginPaint(&c.window, WM_PAINT, nullptr)); Test::full = true;
+        c.window.backdrop = false; CHECK(!BeginPaint(&c.window, WM_PAINT, nullptr)); c.window.backdrop = true;
+        CHECK(BeginPaint(&c.window, WM_PAINT, nullptr)); const auto text = AnsiHook(c);
+        Test::full = false; CHECK(text(&c.dc,"X",1,&c.client,0) == 43); Test::full = true;
+        c.window.backdrop = false; CHECK(text(&c.dc,"X",1,&c.client,0) == 43); c.window.backdrop = true;
+        c.window.valid = false; CHECK(text(&c.dc,"X",1,&c.client,0) == 43); c.window.valid = true;
+        c.window.cls = L"TFrame"; CHECK(text(&c.dc,"X",1,&c.client,0) == 43); c.window.cls = L"TPanel";
+        CHECK(Test::alphaText == 0 && PanelTest::nativeAnsi == 4);
+        CHECK(text(&c.dc,"X",1,&c.client,0) == 15 && Test::alphaText == 1);
+        Shutdown();
+        CHECK(text(&c.dc,"X",1,&c.client,0) == 43 && Test::alphaText == 1);
+        EndPaint(); c.Refs(0); CHECK(!BeginPaint(&c.window, WM_PAINT, nullptr));
+    }
+    void AnsiNativeArgumentSemantics()
+    {
+        Context c{true}; CHECK(BeginPaint(&c.window, WM_PAINT, nullptr)); const auto text = AnsiHook(c);
+        char value[16] = "Panel"; RECT rect{2,3,90,20};
+        const auto native = [&](LPCSTR input, int count, LPRECT area, UINT flags) {
+            const int before = PanelTest::nativeAnsi;
+            CHECK(text(&c.dc, input, count, area, flags) == 43);
+            CHECK(PanelTest::nativeAnsi == before+1 && PanelTest::chainedAnsi == PanelTest::nativeAnsi);
+            CHECK(PanelTest::ansiDc == &c.dc && PanelTest::ansiPointer == input);
+            CHECK(PanelTest::ansiCount == count && PanelTest::ansiRect == area && PanelTest::ansiFlags == flags);
+        };
+        native(value, -1, &rect, DT_CALCRECT); CHECK(rect.right == 97);
+        native(value, 5, &rect, DT_MODIFYSTRING); CHECK(value[0] == 'X');
+        native(value, 5, &rect, DT_NOCLIP);
+        native(nullptr, 5, &rect, 0); native(value, 0, &rect, 0); native(value, -2, &rect, 0);
+        native(value, 5, nullptr, 0);
+        for (RECT area : {RECT{}, RECT{10,0,5,8}, RECT{0,8,10,1},
+            RECT{(std::numeric_limits<LONG>::min)(),0,(std::numeric_limits<LONG>::max)(),8},
+            RECT{0,(std::numeric_limits<LONG>::min)(),8,(std::numeric_limits<LONG>::max)()}})
+            native(value, 5, &area, 0);
+        PanelTest::maps[&c.dc] = 8; native(value, 5, &rect, 0);
+        CHECK(Test::alphaText == 0 && PanelTest::conversions == 0);
+        EndPaint(); c.Refs(0);
+    }
+    void AnsiPreservesDcClippingAndBackground()
+    {
+        Context c{true}; TestFont font{204}; c.dc.font = &font;
+        c.dc.text = RGB(10,20,30); c.dc.background = RGB(80,90,100); c.dc.bkMode = OPAQUE;
+        const DcState state = c.dc; const auto details = PanelTest::dcDetails[&c.dc];
+        PanelTest::mutateRenderer = true;
+        RECT rect{3,4,80,20}; const RECT beforeRect = rect;
+        Test::duringNativePaint = [&](HWND, UINT, WPARAM, LPARAM) {
+            c.Fill(); // Accepted panel tint/black base must survive ANSI captions.
+            const int black = Test::black, blends = PanelTest::blends, fill = Test::nativeFill;
+            const int ext = Test::nativeExt, wide = Test::nativeText;
+            CHECK(AnsiHook(c)(&c.dc,"Text",4,&rect,0x21) == 15);
+            CHECK(Test::black == black && PanelTest::blends == blends && Test::nativeFill == fill);
+            CHECK(Test::nativeExt == ext && Test::nativeText == wide);
+            CHECK(PanelTest::alphaState.bkMode == TRANSPARENT);
+            CHECK(PanelTest::alphaState.font == state.font && PanelTest::alphaState.text == state.text);
+            CHECK(PanelTest::alphaState.background == state.background);
+            CHECK(SameDetails(PanelTest::alphaDetails, details));
+            CHECK(SameState(c.dc, state) && SameDetails(PanelTest::dcDetails[&c.dc], details));
+            CHECK(GetMapMode(&c.dc) == MM_TEXT && c.dc.saved.empty());
+            CHECK(PanelTest::savedDetails[&c.dc].empty());
+            CHECK(std::memcmp(&rect, &beforeRect, sizeof(rect)) == 0);
+            CHECK(PanelTest::alphaRectPointer != &rect);
+        };
+        CHECK(c.Message(WM_PAINT)); CHECK(PanelTest::blendPixel[3] == 100);
+        c.custom.lbColor = GetSysColor(COLOR_WINDOW); CHECK(c.Message(WM_PAINT));
+        c.dc.bkMode = TRANSPARENT; const int saved = SaveDC(&c.dc);
+        CHECK(BeginPaint(&c.window, WM_PAINT, nullptr));
+        CHECK(AnsiHook(c)(&c.dc,"Text",4,&rect,0) == 15);
+        CHECK(c.dc.bkMode == TRANSPARENT && c.dc.saved.size() == 1);
+        EndPaint(); CHECK(RestoreDC(&c.dc, saved)); c.Refs(0);
+    }
+    void AnsiConversionFailures()
+    {
+        Context c{true}; TestFont font{204}; c.dc.font = &font;
+        PanelTest::fontCharsets[&font] = 204;
+        CHECK(BeginPaint(&c.window, WM_PAINT, nullptr)); const auto text = AnsiHook(c);
+        const char bytes[]{char(0xcf),char(0xf0)};
+        for (bool* failure : {&PanelTest::failTranslate, &PanelTest::failConvert,
+            &PanelTest::partialConvert, &PanelTest::throwConvert})
+        {
+            *failure = true; SetLastError(0x1234);
+            const int native = PanelTest::nativeAnsi;
+            CHECK(text(&c.dc, bytes, 2, &c.client, 0x20) == 43);
+            CHECK(GetLastError() == PanelTest::nativeError && PanelTest::nativeEntryError == 0x1234);
+            CHECK(PanelTest::nativeAnsi == native+1 && Test::alphaText == 0);
+            CHECK(PanelTest::ansiPointer == bytes && PanelTest::ansiCount == 2 && PanelTest::ansiFlags == 0x20);
+            CHECK(c.dc.saved.empty()); *failure = false;
+        }
+        CHECK(text(&c.dc, bytes, 2, &c.client, 0) == 15 && Test::alphaText == 1);
+        EndPaint(); c.Refs(0);
+    }
+    void AnsiRendererFailures()
+    {
+        Context c{true}; RECT rect{3,4,90,20}; const RECT original = rect;
+        c.dc.text = RGB(10,20,30); const DcState state = c.dc;
+        const auto details = PanelTest::dcDetails[&c.dc];
+        CHECK(BeginPaint(&c.window, WM_PAINT, nullptr)); const auto text = AnsiHook(c);
+        const auto fallback = [&] {
+            const int native = PanelTest::nativeAnsi;
+            CHECK(text(&c.dc,"Panel",5,&rect,0x20) == 43);
+            CHECK(PanelTest::nativeAnsi == native+1 && PanelTest::ansiRect == &rect);
+            CHECK(SameState(PanelTest::nativeState, state));
+            CHECK(SameState(c.dc, state) && SameDetails(PanelTest::dcDetails[&c.dc], details));
+            CHECK(SameDetails(PanelTest::nativeDetails, details) && c.dc.saved.empty());
+            CHECK(std::memcmp(&rect,&original,sizeof(rect)) == 0);
+        };
+        PanelTest::failSave = true; fallback(); PanelTest::failSave = false;
+        PanelTest::failMode = true; fallback(); PanelTest::failMode = false;
+        CHECK(Test::alphaText == 0);
+        PanelTest::mutateRenderer = true;
+        Test::alphaResult = E_FAIL; fallback(); Test::alphaResult = S_OK;
+        PanelTest::throwRenderer = true; fallback(); PanelTest::throwRenderer = false;
+        CHECK(Test::alphaText == 2 && Test::black == 0 && PanelTest::blends == 0);
+        PanelTest::renderedResult = 0;
+        CHECK(text(&c.dc,"Panel",5,&rect,0) == 0 && PanelTest::nativeAnsi == 4);
+        PanelTest::renderedResult = -7;
+        CHECK(text(&c.dc,"Panel",5,&rect,0) == -7 && PanelTest::nativeAnsi == 4);
+        EndPaint(); c.Refs(0);
+    }
+    void AnsiOriginalAndStaleFallback()
+    {
+        Context c{true}; CHECK(BeginPaint(&c.window, WM_PAINT, nullptr)); const auto text = AnsiHook(c);
+        CHECK(text(&c.dc,"Panel",-2,&c.client,0) == 43);
+        CHECK(PanelTest::chainedAnsi == 1 && PanelTest::nativeAnsi == 1);
+        PanelTest::noOriginal[&c.module] = {"DrawTextA"};
+        CHECK(text(&c.dc,"Panel",5,&c.client,0) == 43);
+        CHECK(PanelTest::chainedAnsi == 1 && PanelTest::nativeAnsi == 2 && Test::alphaText == 0);
+        PanelTest::noOriginal.clear(); EndPaint();
+        SetLastError(0x1234);
+        CHECK(text(&c.dc,"Panel",5,&c.client,0) == 43);
+        CHECK(PanelTest::nativeEntryError == 0x1234 && GetLastError() == PanelTest::nativeError);
+        CHECK(PanelTest::chainedAnsi == 1 && PanelTest::nativeAnsi == 3); c.Refs(0);
+    }
+    void AnsiLastError()
+    {
+        Context c{true}; CHECK(BeginPaint(&c.window, WM_PAINT, nullptr)); const auto text = AnsiHook(c);
+        PanelTest::logFormats.clear();
+        SetLastError(0x1234);
+        CHECK(text(&c.dc,"Do not log this text",-1,&c.client,0) == 15);
+        CHECK(GetLastError() == 0x1234 && !PanelTest::logFormats.empty());
+        for (const auto& format : PanelTest::logFormats) CHECK(format.find(L"Do not log this text") == format.npos);
+        for (bool leavesError : {false,true})
+        {
+            PanelTest::nativeLeavesError = leavesError; SetLastError(0x1234);
+            CHECK(text(&c.dc,"Panel",-2,&c.client,0) == 43);
+            CHECK(PanelTest::nativeEntryError == 0x1234);
+            CHECK(GetLastError() == (leavesError ? 0x1234u : PanelTest::nativeError));
+        }
+        PanelTest::nativeLeavesError = false; PanelTest::mutateRenderer = true; Test::alphaResult = E_FAIL;
+        SetLastError(0x2468); CHECK(text(&c.dc,"Panel",5,&c.client,0) == 43);
+        CHECK(PanelTest::nativeEntryError == 0x2468 && GetLastError() == PanelTest::nativeError);
+        PanelTest::nativeResult = 0; SetLastError(0x9876);
+        CHECK(text(&c.dc,"Panel",-2,&c.client,0) == 0);
+        CHECK(PanelTest::nativeEntryError == 0x9876 && GetLastError() == PanelTest::nativeError);
+        EndPaint(); c.Refs(0);
+    }
+    void AnsiNestedRefDeltas()
+    {
+        Context c{true}; CHECK(BeginPaint(&c.window, WM_PAINT, nullptr)); const auto text = AnsiHook(c);
+        CHECK(c.module.refs.at("DrawTextA") == 1);
+        CHECK(BeginPaint(&c.window, WM_PAINT, nullptr)); CHECK(c.module.refs.at("DrawTextA") == 2);
+        CHECK(text(&c.dc,"Panel",5,&c.client,0) == 15);
+        EndPaint(); CHECK(c.module.refs.at("DrawTextA") == 1);
+        CHECK(BeginPaint(&c.window, WM_ERASEBKGND, &c.dc));
+        CHECK(c.module.refs.at("DrawTextA") == 1);
+        CHECK(text(&c.dc,"Panel",5,&c.client,0) == 43); EndPaint();
+        c.other.cls = L"TFrame";
+        CHECK(BeginPaint(&c.other, WM_PAINT, nullptr));
+        CHECK(text(&c.foreign,"Frame",5,&c.client,0) == 43);
+        CHECK(c.module.refs.at("DrawTextA") == 1); EndPaint();
+        c.other.cls = L"TPanel";
+        PanelTest::registrationFailures[&c.module] = {"DrawTextA"};
+        CHECK(BeginPaint(&c.other, WM_PAINT, nullptr));
+        CHECK(c.module.refs.at("DrawTextA") == 1);
+        CHECK(text(&c.foreign,"Unacquired",10,&c.client,0) == 43); EndPaint();
+        CHECK(c.module.refs.at("DrawTextA") == 1); PanelTest::registrationFailures.clear();
+        CHECK(BeginPaint(&c.other, WM_PAINT, nullptr));
+        CHECK(c.module.refs.at("DrawTextA") == 2);
+        CHECK(text(&c.dc,"Other",5,&c.client,0) == 43);
+        CHECK(text(&c.foreign,"Inner",5,&c.client,0) == 15); EndPaint();
+        CHECK(c.module.refs.at("DrawTextA") == 1);
+        CHECK(text(&c.dc,"Outer",5,&c.client,0) == 15); EndPaint(); c.Refs(0);
+        CHECK(c.module.hooks.empty()); EndPaint(); c.Refs(0);
+    }
+    int WINAPI OtherAnsiOccupant(HDC, LPCSTR, int, LPRECT, UINT) { return 97; }
+    void AnsiImportsAndFirstOccupant()
+    {
+        Context c{true};
+        CHECK(BeginPaint(&c.window, WM_PAINT, nullptr)); const auto text = AnsiHook(c); EndPaint();
+        PanelTest::registrationFailures[&c.module] = {"DrawTextA"};
+        CHECK(BeginPaint(&c.window, WM_PAINT, nullptr));
+        CHECK(!c.module.hooks.count("DrawTextA") && c.module.refs.at("DrawTextA") == 0);
+        CHECK(text(&c.dc,"Panel",5,&c.client,0) == 43); EndPaint(); c.Refs(0);
+        PanelTest::registrationFailures.clear();
+        const GlassCore::Hooks::HookDispatcherDependency<1,1> dep{{std::tuple{
+            std::array{std::string_view{"user32.dll"}}, "DrawTextA", reinterpret_cast<void*>(&OtherAnsiOccupant)}}};
+        GlassCore::Hooks::HookDispatcher<1,1> peer{dep, &c.module};
+        CHECK(peer.EnableHook(0,true));
+        CHECK(BeginPaint(&c.window, WM_PAINT, nullptr));
+        CHECK(c.module.refs.at("DrawTextA") == 2);
+        CHECK(AnsiHook(c)(&c.dc,"Panel",5,&c.client,0) == 97 && Test::alphaText == 0);
+        CHECK(peer.EnableHook(0,false));
+        CHECK(AnsiHook(c)(&c.dc,"Panel",5,&c.client,0) == 15);
+        EndPaint(); c.Refs(0); CHECK(c.module.hooks.empty());
+        CHECK(peer.EnableHook(0,true)); CHECK(BeginPaint(&c.window, WM_PAINT, nullptr));
+        EndPaint(); CHECK(peer.GetRef(0) == 1);
+        CHECK(AnsiHook(c)(&c.dc,"Panel",5,&c.client,0) == 97); CHECK(peer.EnableHook(0,false)); c.Refs(0);
+        Shutdown(); c.module.originals.erase("DrawTextA"); Startup();
+        CHECK(BeginPaint(&c.window, WM_PAINT, nullptr)); CHECK(!c.module.hooks.count("DrawTextA"));
+        EndPaint(); c.Refs(0);
+        Shutdown(); c.module.originals.clear(); Startup();
+        CHECK(!BeginPaint(&c.window, WM_PAINT, nullptr)); CHECK(c.module.hooks.empty());
+    }
+    void AnsiReentryAndLogBudget()
+    {
+        Context c{true}; CHECK(BeginPaint(&c.window, WM_PAINT, nullptr)); const auto text = AnsiHook(c);
+        bool insideCallback = false;
+        Test::duringAlpha = [&] {
+            CHECK(!insideCallback); insideCallback = true;
+            CHECK(text(&c.dc,"Nested",6,&c.client,0) == 43); insideCallback = false;
+        };
+        CHECK(text(&c.dc,"Outer",5,&c.client,0) == 15);
+        CHECK(Test::alphaText == 1 && PanelTest::nativeAnsi == 1); Test::duringAlpha = {};
+        PanelTest::clock += 1001; PanelTest::logFormats.clear();
+        for (int i = 0; i < 40; ++i) CHECK(text(&c.dc,"Burst",5,&c.client,0) == 15);
+        CHECK(Test::alphaText == 41 && PanelTest::logFormats.size() == 16);
+        CHECK(text(&c.dc,"Native",-2,&c.client,0) == 43 && PanelTest::nativeAnsi == 2);
+        CHECK(PanelTest::logFormats.size() == 16);
+        PanelTest::clock += 1001; CHECK(text(&c.dc,"Next",4,&c.client,0) == 15);
+        CHECK(PanelTest::logFormats.size() == 17); EndPaint(); c.Refs(0);
+    }
+    void AnsiThreadLocalContext()
+    {
+        Context c{true}; CHECK(BeginPaint(&c.window, WM_PAINT, nullptr)); const auto text = AnsiHook(c);
+        bool passed = false;
+        std::thread outsider([&] {
+            RECT rect{2,3,90,20}; SetLastError(0x5678);
+            passed = text(&c.dc,"Other thread",-1,&rect,0) == 43
+                && PanelTest::nativeEntryError == 0x5678 && GetLastError() == PanelTest::nativeError;
+        });
+        outsider.join(); CHECK(passed && Test::alphaText == 0 && PanelTest::nativeAnsi == 1);
+        CHECK(text(&c.dc,"Owner",5,&c.client,0) == 15); EndPaint(); c.Refs(0);
+    }
+
     void FailureAndReentry()
     {
         Context c;
@@ -507,6 +891,14 @@ int main(int argc, char** argv)
         {"probe-themed-captions", ProbeThemedCaptions}, {"themed-dc-and-legacy", ThemedDcAndLegacyContainers},
         {"themed-native-semantics", ThemedNativeSemanticsAndFailure},
         {"card-and-radio-captions", CardAndRadioGroupProbe},
+        {"ansi-route", AnsiOnlyImportRoute}, {"ansi-classes", AnsiExactClassesAndMessages},
+        {"ansi-lengths", AnsiCountsAndUtf16Length}, {"ansi-codepages", AnsiSelectedFontCodepage},
+        {"ansi-dcs", AnsiDcOwnership}, {"ansi-gates", AnsiRuntimeGates},
+        {"ansi-native-args", AnsiNativeArgumentSemantics}, {"ansi-state", AnsiPreservesDcClippingAndBackground},
+        {"ansi-conversion-failures", AnsiConversionFailures}, {"ansi-render-failures", AnsiRendererFailures},
+        {"ansi-original", AnsiOriginalAndStaleFallback}, {"ansi-last-error", AnsiLastError},
+        {"ansi-nested", AnsiNestedRefDeltas}, {"ansi-imports", AnsiImportsAndFirstOccupant},
+        {"ansi-reentry-budget", AnsiReentryAndLogBudget}, {"ansi-tls", AnsiThreadLocalContext},
     };
     try { CHECK(argc == 2); cases.at(argv[1])(); std::cout << argv[1] << ": OK\n"; return 0; }
     catch (const std::exception& e) { std::cerr << argv[1] << ": " << e.what() << '\n'; return 1; }
