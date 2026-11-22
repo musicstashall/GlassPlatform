@@ -1975,7 +1975,8 @@ class DelphiPipelineContract(unittest.TestCase):
         table = code.split('g_dep{{', 1)[1].split('}};', 1)[0]
         self.assertNotIn('DrawTextA', table)
         self.assertNotIn('TextSlot', code)
-        self.assertIn('IsAnsiTextPanel(hwnd, message) && AcquireAnsiText()', code)
+        self.assertIn('const bool panelText = IsAnsiTextPanel(hwnd, message)', code)
+        self.assertIn('s.ansiTextAcquired = panelText && AcquireAnsiText()', code)
         self.assertIn('GetProcAddress(user32, "DrawTextA")', code)
         self.assertIn('Detours::Attach(reinterpret_cast<void**>(&g_actualDrawTextA)', code)
         self.assertIn('Detours::Detach(reinterpret_cast<void**>(&g_actualDrawTextA)', code)
@@ -1987,9 +1988,8 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('return DrawAnsiText(AnsiTextRoute::PanelExport, dc, text, count, rect, flags)', wrappers)
         self.assertIn('return DrawAnsiText(AnsiTextRoute::PageIat, dc, text, count, rect, flags)', wrappers)
         for marker in ('const auto original = pageIat ? PageAnsiTextOriginal() : AnsiTextOriginal()',
-                       '!g_inHook && IsPanelDc(dc)', 'if (!original && !pageIat) return 0',
-                       'g_stack.back().ansiTextAcquired',
-                       'IsAnsiTextPanel(g_stack.back().hwnd, g_stack.back().message)'):
+                       'if (!original && !pageIat) return 0', '!IsPanelDc(dc)',
+                       '!g_stack.back().ansiTextPaint'):
             self.assertIn(marker, handler)
         for forbidden in ('IsWindowUnicode', 'GetACP(', 'DetourAttach', '_ReturnAddress'):
             self.assertNotIn(forbidden, code)
@@ -2189,21 +2189,48 @@ class DelphiPipelineContract(unittest.TestCase):
                        'GlassCore/src/Subsystems/PaintDispatcher.cpp'):
             self.assertNotIn('IsDelphiPageAnsiPaintWindow', read(source))
 
-    def test_page_iat_and_panel_export_keep_distinct_eligible_leases_and_native_delegation(self):
+    def test_page_iat_and_panel_export_use_one_cached_text_context_and_native_fallback(self):
         code = read('GlassCore/src/Hooks/delphi/TPanelDraw.cpp')
         handler = code.split('int DrawAnsiText(AnsiTextRoute route,', 1)[1].split(
             'int WINAPI PanelDrawTextA(HDC dc,', 1)[0]
-        for marker in ('route == AnsiTextRoute::PageIat', 'pageAnsiTextAcquired', 'ansiTextAcquired',
-                       'IsDelphiPageAnsiPaintWindow(g_stack.back().hwnd, g_stack.back().message)',
-                       'IsAnsiTextPanel(g_stack.back().hwnd, g_stack.back().message)',
-                       'if (!original || !eligible) return native()', 'const bool previous = g_inHook',
-                       'if (pageIat && eligible) g_inHook = true', 'g_inHook = previous',
+        for marker in ('route == AnsiTextRoute::PageIat',
+                       'const auto original = pageIat ? PageAnsiTextOriginal() : AnsiTextOriginal()',
+                       'if (!original || g_inHook || !IsPanelDc(dc) || !g_stack.back().ansiTextPaint) return native()',
+                       'const bool previous = g_inHook', 'g_inHook = previous',
                        'const auto target = original ? original : &::DrawTextA',
                        'target(dc, text, count, rect, flags)', 'L"page-iat" : L"panel-export"', 'route=%s'):
             self.assertIn(marker, handler)
+        for forbidden in ('pageAnsiTextAcquired', 'ansiTextAcquired', 'IsDelphiPageAnsiPaintWindow',
+                          'IsAnsiTextPanel', 'GetClassNameW', 'eligible'):
+            self.assertNotIn(forbidden, handler)
+        native = handler.split('const auto native = [&] {', 1)[1].split('if (!original || g_inHook', 1)[0]
+        self.assertIn('g_inHook = true', native)
+        self.assertNotIn('pageIat', native)
+        self.assertNotRegex(native, r'\bif\s*\(')
         self.assertEqual(handler.count('target(dc, text, count, rect, flags)'), 1)
         self.assertNotIn('return PanelDrawTextA(', handler)
         self.assertNotIn('return PageDrawTextA(', handler)
+
+    def test_ansi_paint_context_is_checked_once_not_derived_from_hook_acquisition(self):
+        code = read('GlassCore/src/Hooks/delphi/TPanelDraw.cpp')
+        self.assertIn('bool ansiTextPaint = false', code)
+        begin = code.split('bool BeginPaint(HWND hwnd,', 1)[1].split('void EndPaint()', 1)[0]
+        for marker in ('const bool panelText = IsAnsiTextPanel(hwnd, message)',
+                       'const bool pageText = GlassShared::IsDelphiPageAnsiPaintWindow(hwnd, message)',
+                       's.ansiTextPaint = panelText || pageText',
+                       's.ansiTextAcquired = panelText && AcquireAnsiText()',
+                       's.pageAnsiTextAcquired = pageText && AcquirePageAnsiText(hwnd)'):
+            self.assertIn(marker, begin)
+        self.assertEqual(begin.count('IsAnsiTextPanel(hwnd, message)'), 1)
+        self.assertEqual(begin.count('IsDelphiPageAnsiPaintWindow(hwnd, message)'), 1)
+        self.assertLess(begin.index('s.ansiTextPaint = panelText || pageText'), begin.index('g_lock.lock_exclusive()'))
+        self.assertLess(begin.index('if (!mask) return false'), begin.index('g_stack.push_back(s)'))
+        tests = read('WndCompat/tests/panel_rendering_tests.cpp')
+        for marker in ('iatForwardCalls == 0', 'SharedAnsiContextDoesNotDependOnTheMatchingHookLease',
+                       'SharedAnsiFallbackIsNativeOnceForBothOwnersAndEntries',
+                       'PanelTest::classQueries == classQueries',
+                       'SharedAnsiMissingOriginalAndStaleIatStayNativeUnderExport'):
+            self.assertIn(marker, tests)
 
     def test_page_iat_harness_executes_production_bridge_and_hybrid_renderer_paths(self):
         test = read('WndCompat/tests/panel_rendering_tests.cpp')
@@ -2211,9 +2238,9 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('#include "../Root/DelphiPanelPaint.h"', test)
         for marker in ('PageIatMessageRoute', 'PageIatExactClassesAndMessages',
                        'PageIatMissingImportAndRegistration', 'PageIatIndependentOfResolvedExport',
-                       'PageIatBackgroundIsolationUnderPanel', 'PageIatDelegatesNestedPanelToExport',
+                       'PageIatBackgroundIsolationUnderPanel', 'PageIatDrawsNestedPanelDirectly',
                        'PageIatHybridFallbackNativeOnce', 'PageIatFirstOccupantAndPeerLifetime',
-                       'PageIatOriginalAndStaleHandler', 'PageIatOwnedFallbackOriginalReentry',
+                       'PageIatOriginalAndStaleHandler', 'SharedAnsiNativeFallbackOriginalReentry',
                        'PageIatThreadLocalContext',
                        'PageIatFailureFallbacks', 'PageIatStateAndLastError'):
             self.assertIn(marker, test)
