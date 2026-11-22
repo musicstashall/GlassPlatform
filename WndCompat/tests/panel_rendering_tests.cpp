@@ -1,6 +1,14 @@
 // Compile the actual panel hook and the actual WndCompat message bridge. The
 // entry window starts unmarked; native erase supplies its real solid brush.
 #include "panel_test_shim.h"
+// Count environment queries, not a replacement for the production admission.
+namespace PanelTest { inline thread_local int classQueries = 0; }
+inline int PanelGetClassNameW(HWND hwnd, LPWSTR name, int capacity)
+{
+    ++PanelTest::classQueries;
+    return GetClassNameW(hwnd, name, capacity);
+}
+#define GetClassNameW PanelGetClassNameW
 #include "../../GlassCore/src/Hooks/delphi/TPanelDraw.cpp"
 #include "../Root/DelphiPanelPaint.h"
 #include <root_panel_theme_test.inc>
@@ -630,7 +638,10 @@ namespace
         Test::full = false; CHECK(text(&c.dc,"X",1,&c.client,0) == 43); Test::full = true;
         c.window.backdrop = false; CHECK(text(&c.dc,"X",1,&c.client,0) == 43); c.window.backdrop = true;
         c.window.valid = false; CHECK(text(&c.dc,"X",1,&c.client,0) == 43); c.window.valid = true;
-        c.window.cls = L"TFrame"; CHECK(text(&c.dc,"X",1,&c.client,0) == 43); c.window.cls = L"TPanel";
+        // A native HWND does not change its class in place. Exercise another
+        // admitted paint context, not a fake mid-session class mutation.
+        c.other.cls = L"TFrame"; CHECK(BeginPaint(&c.other, WM_PAINT, nullptr));
+        CHECK(text(&c.foreign,"X",1,&c.client,0) == 43); EndPaint();
         CHECK(Test::alphaText == 0 && PanelTest::nativeAnsi == 4);
         CHECK(text(&c.dc,"X",1,&c.client,0) == 15 && Test::alphaText == 1);
         Shutdown();
@@ -1077,7 +1088,8 @@ namespace
         Test::full = false; expect(&c.dc, false); Test::full = true;
         c.window.backdrop = false; expect(&c.dc, false); c.window.backdrop = true;
         c.window.valid = false; expect(&c.dc, false); c.window.valid = true;
-        c.window.cls = L"TPageControl"; expect(&c.dc, false); c.window.cls = L"TPage";
+        c.other.cls = L"TFrame"; CHECK(BeginPaint(&c.other, WM_PAINT, nullptr));
+        expect(&c.foreign, false); EndPaint(); // Another real window context is not an ANSI panel.
         expect(&c.dc, true); EndPaint();
         Test::stackOwners.clear(); CHECK(BeginPaint(&c.window, WM_PRINTCLIENT, &c.memory));
         expect(&c.memory, true); expect(&c.foreign, false); EndPaint();
@@ -1227,26 +1239,107 @@ namespace
         CHECK(PanelTest::themeBuffers == 0 && PanelTest::nativeThemeCalls == 1);
         CHECK(ImportedAnsi(c,&c.dc,"Page",4,&c.client,0) == 15);
         CHECK(Test::alphaText == 1 && PanelTest::nativeAnsi == 0);
-        CHECK(::DrawTextA(&c.dc,"Export is not page IAT",-1,&c.client,0) == 43);
-        CHECK(Test::alphaText == 1 && PanelTest::nativeAnsi == 1);
+        CHECK(::DrawTextA(&c.dc,"Page through either hook",-1,&c.client,0) == 15);
+        CHECK(Test::alphaText == 2 && PanelTest::nativeAnsi == 0);
         EndPaint(); CHECK(!ImportRef(c,"DrawTextA") && g_ansiTextRefs == 1);
         CHECK(::DrawTextA(&c.foreign,"Panel",5,&c.client,0) == 15);
         EndPaint(); c.Refs(0); CHECK(!PanelTest::textDetour && PanelTest::attaches == 1 && PanelTest::detaches == 1);
     }
-    void PageIatDelegatesNestedPanelToExport()
+    int iatForwardCalls = 0;
+    int WINAPI CountedIatOriginal(HDC dc, LPCSTR text, int count, LPRECT rect, UINT flags)
+    {
+        ++iatForwardCalls;
+        return ::DrawTextA(dc,text,count,rect,flags);
+    }
+    void PageIatDrawsNestedPanelDirectly()
     {
         PageContext c; c.other.cls = L"TPanel";
+        c.module.originals["DrawTextA"] = reinterpret_cast<void*>(&CountedIatOriginal);
         CHECK(BeginPaint(&c.window, WM_PAINT, nullptr));
         CHECK(BeginPaint(&c.other, WM_PAINT, nullptr));
         CHECK(ImportRef(c,"DrawTextA") == 1 && g_ansiTextRefs == 1);
         const int conversions = PanelTest::conversions;
         CHECK(ImportedAnsi(c,&c.foreign,"Panel",5,&c.client,0) == 15);
         CHECK(Test::alphaText == 1 && PanelTest::nativeAnsi == 0 && PanelTest::conversions == conversions+2);
+        CHECK(iatForwardCalls == 0); // No pass through a second text hook just because the owner is TPanel.
         CHECK(PanelTest::attaches == 1 && PanelTest::detaches == 0);
         EndPaint(); PageOnlyRefs(c);
         CHECK(ImportedAnsi(c,&c.dc,"Page",4,&c.client,0) == 15);
         CHECK(Test::alphaText == 2 && PanelTest::nativeAnsi == 0 && PanelTest::detaches == 1);
         EndPaint(); PageOnlyRefs(c, 0);
+    }
+    void SharedAnsiContextDoesNotDependOnTheMatchingHookLease()
+    {
+        PageContext c; c.other.cls = L"TPanel";
+        c.module.originals["DrawTextA"] = reinterpret_cast<void*>(&CountedIatOriginal);
+        CHECK(BeginPaint(&c.window, WM_PAINT, nullptr));
+        // The already active IAT hook can draw the nested Glass panel even if
+        // that panel's own export acquisition failed. Refs control lifetime,
+        // not whether the current ANSI paint context is allowed to draw Glass.
+        PanelTest::failAttach = true;
+        CHECK(BeginPaint(&c.other, WM_PAINT, nullptr));
+        CHECK(!g_stack.back().ansiTextAcquired && !g_stack.back().pageAnsiTextAcquired);
+        CHECK(ImportRef(c,"DrawTextA") == 1 && g_ansiTextRefs == 0 && !PanelTest::textDetour);
+        CHECK(ImportedAnsi(c,&c.foreign,"Panel",5,&c.client,0) == 15);
+        CHECK(Test::alphaText == 1 && PanelTest::nativeAnsi == 0 && iatForwardCalls == 0);
+        PanelTest::failAttach = false;
+        EndPaint(); PageOnlyRefs(c);
+        CHECK(ImportedAnsi(c,&c.dc,"Page",4,&c.client,0) == 15 && iatForwardCalls == 0);
+        EndPaint(); PageOnlyRefs(c, 0);
+    }
+    void SharedAnsiFallbackIsNativeOnceForBothOwnersAndEntries()
+    {
+        PageContext c; c.other.cls = L"TPanel";
+        c.module.originals["DrawTextA"] = reinterpret_cast<void*>(&CountedIatOriginal);
+        RECT rect{3,4,90,20}; const RECT original = rect;
+        Test::alphaResult = E_FAIL; PanelTest::mutateRenderer = true;
+        for (bool pageOwner : {true,false})
+        {
+            if (pageOwner)
+            { CHECK(BeginPaint(&c.other, WM_PAINT, nullptr)); CHECK(BeginPaint(&c.window, WM_PAINT, nullptr)); }
+            else
+            { CHECK(BeginPaint(&c.window, WM_PAINT, nullptr)); CHECK(BeginPaint(&c.other, WM_PAINT, nullptr)); }
+            HDC dc = pageOwner ? &c.dc : &c.foreign;
+            const DcState state = *dc;
+            const auto details = PanelTest::dcDetails[dc];
+            const int classQueries = PanelTest::classQueries;
+            for (bool iatEntry : {true,false})
+            {
+                const int alpha = Test::alphaText, native = PanelTest::nativeAnsi;
+                const int trampoline = PanelTest::trampolines, forwarded = iatForwardCalls;
+                SetLastError(0x1234);
+                CHECK((iatEntry ? ImportedAnsi(c,dc,"Text",4,&rect,0) : ::DrawTextA(dc,"Text",4,&rect,0)) == 43);
+                CHECK(Test::alphaText == alpha+1 && PanelTest::nativeAnsi == native+1);
+                CHECK(iatForwardCalls == forwarded+int(iatEntry) && PanelTest::trampolines == trampoline+1);
+                CHECK(PanelTest::nativeEntryError == 0x1234 && GetLastError() == PanelTest::nativeError);
+                CHECK(SameState(*dc,state) && SameState(PanelTest::nativeState,state));
+                CHECK(SameDetails(PanelTest::dcDetails[dc],details) && dc->saved.empty());
+                CHECK(std::memcmp(&rect,&original,sizeof(rect)) == 0 && !g_inHook);
+                CHECK(PanelTest::classQueries == classQueries); // Admission is cached, including the fallback chain.
+            }
+            EndPaint(); EndPaint(); c.Refs(0);
+        }
+        Test::alphaResult = S_OK; PanelTest::mutateRenderer = false;
+        CHECK(Test::alphaText == 4 && PanelTest::nativeAnsi == 4 && iatForwardCalls == 2);
+    }
+    void SharedAnsiMissingOriginalAndStaleIatStayNativeUnderExport()
+    {
+        PageContext c; c.other.cls = L"TPanel";
+        CHECK(BeginPaint(&c.other, WM_PAINT, nullptr));
+        CHECK(BeginPaint(&c.window, WM_PAINT, nullptr)); const auto text = PageHook(c);
+        PanelTest::noOriginal[&c.module] = {"DrawTextA"};
+        SetLastError(0x1234);
+        CHECK(text(&c.dc,"Missing original",-1,&c.client,0) == 43);
+        CHECK(Test::alphaText == 0 && PanelTest::nativeAnsi == 1 && PanelTest::trampolines == 1);
+        CHECK(PanelTest::nativeEntryError == 0x1234 && GetLastError() == PanelTest::nativeError && !g_inHook);
+        PanelTest::noOriginal.clear(); EndPaint();
+        CHECK(!ImportRef(c,"DrawTextA") && g_ansiTextRefs == 1);
+        SetLastError(0x5678);
+        CHECK(text(&c.foreign,"Stale IAT callback",-1,&c.client,0) == 43);
+        CHECK(Test::alphaText == 0 && PanelTest::nativeAnsi == 2 && PanelTest::trampolines == 2);
+        CHECK(PanelTest::nativeEntryError == 0x5678 && GetLastError() == PanelTest::nativeError && !g_inHook);
+        CHECK(::DrawTextA(&c.foreign,"Panel",5,&c.client,0) == 15 && Test::alphaText == 1);
+        EndPaint(); c.Refs(0); CHECK(!PanelTest::textDetour);
     }
     void PageIatHybridFallbackNativeOnce()
     {
@@ -1317,7 +1410,20 @@ namespace
         }
         return ::DrawTextA(dc,text,count,rect,flags);
     }
-    void PageIatOwnedFallbackOriginalReentry()
+    bool inExportOriginal = false;
+    DWORD exportOriginalEntryError{};
+    int WINAPI ReentrantExportOriginal(HDC dc, LPCSTR text, int count, LPRECT rect, UINT flags)
+    {
+        if (!inExportOriginal)
+        {
+            exportOriginalEntryError = GetLastError();
+            inExportOriginal = true;
+            CHECK(ImportedAnsi(*pageOriginalContext,dc,"Export original reentry",-1,rect,0) == 43);
+            inExportOriginal = false;
+        }
+        return ChainedPanelAnsi(dc,text,count,rect,flags);
+    }
+    void SharedAnsiNativeFallbackOriginalReentry()
     {
         PageContext c; pageOriginalContext = &c;
         c.module.originals["DrawTextA"] = reinterpret_cast<void*>(&ReentrantPageOriginal);
@@ -1327,7 +1433,22 @@ namespace
         CHECK(Test::alphaText == 0 && PanelTest::nativeAnsi == 2);
         CHECK(PanelTest::conversions == 0 && !g_inHook && !inPageOriginal);
         CHECK(GetLastError() == PanelTest::nativeError);
-        EndPaint(); PageOnlyRefs(c, 0); pageOriginalContext = nullptr;
+        EndPaint(); PageOnlyRefs(c, 0);
+        // The export trampoline's original can also call back through the IAT.
+        // Both originals see native reentry, not a fresh compositor attempt.
+        Shutdown();
+        c.module.originals["DrawTextA"] = reinterpret_cast<void*>(&::DrawTextA);
+        PanelTest::textExport = &ReentrantExportOriginal; Startup();
+        c.other.cls = L"TPanel";
+        CHECK(BeginPaint(&c.other, WM_PAINT, nullptr));
+        CHECK(BeginPaint(&c.window, WM_PAINT, nullptr));
+        SetLastError(0x1234);
+        CHECK(::DrawTextA(&c.dc,"Native",-2,&c.client,0) == 43);
+        CHECK(Test::alphaText == 0 && PanelTest::nativeAnsi == 4 && PanelTest::trampolines == 2);
+        CHECK(PanelTest::conversions == 0 && !g_inHook && !inExportOriginal);
+        CHECK(exportOriginalEntryError == 0x1234 && GetLastError() == PanelTest::nativeError);
+        EndPaint(); EndPaint(); c.Refs(0); pageOriginalContext = nullptr;
+        Shutdown(); PanelTest::textExport = &ChainedPanelAnsi; Startup();
     }
     void PageIatShutdownAndRestart()
     {
@@ -1416,11 +1537,14 @@ int main(int argc, char** argv)
         {"page-native-args", PageIatNativeArgumentSemantics}, {"page-state-error", PageIatStateAndLastError},
         {"page-fallbacks", PageIatFailureFallbacks}, {"page-nested", PageIatNestedRefsAndBarriers},
         {"page-no-background", PageIatBackgroundIsolationUnderPanel},
-        {"page-nested-panel", PageIatDelegatesNestedPanelToExport}, {"page-hybrid-fallback", PageIatHybridFallbackNativeOnce},
+        {"page-nested-panel", PageIatDrawsNestedPanelDirectly}, {"page-hybrid-fallback", PageIatHybridFallbackNativeOnce},
         {"page-occupants", PageIatFirstOccupantAndPeerLifetime}, {"page-original", PageIatOriginalAndStaleHandler},
-        {"page-original-reentry", PageIatOwnedFallbackOriginalReentry},
+        {"page-original-reentry", SharedAnsiNativeFallbackOriginalReentry},
         {"page-shutdown", PageIatShutdownAndRestart}, {"page-reentry", PageIatReentryAndDiagnosticBudget},
         {"page-tls", PageIatThreadLocalContext},
+        {"ansi-shared-context", SharedAnsiContextDoesNotDependOnTheMatchingHookLease},
+        {"ansi-shared-fallback", SharedAnsiFallbackIsNativeOnceForBothOwnersAndEntries},
+        {"ansi-shared-missing-original", SharedAnsiMissingOriginalAndStaleIatStayNativeUnderExport},
     };
     try { CHECK(argc == 2); cases.at(argv[1])(); std::cout << argv[1] << ": OK\n"; return 0; }
     catch (const std::exception& e) { std::cerr << argv[1] << ": " << e.what() << '\n'; return 1; }

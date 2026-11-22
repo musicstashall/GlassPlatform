@@ -74,6 +74,7 @@ namespace GlassCore::DelphiPanel
             UINT message{};
             HDC suppliedDc{};
             std::array<bool, Count> acquired{};
+            bool ansiTextPaint = false; // Class/message checked once at BeginPaint, for either hook.
             bool ansiTextAcquired = false;
             bool pageAnsiTextAcquired = false;
             bool panelBackground = false;
@@ -99,7 +100,7 @@ namespace GlassCore::DelphiPanel
         }
         // Caller holds g_lock exclusively. Logical session refs are separate
         // from attachment state so a failed final Detach keeps its trampoline
-        // valid, but cannot authorize text rendering without a session lease.
+        // valid even after the last logical ref was released.
         bool DetachAnsiText() noexcept
         {
             if (!g_ansiTextAttached) return true;
@@ -359,8 +360,8 @@ namespace GlassCore::DelphiPanel
                 : orig(dc, x, y, options, r, text, count, dx);
         }
 
-        // ANSI captions are opt-in for exact TPanel only; the wider panel/frame
-        // background and themed-caption allowlists must not enrol other classes.
+        // Export acquisition is exact TPanel only; TPage acquires its EXE IAT.
+        // Both feed the same ANSI paint context, not the wider background set.
         bool IsAnsiTextPanel(HWND hwnd, UINT message) noexcept
         {
             wchar_t name[64]{};
@@ -395,8 +396,8 @@ namespace GlassCore::DelphiPanel
             if (count == -1) wide.pop_back(); // -1 includes the terminating NUL, explicit byte counts do not.
             return !wide.empty();
         }
-        // Shared ANSI glyph semantics, two deliberately separate interception
-        // routes. Neither route can borrow the other session's rendering lease.
+        // One Glass text path for both TPanel/TPage. The interception route
+        // selects only its original and diagnostic label, not drawing permission.
         int DrawAnsiText(AnsiTextRoute route, HDC dc, LPCSTR text, int count, LPRECT rect, UINT flags)
         {
             const DWORD entryError = GetLastError();
@@ -408,19 +409,11 @@ namespace GlassCore::DelphiPanel
             const LPCWSTR routeName = pageIat ? L"page-iat" : L"panel-export";
             const auto original = pageIat ? PageAnsiTextOriginal() : AnsiTextOriginal();
             if (!original && !pageIat) return 0; // No export address means no panel attachment.
-            const bool eligible = !g_inHook && IsPanelDc(dc)
-                && (pageIat
-                    ? g_stack.back().pageAnsiTextAcquired
-                        && GlassShared::IsDelphiPageAnsiPaintWindow(g_stack.back().hwnd, g_stack.back().message)
-                    : g_stack.back().ansiTextAcquired
-                        && IsAnsiTextPanel(g_stack.back().hwnd, g_stack.back().message));
             const auto native = [&] {
                 const bool previous = g_inHook;
-                // An owned page fallback must not render again via an active
-                // panel export/another entry into this hook. Ineligible page
-                // calls must remain ordinary passthrough: a nested TPanel may
-                // legitimately reach its unchanged export renderer this way.
-                if (pageIat && eligible) g_inHook = true;
+                // The IAT original may reach the export hook. Once falling
+                // back, stay native instead of retrying the same compositor.
+                g_inHook = true;
                 auto leave = wil::scope_exit([&]() noexcept { g_inHook = previous; });
                 SetLastError(entryError);
                 // Prefer the registry-provided original, never a peer bypass.
@@ -431,7 +424,7 @@ namespace GlassCore::DelphiPanel
                 exitError = GetLastError();
                 return result;
             };
-            if (!original || !eligible) return native();
+            if (!original || g_inHook || !IsPanelDc(dc) || !g_stack.back().ansiTextPaint) return native();
             const HWND hwnd = g_stack.back().hwnd;
             const auto nativeReason = [&](LPCWSTR reason) {
                 if (TakeDiag(4)) DebugLog(DBG_NORMAL,
@@ -540,8 +533,10 @@ namespace GlassCore::DelphiPanel
         const bool background = GlassShared::IsDelphiPanelWindow(hwnd);
         const bool pageText = GlassShared::IsDelphiPageAnsiPaintWindow(hwnd, message);
         if (!background && !pageText) return false;
+        const bool panelText = IsAnsiTextPanel(hwnd, message);
         Session s{}; s.hwnd = hwnd; s.message = message; s.suppliedDc = suppliedDc;
         s.panelBackground = background;
+        s.ansiTextPaint = panelText || pageText;
         unsigned mask = 0;
         {
             auto lock = g_lock.lock_exclusive();
@@ -556,7 +551,7 @@ namespace GlassCore::DelphiPanel
                 s.acquired[i] = g_dispatcher.GetRef(i) > before;
                 if (s.acquired[i]) mask |= 1u << i;
             }
-            s.ansiTextAcquired = IsAnsiTextPanel(hwnd, message) && AcquireAnsiText();
+            s.ansiTextAcquired = panelText && AcquireAnsiText();
             if (s.ansiTextAcquired) mask |= kAnsiTextMask;
             s.pageAnsiTextAcquired = pageText && AcquirePageAnsiText(hwnd);
             if (s.pageAnsiTextAcquired) mask |= kPageAnsiTextMask;

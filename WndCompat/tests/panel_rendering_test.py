@@ -5,8 +5,8 @@ The root themed-text gate and IAT handler are also compiled directly from
 production source excerpts. The complete TPanelDraw unit is compiled in three
 configurations, including its TPanel user32 export detour, exact TPage EXE-IAT
 route and shared ANSI glyph decoding. Checks acquisition/ref/trampoline lifetime,
-first-occupant and hybrid routing, DIB bytes, options and
-scoped state, not Windows NLS tables, pixels, executable Detours patches,
+first-occupant and shared ANSI context through either entry, cached class admission,
+DIB bytes, options and scoped state, not Windows NLS tables, pixels, executable Detours patches,
 real IAT chains, uxtheme alpha, or MSVC build compatibility.
 """
 from pathlib import Path
@@ -131,7 +131,7 @@ class PanelRenderingTest(unittest.TestCase):
     def test_ansi_window_tracked_memory_and_explicit_print_dc_ownership(self):
         self.run_case('ansi-dcs')
 
-    def test_ansi_full_backdrop_window_class_and_shutdown_are_checked_at_call(self):
+    def test_ansi_full_backdrop_window_shutdown_and_non_ansi_inner_context(self):
         self.run_case('ansi-gates')
 
     def test_ansi_native_measure_modify_invalid_geometry_and_mapping_semantics(self):
@@ -210,7 +210,7 @@ class PanelRenderingTest(unittest.TestCase):
     def test_page_inner_session_cannot_use_outer_panel_background_or_themed_hooks(self):
         self.run_case('page-no-background')
 
-    def test_page_outer_iat_delegates_nested_tpanel_to_unchanged_export_route(self):
+    def test_page_iat_draws_nested_tpanel_without_forwarding_to_another_text_hook(self):
         self.run_case('page-nested-panel')
 
     def test_page_native_fallback_and_reentry_cross_panel_export_only_once(self):
@@ -222,7 +222,7 @@ class PanelRenderingTest(unittest.TestCase):
     def test_page_native_fallback_uses_registry_original_and_stale_handler_is_safe(self):
         self.run_case('page-original')
 
-    def test_page_owned_native_fallback_blocks_compositor_reentry_via_its_original(self):
+    def test_shared_ansi_native_fallback_blocks_reentry_from_iat_and_export_originals(self):
         self.run_case('page-original-reentry')
 
     def test_page_shutdown_releases_only_its_iat_refs_and_can_restart(self):
@@ -233,6 +233,15 @@ class PanelRenderingTest(unittest.TestCase):
 
     def test_page_iat_cannot_use_a_different_threads_session(self):
         self.run_case('page-tls')
+
+    def test_shared_ansi_context_does_not_require_a_lease_from_the_same_hook(self):
+        self.run_case('ansi-shared-context')
+
+    def test_shared_ansi_fallback_is_once_for_both_entries_without_rechecking_class(self):
+        self.run_case('ansi-shared-fallback')
+
+    def test_shared_ansi_missing_original_and_stale_iat_stay_native_under_export(self):
+        self.run_case('ansi-shared-missing-original')
 
 
 if __name__ == '__main__':

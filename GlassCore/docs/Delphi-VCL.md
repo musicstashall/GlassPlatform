@@ -6194,3 +6194,116 @@ runner methods побайтово сохранены. Предыдущие ра�
 Готова согласованная реализация для последующей пользовательской сборки:
 проверить появление двух абзацев TPage и сохранность текущей подложки/флажков.
 До такой проверки **исчезновение текста не объявляется визуально исправленным**.
+
+## Тест 118: общий ANSI paint-контекст TPanel/TPage, независимо от входного хука
+
+После публикации **c6dc298** (§117) пользователь подтвердил результат:
+**«Подтверждаю успех. Текс на панелях рисуется»**. Таким образом, визуальная
+приёмка предыдущего исправления получена; текст не считается по-прежнему
+пропавшим. Затем пользователь потребовал **«Упрости логику»**: разрешение
+рисовать подходящий TPanel/TPage не должно зависеть от входа через IAT или
+export-detour. Прежнее требование делегировать nested TPanel из page IAT в
+panel export было искусственным ограничением нашей реализации, а не свойством
+WinAPI или причиной неизбежного подавления текста. **Этот раздел заменяет
+описанное в §117 разделение rendering permission по route.**
+
+### Изменение production, без смены способов установки хуков
+
+- В `TPanelDraw.cpp` сессия хранит один **ansiTextPaint**: exact TPanel либо
+  exact TPage, только **WM_PAINT / WM_PRINTCLIENT**. Class/message admission
+  вычисляется при **BeginPaint**, не повторяется на каждом DrawTextA. HWND,
+  Full/backdrop, shutdown, TLS и принадлежность DC по-прежнему проверяются
+  во время вызова; это не глобальное разрешение всем дочерним контролам.
+- **Оба входа DrawTextA сразу используют один decoder/compositor** текущей
+  подходящей сессии. Активный IAT может сам нарисовать nested TPanel, а активный
+  export-detour — TPage. Специальной передачи в другой текстовый hook только
+  ради класса панели больше нет. Собственный acquired text ref не является
+  rendering permission; например, уже активный page IAT может обслужить
+  допущенный TPanel с background refs, даже если его export Attach не удался.
+- Само открытие сессии по-прежнему требует фактически приобретённого hook ref;
+  отказ page IAT registration/отсутствие импорта не создаёт phantom session.
+  **TPanel приобретает прежний resolved-user32 export Detours, TPage — только
+  named entry-point EXE DrawTextA через свой HookDispatcher/IATRegistry.**
+  Независимые acquisition, ref-delta/release, startup/shutdown и original
+  pointers сохранены. First-active-occupant contract не обходится и registry
+  не перерабатывается; перехват не гарантируется, если чужой occupant не отдаёт
+  этому renderer управление.
+- Route нужен только для выбора **своего original и diagnostic label**.
+  Native fallback всегда устанавливает общий reentry guard и восстанавливает
+  предыдущее значение. IAT original → active export, missing/stale IAT original
+  → API export, а также callbacks из registry original/export trampoline
+  **не повторяют conversion/compositor**. Каждый собственный native fallback
+  вызывает свой original ровно один раз с исходными аргументами. Отдельный
+  нативный вызов из callback остаётся отдельным вызовом API, не подавляется.
+- **TPage остаётся text-only**: общий panel/background/themed allowlist не
+  расширен; background/image hooks ему не приобретаются. `panelBackground`
+  продолжает запрещать применение унаследованных от внешнего TPanel фоновых
+  hooks к странице. WM_ERASEBKGND/GetDC, StretchBlt, themed captions, общий
+  PaintDispatcher/DoubleBuffered и принятые соседние контролы не менялись.
+- Selected-font charset → codepage, ANSI byte bounds / реальная UTF-16 длина,
+  transparent glyphs, owned window / tracked memory / supplied print DC,
+  SaveDC/RestoreDC, caller RECT и entry/exit LastError сохранены. CALCRECT,
+  MODIFYSTRING, NOCLIP, неподдерживаемые аргументы/mapping и сбои по-прежнему
+  имеют native semantics. Новые opaque text-rectangle fills не добавлены.
+
+`route=page-iat` / `route=panel-export` теперь обозначают **точку входа**, а не
+класс владельца текста. Для доказательства class → session → hook → DC нужно
+сопоставлять HWND с `Begin class=...`, не выводить класс из suffix route.
+Логирование остаётся ограниченным metadata-only, без содержимого строк.
+Повторные class queries убраны структурно и проверены счётчиком в harness;
+численное ускорение или снижение нагрузки **не измерялось и не заявляется**.
+
+### Проверки
+
+- До production-правки обновлённый harness компилировался во всех трёх
+  конфигурациях: **4 сценария ×3 RED на runtime**, отражая прежние route/lease
+  ограничения; остальные 49 из первых 53 сценариев проходили. Это не compile
+  failures. Затем добавлен missing/stale-original scenario и расширен original
+  reentry test на обратный путь export → IAT.
+- Итоговый **panel harness 54×3 PASS**, Release / Debug / Debug+probe,
+  C++20/`-Werror`. Компилируются полный production TPanelDraw, реальный WndCompat
+  bridge и прежние root snippets, не подменённый renderer. Проверены обе
+  вложенности, прямой IAT → TPanel без вызова original, export → TPage,
+  общий admission без собственного text lease, отсутствие class queries в
+  DrawTextA, native-once/reentry через оба original, DC/RECT/LastError,
+  background isolation и прежние ANSI/lifetime сценарии. Probe define здесь
+  проверяет совместимость конфигурации, не исполнение настоящей probe Begin.
+- **ASan+UBSan+leak detection: 54×3 PASS**, с
+  `-fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie`,
+  `detect_leaks=1:abort_on_error=1` / `halt_on_error=1:print_stacktrace=1`.
+- **127 source contracts PASS**: прежний route-isolation contract заменён
+  общим контекстом/native guard, один новый — cached admission; два соседних
+  контракта адаптированы, остальные **123 побайтово сохранены**.
+- **22/22 компилируемых мутанта отвергнуты runtime**: возврат class/route/lease
+  ограничений, повторные class queries, отсутствие/условность/залипание guard,
+  повторный native call, подмена registry original, page background leakage,
+  слишком широкий class/message admission, потеря Full/DC/print gates,
+  compositor reentry, DC restore/transparency и native LastError. Compile
+  failures и timeouts не засчитывались; у каждого мутанта успешная компиляция
+  и ненулевой runtime exit. Временные sources/binaries удалены.
+- Соседние suites PASS: **DDH 18**, optional probe **19**, VCL images **14**,
+  ListView images **13**, ButtonGroups **9**, CoolBar **9**, BomeMemo **14**,
+  ListBox **21×3**, CTLCOLOR **13×3**, input icons **28×3** в конфигурациях
+  соответствующих runners. Закрытые ComboLBox/SearchBox/TButtonedEdit не
+  переоткрываются и новой пользовательской приёмки не требуют.
+
+Финальная сверка с **c6dc298**: изменены только **5 существовавших файлов** —
+TPanelDraw, три файла panel tests/contracts и этот документ; остальные **1789**
+из 1794 tracked-файлов побайтово неизменны. Production-дельта ограничена общим
+cached text admission, отказом от route-specific permission, единым native
+fallback guard и соответствующими комментариями; decoder/compositor body,
+оба механизма установки/снятия и фоновые/themed функции сохранены. Из прежних
+51 C++-сценария **46 функций побайтово сохранены**, пять адаптированы/расширены,
+добавлено три сценария; Context/PageContext и runner setup/execution неизменны.
+Все предыдущие разделы документа сохранены побайтово. UTF-8 без BOM, Python
+AST, `git diff --check` и исходный hash BWM.txt проверены. Разовые scripts,
+manifest и mutation report удалены перед коммитом; изображения и BWM сохранены,
+удалённые ранее разобранные логи не восстановлены.
+
+**Новая упрощённая версия ещё не проверена в Windows/MSVC и визуально:**
+portable doubles/sanitizers не исполняют настоящий IAT/Detours/Win32 ABI,
+NLS/GDI/uxtheme/DWM. Предыдущий визуальный успех c6dc298 этим не отменяется.
+Для последующей сборки/проверки Restorator PE32 нужен соответствующий
+**Win32/x86 комплект DLL**; не x64-only DLL. Платформу не запускали/останавливали,
+DLL не освобождали. Проверить сохранение текста TPage/TPanel и прежней подложки
+можно после публикации этой согласованной правки.
