@@ -811,10 +811,8 @@ DWORD WINAPI InstallEngine::RunGlassWorker(LPVOID p) noexcept {
             if(ok && !self->IsCancelRequested())ok=self->PrepareManagedRemoval();
 
             if (ok && !vendorOnly && !self->IsCancelRequested()) {
-                if(GlassProcedurePlan::Settings(self->procedureMask_)) {
-                    ok=GlassInstallUtil::CloseSelectedSettingsProcesses(self->x64Dir_,self->x86Dir_,self->procedureMask_&36u,&self->cancelRequested_);
-                    if(!ok&&!self->IsCancelRequested())self->SetFailure(PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN?L"Не удалось закрыть выбранную версию GlassSettings. Закройте её и повторите операцию.":L"Could not close the selected GlassSettings version. Close it and retry.",GetLastError());
-                }
+                if(GlassProcedurePlan::Settings(self->procedureMask_))
+                    ok=self->WaitForSelectedSettings();
                 if (ok && !self->IsCancelRequested()) ok = self->StopRunningHosts();
             }
 
@@ -1204,9 +1202,11 @@ std::wstring InstallEngine::HoldReport() const noexcept {
 
 void InstallEngine::SignalHold(HoldAction action) noexcept {
     AcquireSRWLockExclusive(&statusLock_);
+    const HoldKind kind=holdKind_;
     holdAction_ = action;
     holdKind_ = HoldKind::None;
-    if (action==HoldAction::Retry) unlockActivity_.Begin(WizardUnlock::Phase::Modules);
+    // Повтор GlassSettings не запускает анимацию выгрузки модулей.
+    if (action==HoldAction::Retry && kind!=HoldKind::Settings) unlockActivity_.Begin(WizardUnlock::Phase::Modules);
     else if (action==HoldAction::Unlock) unlockActivity_.Begin(WizardUnlock::Phase::Processes);
     else unlockActivity_.End();
     ReleaseSRWLockExclusive(&statusLock_);
@@ -1258,6 +1258,48 @@ bool InstallEngine::StopGlassPlatform(GP::PlatformArch arch, const std::wstring&
     // their own visible status and unlock pages.
     InstallLog::LineFormat(L"%s: host stopped",logTag);
     return true;
+}
+
+bool InstallEngine::WaitForSelectedSettings() noexcept {
+    const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+    const unsigned mask=procedureMask_&36u;
+    const auto fail=[this,ru](DWORD error) {
+        SetFailure(ru?L"Не удалось закрыть выбранную версию GlassSettings. Закройте её и повторите операцию.":
+            L"Could not close the selected GlassSettings version. Close it and retry.",error);
+        return false;
+    };
+    for(;;) {
+        if(IsCancelRequested())return false;
+        const bool closed=GlassInstallUtil::CloseSelectedSettingsProcesses(x64Dir_,x86Dir_,mask,&cancelRequested_);
+        if(closed)return !IsCancelRequested();
+        if(IsCancelRequested())return false;
+        const DWORD error=GetLastError();
+        // Несохранённые изменения оставляют процесс живым. Это не ошибка установки.
+        if(error!=ERROR_TIMEOUT)return fail(error);
+        std::wstring report=GlassInstallUtil::FormatSelectedSettingsReport(x64Dir_,x86Dir_,mask);
+        if(report.empty()) {
+            if(GlassInstallUtil::CloseSelectedSettingsProcesses(x64Dir_,x86Dir_,mask,&cancelRequested_))
+                return !IsCancelRequested();
+            if(IsCancelRequested())return false;
+            const DWORD again=GetLastError();
+            if(again!=ERROR_TIMEOUT)return fail(again);
+            report=ru?L"GlassSettings.exe: окно не закрылось":L"GlassSettings.exe: the window stayed open";
+        }
+        AcquireSRWLockExclusive(&statusLock_);
+        unlockActivity_.End();
+        if(holdGate_)ResetEvent(holdGate_);
+        holdKind_=HoldKind::Settings;
+        holdReport_=std::move(report);
+        holdAction_=HoldAction::None;
+        ReleaseSRWLockExclusive(&statusLock_);
+        InstallLog::Line(L"GlassSettings stayed open; waiting until it is closed");
+        if(IsCancelRequested())return false;
+        WaitForSingleObject(holdGate_,INFINITE);
+        AcquireSRWLockShared(&statusLock_);
+        const auto action=holdAction_.load(std::memory_order_acquire);
+        ReleaseSRWLockShared(&statusLock_);
+        if(action==HoldAction::Cancel || IsCancelRequested()){quietClose_=true;return false;}
+    }
 }
 
 bool InstallEngine::StopRunningHosts() noexcept {

@@ -104,7 +104,7 @@ constexpr wchar_t kWebView2BootstrapperUrl[] = L"https://go.microsoft.com/fwlink
 constexpr UINT_PTR kDebugDemoTimer = 4;
 constexpr UINT kDebugDemoPageMs = 1800;
 #endif
-enum class Page { RuntimeRequired, RuntimeInstalling, RuntimeError, Welcome, Checking, Conflicts, Downgrade, VersionInvalid, License, Components, Certificate, FullCleanup, SettingsRemovalRisk, Installing, ModulesBusy, ProcessesStuck, ConfirmCancel, Cancelling, Cancelled, Launching, Complete, Error };
+enum class Page { Welcome, Checking, Conflicts, License, Components, Certificate, FullCleanup, SettingsRemovalRisk, Installing, SettingsBusy, ModulesBusy, ProcessesStuck, ConfirmCancel, Cancelling, Cancelled, Launching, Complete, Error };
 HINSTANCE gInstance = nullptr;
 HBRUSH gWindowClassBrush = nullptr;
 bool gWindowClassRegistered = false;
@@ -1227,6 +1227,19 @@ public:
         if(vendorMetadataThread_.joinable())vendorMetadataThread_.join();
         downloads_.Join();
     }
+    // Бит 1 — кнопка мыши, бит 2 — перетаскивание окна. Таймер тура стоит, пока захват не отпущен.
+    void SetDebugDemoHold(unsigned bit, bool active) noexcept {
+#ifdef _DEBUG
+        if(!debugDemoActive_){debugDemoHold_=0;return;}
+        const unsigned previous=debugDemoHold_;
+        if(active)debugDemoHold_|=bit; else debugDemoHold_&=~bit;
+        if(!previous && debugDemoHold_)KillTimer(window,kDebugDemoTimer);
+        else if(previous && !debugDemoHold_)
+            SetTimer(window,kDebugDemoTimer,debugNativeDemo_?4000:kDebugDemoPageMs,nullptr);
+#else
+        (void)bit;(void)active;
+#endif
+    }
     // Observe queued pointer messages before child controls/IsDialogMessage
     // consume them. Commands and keyboard activation are NOT pointer clicks.
     void ObserveComponentNoticeClick(const MSG& message) noexcept {
@@ -1242,6 +1255,8 @@ public:
             msg==WM_NCLBUTTONDOWN||msg==WM_NCRBUTTONDOWN||msg==WM_NCMBUTTONDOWN||msg==WM_NCXBUTTONDOWN;
         const bool up=msg==WM_LBUTTONUP||msg==WM_RBUTTONUP||msg==WM_MBUTTONUP||msg==WM_XBUTTONUP||
             msg==WM_NCLBUTTONUP||msg==WM_NCRBUTTONUP||msg==WM_NCMBUTTONUP||msg==WM_NCXBUTTONUP;
+        const bool webPointer=webHost_ && (message.hwnd==webHost_ || IsChild(webHost_,message.hwnd));
+        if(!webPointer && (down||up)) SetDebugDemoHold(1,down);
         if(down){nativeNoticePress_=message.pt;nativeNoticeButton_=msg;return;}
         if(nativeNoticeButton_&&(up||msg==WM_MOUSEMOVE||msg==WM_NCMOUSEMOVE)) {
             const LONG dx=message.pt.x-nativeNoticePress_.x,dy=message.pt.y-nativeNoticePress_.y;
@@ -1323,7 +1338,6 @@ private:
     std::wstring platformVersion_;
     std::wstring eulaText_;
     std::vector<std::wstring> conflicts_;
-    std::wstring installedGlassVersion_;
     GlassProductInspect::Report inspect_;
     std::thread inspectThread_,vendorMetadataThread_;
     bool ogMetadataBlocked_=false,sutMetadataBlocked_=false,ogMetadataLocal_=false,sutMetadataLocal_=false;
@@ -1334,12 +1348,8 @@ private:
     Page beforeSettingsRemovalRisk_=Page::Components;
     std::atomic_bool inspectStop_{false};
     mutable std::mutex inspectMutex_;
-    std::wstring setupProductVersion_;
     std::wstring footerSetupVersion_; // Actual running EXE FileVersion; not catalog/bundle.
     std::wstring preflightX64Root_,preflightX86Root_,preflightOpenGlassRoot_;
-    std::wstring blockReason_;
-    std::wstring versionInvalidNote_;
-    std::wstring downgradeBody_;
     struct VersionCheckResult {
         bool completed = false;
         bool fetched = false;
@@ -1388,6 +1398,7 @@ private:
     ULONGLONG simulateRollbackStarted_ = 0;
     bool debugDemoPending_ = false, debugDemoStarted_ = false, debugDemoActive_ = false;
     bool debugNativeDemo_ = false;
+    unsigned debugDemoHold_ = 0;
     size_t debugDemoStep_ = 0;
 #endif
     std::wstring installStatusLine_;
@@ -1730,20 +1741,21 @@ private:
 #endif
                 ContinueVersionCheck(); // Update the controller before exposing product choices.
         } else {
-            SetPage(Page::RuntimeRequired);
+            // Среда ещё не стоит: бублик ожидания остаётся, загрузка идёт в фоне.
+            SetPage(Page::Welcome);
+            StartRuntimeInstallation();
         }
     }
     void Layout() {
         Move(back_,page_==Page::ModulesBusy?510:644,kContentHeight+12,page_==Page::ModulesBusy?230:96,32);
         // Complete uses the exact rectangle previously occupied by Cancel.
-        const bool unlock = page_==Page::ProcessesStuck;
+        const bool unlock = page_==Page::ProcessesStuck || page_==Page::SettingsBusy;
         const bool conflictCheck = page_==Page::Conflicts;
         const bool confirm=page_==Page::ConfirmCancel || page_==Page::SettingsRemovalRisk;
-        const bool terminal=page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error ||
-            page_==Page::RuntimeError;
+        const bool terminal=page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error;
         if (confirm) Move(back_,page_==Page::SettingsRemovalRisk?518:568,kContentHeight+12,190,32);
-        const int nextWidth=page_==Page::SettingsRemovalRisk?240:confirm?190:page_==Page::RuntimeRequired?230:(unlock || conflictCheck)?160:104;
-        const int nextX=page_==Page::SettingsRemovalRisk?728:confirm?778:page_==Page::RuntimeRequired?624:terminal?864:
+        const int nextWidth=page_==Page::SettingsRemovalRisk?240:confirm?190:(unlock || conflictCheck)?160:104;
+        const int nextX=page_==Page::SettingsRemovalRisk?728:confirm?778:terminal?864:
             (unlock || conflictCheck)?694:750;
         Move(next_,nextX,kContentHeight+12,nextWidth,32);
         Move(cancel_,864,kContentHeight+12,104,32);
@@ -1776,14 +1788,12 @@ private:
     }
     bool WaitingForWebUi() const noexcept {
         return !NativeDemo() && !webReady_ && SUCCEEDED(webError_) &&
-            page_!=Page::RuntimeRequired && page_!=Page::RuntimeInstalling &&
-            page_!=Page::RuntimeError &&
             (webStartupExpected_ || (page_!=Page::Error));
     }
     void ShowContentControls() {
         if(WaitingForWebUi()) {
             EnableWindow(next_,FALSE);EnableWindow(back_,FALSE);
-            for(HWND control:{back_,next_,cancel_,eula_,accept_,cleanupOg_,component64_,component32_,componentSettings_,
+            for(HWND control:{back_,next_,eula_,accept_,cleanupOg_,component64_,component32_,componentSettings_,
                 componentSettings32_,componentOpenGlass_,componentSecureUxTheme_,componentResources_,certInstall_,certSkip_,progress_,webHost_})
                 if(control)ShowWindow(control,SW_HIDE);
             return;
@@ -1798,7 +1808,7 @@ private:
         ShowWindow(cleanupOg_,!webVisible&&page_==Page::FullCleanup&&cleanupOgEligible_?SW_SHOWNA:SW_HIDE);
         SetWindowTextW(cleanupOg_,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"OpenGlass — удалить параметры реестра":L"OpenGlass — remove registry settings");
         SendMessageW(cleanupOg_,BM_SETCHECK,selection_.cleanupOpenGlassConfig?BST_CHECKED:BST_UNCHECKED,0);
-        const bool showProgress = !transitioning_ && (page_==Page::Installing || page_==Page::Cancelling || page_==Page::Launching || page_==Page::RuntimeInstalling ||
+        const bool showProgress = !transitioning_ && (page_==Page::Installing || page_==Page::Cancelling || page_==Page::Launching ||
             (page_==Page::Components&&downloadContinuePending_) || (page_==Page::Checking&&setupDownloadActive_));
         ShowWindow(progress_, showProgress ? SW_SHOWNA : SW_HIDE);
         if (controller_) controller_->put_IsVisible(webVisible ? TRUE : FALSE);
@@ -1887,8 +1897,6 @@ private:
         case Page::Welcome: return L"welcome";
         case Page::Checking: return L"checking";
         case Page::Conflicts: return L"conflicts";
-        case Page::Downgrade: return L"downgrade";
-        case Page::VersionInvalid: return L"version-invalid";
         case Page::License: return L"license";
         case Page::Components: return L"components";
         case Page::Certificate: return L"certificate";
@@ -1899,13 +1907,11 @@ private:
         case Page::Cancelled: return L"cancelled";
         case Page::Launching: return L"launching";
         case Page::Installing: return WizardUnlock::InstallingPage(unlock);
+        case Page::SettingsBusy: return L"settings-close";
         case Page::ModulesBusy: return L"unlock-modules";
         case Page::ProcessesStuck: return L"unlock-processes";
         case Page::Complete: return L"complete";
         case Page::Error: return L"error";
-        case Page::RuntimeError: return L"error";
-        // Bootstrap pages necessarily work without a WebView2 runtime.
-        case Page::RuntimeRequired: case Page::RuntimeInstalling: return L"loading";
         }
         return L"welcome";
     }
@@ -2550,13 +2556,6 @@ private:
                 L",\"conflictsTitle\":"+JsStringLiteral(Text(IDS_CONFLICTS_TITLE))+
                 L",\"conflictsBody\":"+JsStringLiteral(Text(IDS_CONFLICTS_BODY))+
                 L",\"conflictsInstructions\":"+JsStringLiteral(Text(IDS_CONFLICTS_INSTRUCTIONS))+
-                L",\"downgradeTag\":"+JsStringLiteral(Text(IDS_DOWNGRADE_TAG))+
-                L",\"downgradeTitle\":"+JsStringLiteral(Text(IDS_DOWNGRADE_TITLE))+
-                L",\"versionInvalidTag\":"+JsStringLiteral(Text(IDS_VERSION_INVALID_TAG))+
-                L",\"versionInvalidTitle\":"+JsStringLiteral(Text(IDS_VERSION_INVALID_TITLE))+
-                L",\"downgradeNote\":"+JsStringLiteral(Text(IDS_DOWNGRADE_NOTE))+
-                L",\"versionLabel\":"+JsStringLiteral(Text(IDS_INSTALLED_VERSION_LABEL))+
-                L",\"setupVersionLabel\":"+JsStringLiteral(Text(IDS_SETUP_VERSION_LABEL))+
                 L",\"doneTag\":"+JsStringLiteral(Text(IDS_DONE_TAG))+
                 L",\"doneTitle\":"+JsStringLiteral(Text(IDS_DONE_TITLE))+
                 L",\"doneBody\":"+JsStringLiteral(Text(doneBodyId))+
@@ -2567,7 +2566,7 @@ private:
                 L",\"doneWarnBody\":"+JsStringLiteral(Text(SimulationBuild()?IDS_DONE_BODY_DEMO:IDS_DONE_WARN_BODY))+
                 L",\"doneWarnLabel\":"+JsStringLiteral(Text(IDS_DONE_WARN_LABEL))+
                 L",\"errorTag\":"+JsStringLiteral(Text(IDS_ERROR_TAG))+
-                L",\"errorTitle\":"+JsStringLiteral(Text(page_==Page::RuntimeError?IDS_RUNTIME_INSTALL_FAILED:IDS_ERROR_TITLE))+
+                L",\"errorTitle\":"+JsStringLiteral(Text(IDS_ERROR_TITLE))+
                 L",\"errorBody\":"+JsStringLiteral(Text(IDS_ERROR_BODY))+
                 L",\"errorDetails\":"+JsStringLiteral(Text(IDS_ERROR_DETAILS))+
                 L",\"errorNote\":"+JsStringLiteral(Text(IDS_ERROR_LOG_HINT))+
@@ -2612,12 +2611,7 @@ private:
             L",\"checkingProducts\":"+((controllerCheckHandled_||IsControllerChild())?L"true":L"false")+
             L",\"checkingStatus\":"+JsStringLiteral(checkingStatus_)+
             L",\"conflicts\":"+ConflictsJson()+
-            L",\"installedGlassVersion\":"+JsStringLiteral(installedGlassVersion_)+
-            L",\"setupProductVersion\":"+JsStringLiteral(setupProductVersion_)+
-            L",\"versionInvalidNote\":"+JsStringLiteral(versionInvalidNote_)+
-            L",\"blockReason\":"+JsStringLiteral(blockReason_)+
-            L",\"downgradeBody\":"+JsStringLiteral(downgradeBody_)+
-            L",\"errorReason\":"+JsStringLiteral(page_==Page::RuntimeError?runtimeError_:errorReason_)+
+            L",\"errorReason\":"+JsStringLiteral(errorReason_)+
             L",\"finishWarnings\":"+FinishWarningsJson()+
             L",\"cancellationIsRemoval\":"+((selection_.removeMask||selection_.secureUxThemeRemove)?L"true":L"false")+
             L",\"cancelledDetail\":"+JsStringLiteral(cancelledDetail_)+
@@ -2630,6 +2624,11 @@ private:
             L",\"monitorRiskTitle\":"+JsStringLiteral(Text(IDS_NATIVE_RISK_TITLE))+
             L",\"monitorRiskBody\":"+JsStringLiteral(Text(IDS_NATIVE_RISK_BODY))+
             L",\"holdReport\":"+JsStringLiteral(holdReport_)+
+#ifdef _DEBUG
+            L",\"demoTour\":"+(debugDemoActive_?L"true":L"false")+
+#else
+            L",\"demoTour\":false"+
+#endif
             L",\"maintenance\":"+(MaintenanceUi()?L"true":L"false")+
             L",\"cleanupBody\":"+JsStringLiteral(FullCleanupText())+
             L",\"cleanupUserData\":"+(selection_.cleanupUserData?L"true":L"false")+
@@ -2650,11 +2649,10 @@ private:
     void FocusPage() {
         if (page_==Page::ConfirmCancel || page_==Page::SettingsRemovalRisk) { SetFocus(back_); return; }
         if (webReady_ && (page_==Page::License || page_==Page::Components || page_==Page::Certificate)) { SetFocus(webHost_); return; }
-        SetFocus(page_==Page::ModulesBusy || page_==Page::ProcessesStuck || page_==Page::Conflicts ? next_ :
-                 page_==Page::Downgrade || page_==Page::VersionInvalid ? cancel_ :
+        SetFocus(page_==Page::ModulesBusy || page_==Page::ProcessesStuck || page_==Page::SettingsBusy || page_==Page::Conflicts ? next_ :
                  page_==Page::Checking ? cancel_ :
                  page_==Page::License && !accepted_ ? accept_ :
-                 page_==Page::Installing || page_==Page::RuntimeInstalling ? cancel_ : next_);
+                 page_==Page::Installing ? cancel_ : next_);
     }
     void PrintControl(HDC dc, HWND control) {
         RECT r{}; GetWindowRect(control,&r);
@@ -2766,8 +2764,7 @@ private:
         SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION,0,&animationsEnabled,0);
         loadingAnimationsEnabled_=animationsEnabled!=FALSE;
         const bool nativeLoading=(page_==Page::Welcome || (page_==Page::Checking)) && !webReady_ && SUCCEEDED(webError_);
-        if (animationsEnabled && !webReady_ &&
-            (nativeLoading || page_==Page::Error || page_==Page::RuntimeInstalling))
+        if (animationsEnabled && !webReady_ && (nativeLoading || page_==Page::Error))
             SetTimer(window,kHeroTimer,kHeroTimerMs,nullptr);
         else KillTimer(window,kHeroTimer);
         WizardTheme::ApplyDarkWindowChrome(window);
@@ -2776,38 +2773,37 @@ private:
         WizardTheme::SetSystemCloseEnabled(window,!closeBlocked);
         ShowWindow(eula_,SW_HIDE); ShowWindow(accept_,SW_HIDE);
         Layout();
-        const bool blockedPage=page_==Page::Downgrade || page_==Page::VersionInvalid;
         const bool demoControlsLocked=DebugDemoLocksControls();
-        const bool terminal=page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error ||
-            page_==Page::RuntimeError;
+        const bool terminal=page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error;
         const bool inProgress=page_==Page::Checking || page_==Page::Installing || page_==Page::Cancelling ||
-            page_==Page::Launching || page_==Page::RuntimeInstalling;
-        const UINT nextId = page_==Page::RuntimeRequired?IDS_RUNTIME_INSTALL:
-            page_==Page::FullCleanup?IDS_APPLY:
+            page_==Page::Launching;
+        const UINT nextId = page_==Page::FullCleanup?IDS_APPLY:
             page_==Page::SettingsRemovalRisk?IDS_CONTINUE_RISK:
             page_==Page::ConfirmCancel?IDS_CONFIRM_ABORT:
             page_==Page::Conflicts?IDS_RECHECK_CONFLICTS:
             page_==Page::Components?(CertificatePageApplies()?IDS_NEXT:ProductApplyTextId()):
             page_==Page::Certificate?ProductApplyTextId():
             terminal?IDS_FINISH:
-            page_==Page::ModulesBusy?IDS_HOLD_RETRY:
+            page_==Page::ModulesBusy || page_==Page::SettingsBusy?IDS_HOLD_RETRY:
             page_==Page::ProcessesStuck?IDS_UNLOCK:IDS_NEXT;
         SetWindowTextW(next_,Text(nextId).c_str());
         SetWindowTextW(back_,Text(page_==Page::ModulesBusy?IDS_CONTINUE_RISK:page_==Page::ConfirmCancel?IDS_CONFIRM_RESUME:IDS_BACK).c_str());
-        SetWindowTextW(cancel_,Text(blockedPage?IDS_CLOSE:IDS_CANCEL).c_str());
+        SetWindowTextW(cancel_,Text(IDS_CANCEL).c_str());
         const bool confirm=page_==Page::ConfirmCancel || page_==Page::SettingsRemovalRisk;
         const bool backVisible=(page_==Page::License || page_==Page::Components || page_==Page::Certificate || page_==Page::FullCleanup || page_==Page::ModulesBusy || confirm)
             && !(MaintenanceUi() && (page_==Page::Components || (page_==Page::License && !accepted_)));
-        const bool nextVisible=!inProgress && !blockedPage;
+        const bool nextVisible=!inProgress;
+        // Правый угол занят другой кнопкой на готовых и подтверждающих страницах.
+        // На откате и запуске отменять уже нечего: откат и есть отмена, запуск идёт после фиксации.
         const bool cancelVisible=!terminal && !confirm && page_!=Page::Cancelling && page_!=Page::Launching;
         const bool demoLocked=demoControlsLocked && !terminal;
         ShowWindow(back_,backVisible?SW_SHOWNA:SW_HIDE);
         ShowWindow(next_,nextVisible?SW_SHOWNA:SW_HIDE);
-        ShowWindow(cancel_,cancelVisible && !demoLocked?SW_SHOWNA:SW_HIDE);
+        ShowWindow(cancel_,cancelVisible?SW_SHOWNA:SW_HIDE);
         EnableWindow(next_,!failurePending_ && !demoLocked && (page_!=Page::License || accepted_) && ComponentsReady());
         EnableWindow(back_,!demoLocked && !(MaintenanceUi() && (page_==Page::Components || (page_==Page::License && !accepted_))));
-        EnableWindow(cancel_,!demoLocked && !(page_==Page::RuntimeInstalling && runtimeCancel_.load()));
-        const int defaultId=confirm?IDC_BACK:blockedPage?IDC_CANCEL:IDC_NEXT;
+        EnableWindow(cancel_,cancelVisible && !demoLocked && !runtimeCancel_.load());
+        const int defaultId=confirm?IDC_BACK:IDC_NEXT;
         SendMessageW(window,DM_SETDEFID,defaultId,0);
         if (!webReady_ && (page_!=Page::Checking||FAILED(webError_)) && ((oldPage==Page::Welcome && (page_==Page::Checking || page_==Page::License)) ||
             (oldPage==Page::Checking && page_==Page::License))) BeginTransition();
@@ -2816,14 +2812,19 @@ private:
         SyncWebViewState();
         InvalidateRect(window,nullptr,FALSE);
     }
+    void ShowRuntimeInstallError() noexcept {
+        std::wstring reason=Text(IDS_RUNTIME_INSTALL_FAILED);
+        if(!runtimeError_.empty() && reason.find(runtimeError_)==std::wstring::npos) {
+            reason+=L"\r\n\r\n";
+            reason+=runtimeError_;
+        }
+        ShowInstallError(reason);
+    }
     void StartRuntimeInstallation() {
-        if (runtimeThread_.joinable() || page_!=Page::RuntimeRequired) return;
+        if (runtimeThread_.joinable()) return;
         runtimeCancel_.store(false);
         runtimeSuccess_=false;
         runtimeError_.clear();
-        runtimeStatus_=Text(IDS_RUNTIME_DOWNLOADING);
-        progressMarquee_=true;
-        SetPage(Page::RuntimeInstalling);
         const HWND target=window;
         try {
             runtimeThread_=std::thread([this,target]() {
@@ -2854,7 +2855,7 @@ private:
             });
         } catch (...) {
             runtimeError_=L"Could not create the WebView2 installation worker";
-            SetPage(Page::RuntimeError);
+            ShowRuntimeInstallError();
         }
     }
     void CompleteRuntimeInstallation() {
@@ -2865,16 +2866,19 @@ private:
             std::lock_guard<std::mutex> lock(runtimeMutex_);
             success=runtimeSuccess_;
         }
-        progressMarquee_=false;
         if (!success) {
             InstallLog::LineFormat(L"WebView2 setup failed: %s",runtimeError_.c_str());
-            if (runtimeError_.empty()) runtimeError_=Text(IDS_RUNTIME_INSTALL_FAILED);
-            SetPage(Page::RuntimeError);
+            ShowRuntimeInstallError();
             return;
         }
         InstallLog::Line(L"WebView2 Runtime installed");
-        SetPage(Page::Welcome);
-        InitializeWebView();
+        webStartupExpected_=true;
+        if (!PostMessageW(window,kInitWebView,0,0))
+            WebFailure(HRESULT_FROM_WIN32(GetLastError()));
+#ifdef _DEBUG
+        if (debugDemoPending_) return;
+#endif
+        ContinueVersionCheck();
     }
     void ShowInstallError(const std::wstring& reason) noexcept {
         errorReason_ = reason;
@@ -3149,8 +3153,6 @@ private:
     bool RunPreflightChecks() {
         conflicts_=DetectConflictingApps();
         if (!conflicts_.empty()) {
-            blockReason_.clear();
-            downgradeBody_.clear();
             InstallLog::Line(L"Preflight blocked: stop or remove conflicting applications, then recheck");
             SetPage(Page::Conflicts);
             return false;
@@ -3158,21 +3160,15 @@ private:
         // Setup is a controller, not a version baseline for all products.
         // BuildExecutionPlan compares each prepared MSI to its registered MSI.
         GlassInstallUtil::InstallRoots roots{};
-        setupProductVersion_=SelfProductVersion();
-        installedGlassVersion_.clear();
         if(!GlassInstallUtil::ResolveInstallRoots(roots)) {
-            blockReason_=Text(IDS_ERR_INSTALL_PATH);
-            versionInvalidNote_=Text(IDS_VERSION_INVALID_NOTE);
-            downgradeBody_.clear();
-            InstallLog::Line(L"Preflight blocked: installation roots unavailable; no changes made");
-            SetPage(Page::VersionInvalid);return false;
+            const DWORD rootsError=GetLastError();
+            InstallLog::LineFormat(L"Preflight blocked: installation roots unavailable (error %lu); no changes made",rootsError);
+            ShowInstallError(Text(IDS_ERR_INSTALL_PATH));
+            return false;
         }
         preflightX64Root_=roots.x64;
         preflightX86Root_=roots.x86;
         preflightOpenGlassRoot_=roots.openGlass;
-        blockReason_.clear();
-        versionInvalidNote_.clear();
-        downgradeBody_.clear();
         return true;
     }
     void ContinueAfterLicenseCheck() {
@@ -3411,29 +3407,14 @@ private:
 
         webInitSent_=false;
         InstallLog::Line(L"Debug page tour started; no update or installation actions will run");
-        SetPage(Page::Welcome);
+        debugDemoHold_=0;
+        SetDebugDemoPage(kDebugDemoSequence[0]);
         SetTimer(window,kDebugDemoTimer,debugNativeDemo_?4000:kDebugDemoPageMs,nullptr);
     }
     void SetDebugDemoPage(Page page) {
         switch (page) {
         case Page::Conflicts:
             conflicts_={L"explorerblurmica",L"translucentflyouts",L"translucenttb"};
-            blockReason_.clear();
-            break;
-        case Page::Downgrade:
-            conflicts_.clear();
-            installedGlassVersion_=L"3.0.0.0";
-            setupProductVersion_=L"2.0.0.0";
-            downgradeBody_=FormatVersionPairText(IDS_DOWNGRADE_BODY,setupProductVersion_,installedGlassVersion_);
-            blockReason_.clear();
-            break;
-        case Page::VersionInvalid:
-            conflicts_.clear();
-            installedGlassVersion_.clear();
-            setupProductVersion_=SelfProductVersion();
-            blockReason_=Text(IDS_VERSION_INVALID_BODY);
-            versionInvalidNote_=Text(IDS_VERSION_INVALID_NOTE);
-            downgradeBody_.clear();
             break;
         case Page::License:
             accepted_=false;
@@ -3458,6 +3439,11 @@ private:
             displayProgress_=4300;
             progressTarget_=4300;
             installStatusLine_=Text(IDS_SIMULATION_NOTE);
+            break;
+        case Page::SettingsBusy:
+            holdReport_=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN
+                ? L"GlassSettings.exe (PID 4120): окно не закрылось"
+                : L"GlassSettings.exe (PID 4120): window stayed open";
             break;
         case Page::ModulesBusy:
             holdReport_=L"GlassSettings.exe (PID 4120): GlassCore.dll, WndCompat.dll\r\n"
@@ -3496,12 +3482,20 @@ private:
         case Page::Error:
             errorReason_=Text(IDS_DEBUG_ERROR_REASON);
             break;
+        case Page::FullCleanup:
+            cleanupPlatformEligible_=true;
+            cleanupOgEligible_=true;
+            break;
+        case Page::SettingsRemovalRisk:
+            pendingSettingsRemovalRisk_=3u;
+            break;
         default:
             break;
         }
         SetPage(page);
     }
     void FinishDebugDemo() {
+        debugDemoHold_=0;
         KillTimer(window,kDebugDemoTimer);
         debugDemoActive_=false;
         debugDemoPending_=false;
@@ -3512,16 +3506,14 @@ private:
         accepted_=false;
         SendMessageW(accept_,BM_SETCHECK,BST_UNCHECKED,0);
         webInitSent_=false;
-
-
-        versionInvalidNote_.clear();
         errorReason_.clear();
         holdReport_.clear();
         conflicts_.clear();
-        installedGlassVersion_.clear();
-        setupProductVersion_.clear();
-        blockReason_.clear();
-        downgradeBody_.clear();
+        cleanupPlatformEligible_=false;
+        cleanupOgEligible_=false;
+        pendingSettingsRemovalRisk_=0;
+        runtimeStatus_.clear();
+        runtimeError_.clear();
         progressReverse_=false;
         progressMarquee_=false;
         rollbackFinishing_=false;
@@ -3533,19 +3525,22 @@ private:
         InstallLog::Line(L"Debug page tour finished; returned to Welcome");
         SetPage(Page::Welcome);
     }
+    static constexpr Page kDebugDemoSequence[]={
+        Page::Welcome,Page::Checking,Page::Conflicts,Page::License,
+        Page::Components,Page::Certificate,Page::FullCleanup,Page::SettingsRemovalRisk,Page::Installing,
+        Page::SettingsBusy,Page::ModulesBusy,Page::ProcessesStuck,Page::ConfirmCancel,Page::Cancelling,
+        Page::Cancelled,Page::Launching,Page::Complete,Page::Error};
     void TickDebugDemo() {
-        static constexpr Page sequence[]={Page::Welcome,Page::Checking,
-            Page::Conflicts,Page::Downgrade,Page::VersionInvalid,Page::License,Page::Components,Page::Certificate,
-            Page::Installing,Page::ModulesBusy,Page::ProcessesStuck,Page::ConfirmCancel,Page::Cancelling,Page::Cancelled,Page::Launching,Page::Complete,Page::Error};
-        constexpr size_t count=sizeof(sequence)/sizeof(sequence[0]);
-        if (!debugDemoActive_) { KillTimer(window,kDebugDemoTimer); return; }
+        constexpr size_t count=sizeof(kDebugDemoSequence)/sizeof(kDebugDemoSequence[0]);
+        if (!debugDemoActive_) { debugDemoHold_=0; KillTimer(window,kDebugDemoTimer); return; }
+        if (debugDemoHold_) return;
         if (debugDemoStep_+1>=count) {
             // Keep the isolated native tour isolated: no normal wizard after preview.
-            if (debugNativeDemo_) { debugDemoStep_=0; SetDebugDemoPage(sequence[0]); return; }
+            if (debugNativeDemo_) { debugDemoStep_=0; SetDebugDemoPage(kDebugDemoSequence[0]); return; }
             FinishDebugDemo(); return;
         }
         ++debugDemoStep_;
-        SetDebugDemoPage(sequence[debugDemoStep_]);
+        SetDebugDemoPage(kDebugDemoSequence[debugDemoStep_]);
     }
 #endif
 #ifdef _DEBUG
@@ -3600,7 +3595,7 @@ private:
             SyncWebViewState();
             return;
         }
-        if (page_!=Page::Installing && page_!=Page::ModulesBusy && page_!=Page::ProcessesStuck &&
+        if (page_!=Page::Installing && page_!=Page::SettingsBusy && page_!=Page::ModulesBusy && page_!=Page::ProcessesStuck &&
             page_!=Page::ConfirmCancel && page_!=Page::Cancelling && page_!=Page::Launching) return;
 
         const ULONGLONG now=GetTickCount64();
@@ -3640,12 +3635,14 @@ private:
             if (page_!=Page::Launching) SetPage(Page::Launching);
         } else if (page_!=Page::ConfirmCancel && page_!=Page::Cancelling) {
             const auto hold=installEngine_.CurrentHold();
-            if ((hold==InstallEngine::HoldKind::Modules || hold==InstallEngine::HoldKind::MissingHelper) && page_!=Page::ModulesBusy) {
+            if (hold==InstallEngine::HoldKind::Settings && page_!=Page::SettingsBusy) {
+                holdReport_=installEngine_.HoldReport(); SetPage(Page::SettingsBusy);
+            } else if ((hold==InstallEngine::HoldKind::Modules || hold==InstallEngine::HoldKind::MissingHelper) && page_!=Page::ModulesBusy) {
                 holdReport_=installEngine_.HoldReport(); SetPage(Page::ModulesBusy);
             } else if (hold==InstallEngine::HoldKind::Processes && page_!=Page::ProcessesStuck) {
                 holdReport_=installEngine_.HoldReport(); SetPage(Page::ProcessesStuck);
             } else if (hold==InstallEngine::HoldKind::None &&
-                       (page_==Page::ModulesBusy || page_==Page::ProcessesStuck)) SetPage(Page::Installing);
+                       (page_==Page::SettingsBusy || page_==Page::ModulesBusy || page_==Page::ProcessesStuck)) SetPage(Page::Installing);
         }
 
         const ULONGLONG dt=progressTickMs_ ? now-progressTickMs_ : kInstallTimerMs;
@@ -3692,18 +3689,16 @@ private:
     void RequestClose() {
 #ifdef _DEBUG
         if (debugDemoActive_ || (debugDemoPending_ && page_==Page::Welcome)) {
-            KillTimer(window,kDebugDemoTimer); debugDemoActive_=false; debugDemoPending_=false;
+            debugDemoHold_=0; KillTimer(window,kDebugDemoTimer); debugDemoActive_=false; debugDemoPending_=false;
             DestroyWindow(window); return;
         }
 #endif
-        if (page_==Page::RuntimeInstalling) {
-            runtimeCancel_.store(true); EnableWindow(cancel_,FALSE);
-            runtimeStatus_=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"Отмена, дождитесь завершения…":L"Cancelling; please wait…";
-            InvalidateContent(); InvalidateFooter(); return;
+        if (runtimeThread_.joinable()) {
+            runtimeCancel_.store(true); EnableWindow(cancel_,FALSE); return;
         }
         if (page_==Page::Cancelling || page_==Page::Launching || page_==Page::ConfirmCancel ||
             (page_==Page::Error && failurePending_)) return;
-        if (page_==Page::Installing || page_==Page::ModulesBusy || page_==Page::ProcessesStuck) {
+        if (page_==Page::Installing || page_==Page::SettingsBusy || page_==Page::ModulesBusy || page_==Page::ProcessesStuck) {
             const int visibleAtRequest=visibleProgress_.PaintedOr(progressValue_);
 #ifdef _DEBUG
             if (simulateInstall_) {
@@ -3752,6 +3747,10 @@ private:
         CoTaskMemFree(raw);
         if (message.size()>64) return S_OK;
         if (message==L"cancel") { RequestClose(); return S_OK; }
+#ifdef _DEBUG
+        if (message==L"demo-hold") { SetDebugDemoHold(1,true); return S_OK; }
+        if (message==L"demo-release") { SetDebugDemoHold(1,false); return S_OK; }
+#endif
         if (message==L"ready") {
             webBridgeReady_=true;
             SyncWebViewState();
@@ -4260,19 +4259,7 @@ private:
             DrawLoadingScreen(dc);
             return;
         }
-        if (page_==Page::RuntimeRequired || page_==Page::RuntimeInstalling || page_==Page::RuntimeError) {
-            DrawBanner(dc,true);
-            DrawBrandMark(dc,48,29);
-            DrawLabel(dc,Text(IDS_BRAND),Box(82,27,340,30),font_,white,DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX);
-            const UINT titleId=page_==Page::RuntimeRequired?IDS_RUNTIME_REQUIRED_TITLE:
-                page_==Page::RuntimeInstalling?IDS_RUNTIME_INSTALLING_TITLE:
-                IDS_RUNTIME_INSTALL_FAILED;
-            const std::wstring body=page_==Page::RuntimeRequired?Text(IDS_RUNTIME_MISSING):
-                page_==Page::RuntimeInstalling?runtimeStatus_:
-                runtimeError_;
-            DrawLabel(dc,Text(titleId),Box(48,140,620,110),heading_,white);
-            DrawLabel(dc,body,Box(48,250,620,190),font_,muted);
-        } else if (page_==Page::Certificate && !webReady_) {
+        if (page_==Page::Certificate && !webReady_) {
             DrawBanner(dc,true);
             DrawLabel(dc,Text(IDS_BRAND),Box(48,34,300,35),heading_,white);
             DrawLabel(dc,Text(IDS_CERT_TITLE),Box(48,90,840,50),heading_,white);
@@ -4381,12 +4368,17 @@ private:
             DrawLabel(dc,Text(IDS_BRAND),Box(48,34,500,44),heading_,white);
             DrawLabel(dc,Text(IDS_MAINTENANCE_TITLE),Box(48,145,560,110),title_,white);
             DrawLabel(dc,installStatusLine_,Box(48,285,520,100),font_,muted);
-        } else if (page_ == Page::ModulesBusy || page_ == Page::ProcessesStuck) {
+        } else if (page_ == Page::SettingsBusy || page_ == Page::ModulesBusy || page_ == Page::ProcessesStuck) {
             DrawBanner(dc,true);
+            const bool settings=page_==Page::SettingsBusy;
             const bool kill=page_==Page::ProcessesStuck;
+            const bool ru=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN;
+            const wchar_t* title=settings?(ru?L"Закройте GlassSettings":L"Close GlassSettings"):nullptr;
+            const wchar_t* body=settings?(ru?L"GlassSettings не закрылся. Если остались несохранённые изменения, сохраните или отмените их и закройте окно, затем нажмите «Повторить».":
+                L"GlassSettings did not close. If it still has unsaved changes, save or discard them and close the window, then choose Retry."):nullptr;
             DrawLabel(dc,Text(IDS_BRAND),Box(48,34,300,35),heading_,white);
-            DrawLabel(dc,Text(installEngine_.CurrentHold()==InstallEngine::HoldKind::MissingHelper?IDS_NATIVE_RISK_TITLE:kill?IDS_KILL_TITLE:IDS_HOLD_TITLE),Box(48,139,520,70),heading_,white);
-            DrawLabel(dc,Text(installEngine_.CurrentHold()==InstallEngine::HoldKind::MissingHelper?IDS_NATIVE_RISK_BODY:kill?IDS_KILL_BODY:IDS_HOLD_BODY),Box(48,220,460,136),font_,muted);
+            DrawLabel(dc,settings?title:Text(installEngine_.CurrentHold()==InstallEngine::HoldKind::MissingHelper?IDS_NATIVE_RISK_TITLE:kill?IDS_KILL_TITLE:IDS_HOLD_TITLE).c_str(),Box(48,139,520,70),heading_,white);
+            DrawLabel(dc,settings?body:Text(installEngine_.CurrentHold()==InstallEngine::HoldKind::MissingHelper?IDS_NATIVE_RISK_BODY:kill?IDS_KILL_BODY:IDS_HOLD_BODY).c_str(),Box(48,220,460,136),font_,muted);
             DrawLabel(dc,holdReport_,Box(48,365,520,165),font_,white,DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
         } else if (page_ == Page::Welcome && NativeDemo()) {
             DrawBanner(dc,true);
@@ -4442,24 +4434,6 @@ private:
                 rowY+=64;
             }
             DrawLabel(dc,Text(IDS_CONFLICTS_INSTRUCTIONS),Box(48,443,558,78),small_,white,DT_LEFT|DT_TOP|DT_WORDBREAK|DT_NOPREFIX);
-        } else if (page_==Page::Downgrade) {
-            DrawBanner(dc,true);
-            DrawLabel(dc,Text(IDS_BRAND),Box(48,34,300,35),heading_,white);
-            DrawLabel(dc,Text(IDS_DOWNGRADE_TAG),Box(48,121,520,20),small_,RGB(255,183,197));
-            DrawLabel(dc,Text(IDS_DOWNGRADE_TITLE),Box(48,151,550,78),heading_,white,DT_LEFT|DT_TOP|DT_WORDBREAK|DT_NOPREFIX);
-            DrawLabel(dc,downgradeBody_,Box(48,238,520,126),font_,muted,DT_LEFT|DT_TOP|DT_WORDBREAK|DT_NOPREFIX);
-            DrawLabel(dc,Text(IDS_INSTALLED_VERSION_LABEL)+L": "+installedGlassVersion_,Box(48,382,520,30),font_,white);
-            DrawLabel(dc,Text(IDS_SETUP_VERSION_LABEL)+L": "+setupProductVersion_,Box(48,420,520,30),font_,white);
-            DrawLabel(dc,Text(IDS_DOWNGRADE_NOTE),Box(48,489,520,34),small_,muted);
-        } else if (page_==Page::VersionInvalid) {
-            DrawBanner(dc,true);
-            DrawLabel(dc,Text(IDS_BRAND),Box(48,34,300,35),heading_,white);
-            DrawLabel(dc,Text(IDS_VERSION_INVALID_TAG),Box(48,121,520,20),small_,RGB(255,183,197));
-            DrawLabel(dc,Text(IDS_VERSION_INVALID_TITLE),Box(48,151,550,78),heading_,white,DT_LEFT|DT_TOP|DT_WORDBREAK|DT_NOPREFIX);
-            DrawLabel(dc,blockReason_,Box(48,238,520,126),font_,muted,DT_LEFT|DT_TOP|DT_WORDBREAK|DT_NOPREFIX);
-            DrawLabel(dc,Text(IDS_INSTALLED_VERSION_LABEL)+L": "+(installedGlassVersion_.empty()?L"—":installedGlassVersion_),Box(48,382,520,30),font_,white);
-            DrawLabel(dc,Text(IDS_SETUP_VERSION_LABEL)+L": "+(setupProductVersion_.empty()?L"—":setupProductVersion_),Box(48,420,520,30),font_,white);
-            DrawLabel(dc,versionInvalidNote_,Box(48,489,520,34),small_,muted);
         } else if ((page_==Page::Welcome || (page_==Page::Checking)) && !webReady_ && SUCCEEDED(webError_)) {
             DrawLoadingScreen(dc);
         } else if (!webReady_ && FAILED(webError_)) {
@@ -4476,8 +4450,8 @@ private:
             DrawLabel(dc,Text(IDS_FOOTER_SETUP_VERSION)+L" "+footerSetupVersion_,Box(32,kContentHeight+34,450,16),footerFont_,RGB(156,153,175),
                 DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
         if (WaitingForWebUi()) return;
-        if (page_!=Page::Installing && page_!=Page::Cancelling && page_!=Page::Launching && page_!=Page::RuntimeInstalling && !(page_==Page::Components&&downloadContinuePending_) && !(page_==Page::Checking&&setupDownloadActive_)) return;
-        const std::wstring line=page_==Page::Components?NativeDownloadSummary():page_==Page::Checking?checkingStatus_:page_==Page::RuntimeInstalling?runtimeStatus_:installStatusLine_.empty()?Text(IDS_STATUS_PREPARE):installStatusLine_;
+        if (page_!=Page::Installing && page_!=Page::Cancelling && page_!=Page::Launching && !(page_==Page::Components&&downloadContinuePending_) && !(page_==Page::Checking&&setupDownloadActive_)) return;
+        const std::wstring line=page_==Page::Components?NativeDownloadSummary():page_==Page::Checking?checkingStatus_:installStatusLine_.empty()?Text(IDS_STATUS_PREPARE):installStatusLine_;
         const std::wstring percentText=progressValue_>0 && percent_==0 ? L"<1%" : std::to_wstring(percent_)+L"%";
         const std::wstring shown=progressMarquee_?line:line+L"  "+percentText;
         RECT dot=Box(32,kContentHeight+14,8,8);
@@ -4555,6 +4529,14 @@ private:
         if (progressTrack_) DeleteObject(progressTrack_);
     }
     LRESULT Handle(UINT msg, WPARAM w, LPARAM l) {
+        if(msg==WM_LBUTTONDOWN||msg==WM_RBUTTONDOWN||msg==WM_MBUTTONDOWN||msg==WM_XBUTTONDOWN||
+            msg==WM_NCLBUTTONDOWN||msg==WM_NCRBUTTONDOWN||msg==WM_NCMBUTTONDOWN||msg==WM_NCXBUTTONDOWN)
+            SetDebugDemoHold(1,true);
+        else if(msg==WM_LBUTTONUP||msg==WM_RBUTTONUP||msg==WM_MBUTTONUP||msg==WM_XBUTTONUP||
+            msg==WM_NCLBUTTONUP||msg==WM_NCRBUTTONUP||msg==WM_NCMBUTTONUP||msg==WM_NCXBUTTONUP)
+            SetDebugDemoHold(1,false);
+        else if(msg==WM_ENTERSIZEMOVE) SetDebugDemoHold(2,true);
+        else if(msg==WM_EXITSIZEMOVE) SetDebugDemoHold(2,false);
         switch (msg) {
         case WM_CREATE: InitializeLoading(); return 0;
         case kBeginStartup: BeginStartup(); return 0;
@@ -4627,8 +4609,7 @@ private:
             const auto item=reinterpret_cast<const DRAWITEMSTRUCT*>(l);
             if (item && item->CtlID==IDC_PROGRESS) {
                 FillRect(item->hDC,&item->rcItem,progressTrack_);
-                if (progressMarquee_ && (page_==Page::RuntimeInstalling ||
-                    (page_==Page::Components&&downloadContinuePending_) || (page_==Page::Checking&&setupDownloadActive_))) {
+                if (progressMarquee_ && ((page_==Page::Components&&downloadContinuePending_) || (page_==Page::Checking&&setupDownloadActive_))) {
                     const int width = item->rcItem.right - item->rcItem.left;
                     const int span = std::max(width / 3, 48);
                     const int travel = width + span;
@@ -4779,7 +4760,6 @@ private:
                     selection_.confirmedSettingsRemovalRisk|=pendingSettingsRemovalRisk_;
                     SetPage(beforeSettingsRemovalRisk_);StartInstallation();return 0;
                 }
-                if (page_==Page::RuntimeRequired) { StartRuntimeInstallation(); return 0; }
                 if (page_==Page::ConfirmCancel) {
 #ifdef _DEBUG
                     if (simulateInstall_) {
@@ -4800,8 +4780,13 @@ private:
                     return 0;
                 }
                 if (page_==Page::Conflicts) { RecheckConflicts(); return 0; }
-                if (page_==Page::Downgrade) return 0;
-                if (page_==Page::VersionInvalid) return 0;
+                if (page_==Page::SettingsBusy) {
+                    installStatusLine_ = Text(IDS_HOLD_RETRY);
+                    installEngine_.SetStatus(installStatusLine_,-1);
+                    installEngine_.SignalHold(InstallEngine::HoldAction::Retry);
+                    SetPage(Page::Installing);
+                    return 0;
+                }
                 if (page_==Page::ModulesBusy) {
                     installStatusLine_ = Text(IDS_HOLD_RETRY);
                     installEngine_.SetStatus(installStatusLine_,-1);
@@ -4827,7 +4812,7 @@ private:
                     RequestComponentContinue();
                 }
                 else if (page_==Page::Certificate) StartInstallation();
-                else if (page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error || page_==Page::RuntimeError) RequestClose();
+                else if (page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error) RequestClose();
                 return 0;
             case IDCANCEL:
             case IDC_CANCEL: RequestClose(); return 0;
@@ -4854,8 +4839,7 @@ private:
                 if (GetTickCount64()-fadeStarted_>=kFadeDuration) EndTransition();
                 else InvalidateContent();
             } else if (w==kHeroTimer && !webReady_ &&
-                       (page_==Page::Welcome || (page_==Page::Checking) || page_==Page::Error || page_==Page::RuntimeInstalling)) {
-                if (page_==Page::RuntimeInstalling) { progressMarquee_=true; marqueePhase_=static_cast<double>(GetTickCount64()%kMarqueePeriodMs)/kMarqueePeriodMs; InvalidateRect(progress_,nullptr,FALSE); }
+                       (page_==Page::Welcome || (page_==Page::Checking) || page_==Page::Error)) {
                 InvalidateContent();
             }
             return 0;

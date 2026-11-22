@@ -96,7 +96,7 @@ bool IsProtectedProcessName(const wchar_t*){return false;}
 class InstallEngine {
 public:
  unsigned procedureMask_=0x2Fu;
- enum class HoldKind {None,Modules,Processes,MissingHelper}; enum class HoldAction {None,Retry,Unlock,ContinueRisk,Cancel};
+ enum class HoldKind {None,Modules,Processes,MissingHelper,Settings}; enum class HoldAction {None,Retry,Unlock,ContinueRisk,Cancel};
  struct Labels {std::wstring unload=L"scan",forceUnload=L"force",unlockProcesses=L"process",nativeScanFailed=L"error";} labels_;
  SRWLOCK statusLock_; std::atomic_bool cancelRequested_{false},quietClose_{false},failed_{false};
  HoldKind holdKind_=HoldKind::None; std::atomic<HoldAction> holdAction_{HoldAction::None};

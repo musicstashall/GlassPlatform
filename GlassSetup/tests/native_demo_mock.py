@@ -29,7 +29,7 @@ harness=r'''
 constexpr int BM_SETCHECK=1,BST_UNCHECKED=0,kDebugDemoTimer=4,kDebugDemoPageMs=1800;
 int timerMs=0; void SendMessageW(int,int,int,int){} void SetTimer(int,int,int ms,void*){timerMs=ms;}
 void KillTimer(int,int){} namespace InstallLog {void Line(const wchar_t*){}}
-enum class Page {Welcome,Checking,Conflicts,Downgrade,VersionInvalid,License,Components,Certificate,Installing,ModulesBusy,ProcessesStuck,ConfirmCancel,Cancelling,Cancelled,Launching,Complete,Error};
+enum class Page {Welcome,Checking,Conflicts,License,Components,Certificate,Installing,ModulesBusy,ProcessesStuck,ConfirmCancel,Cancelling,Cancelled,Launching,Complete,Error};
 struct Wizard {
  bool debugDemoPending_=true,debugDemoStarted_=false,debugDemoActive_=false,debugNativeDemo_=false;
  bool webReady_=false,webBridgeReady_=false,accepted_=true,webInitSent_=true;

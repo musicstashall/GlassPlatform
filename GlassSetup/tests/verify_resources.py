@@ -308,8 +308,8 @@ assert "EnsureAndDraw" in theme and "AddState(destination, width, height, normal
 assert "PrewarmButtonCache" not in setup
 
 # One-document UI, static initialization and user-driven cancel controls.
-for mode in ("welcome", "checking", "conflicts", "downgrade", "version-invalid", "license",
-             "components", "installing", "unlock-modules", "unlock-processes", "confirm-cancel",
+for mode in ("welcome", "checking", "conflicts", "license",
+             "components", "installing", "settings-close", "unlock-modules", "unlock-processes", "confirm-cancel",
              "cancelling", "cancelled", "launching", "complete", "error", "uninstall-select", "uninstalling"):
     assert mode in ui, mode
 for node in ("components-panel", "confirm-panel", "cancelling-panel", "cancelled-panel", "launch-panel", "unlock-panel"):
@@ -342,7 +342,8 @@ assert "std::thread" in begin_startup and "kStartupPollTimer" in begin_startup
 assert begin_startup.index("WizardTheme::InstallDetours()") < begin_startup.index("std::thread")
 assert "--debug-slow-startup" in begin_startup and "IDS_STARTUP_FAILED" in begin_startup
 complete_startup = section(setup, "    void CompleteStartupIfReady()", "    void Layout()")
-assert "startupThread_.join()" in complete_startup and "Page::RuntimeRequired" in complete_startup
+assert "startupThread_.join()" in complete_startup and "StartRuntimeInstallation()" in complete_startup
+assert "Page::RuntimeRequired" not in setup
 assert "Page::AlreadyRunning" not in setup and "PostMessageW(window,kInitWebView" in complete_startup
 assert "case kInitWebView: if (!closing_) InitializeWebView()" in setup
 assert "COINIT_APARTMENTTHREADED" in setup
@@ -359,7 +360,7 @@ assert "if (controlsReady_) { CreateFonts(); Layout(); WizardTheme::ResetButtonC
 # it with the engine target, a right-anchored fill, or a moving segment.
 progress_draw = section(setup, "case WM_DRAWITEM:", "case WM_CTLCOLORBTN:")
 assert "WizardProgress::DeterminateSpan" in progress_draw and "visibleProgress_.RecordPaint(progressValue_)" in progress_draw
-assert "progressMarquee_ && (page_==Page::RuntimeInstalling" in progress_draw  # Shared strip also handles unknown download totals.
+assert "progressMarquee_ && ((page_==Page::Components&&downloadContinuePending_) || (page_==Page::Checking&&setupDownloadActive_))" in progress_draw
 assert "(page_==Page::Components&&downloadContinuePending_)" in setup
 assert "(page_==Page::Checking&&setupDownloadActive_)" in setup
 assert "MarqueePhase" not in progress_draw and "progressValue_,progressReverse_" not in progress_draw
@@ -551,7 +552,9 @@ assert '"SecureUxTheme-x64"' not in solution and '"SecureUxThemeCa"' not in solu
 assert '"OpenGlass-x64"' not in solution
 assert "<GlassSignThisProject>true</GlassSignThisProject>" in read("msi/OpenGlassResources-x64.wixproj")
 # Actual discovered plan is built before any process shutdown or MSI mutation.
-assert worker.index("CreateRollbackSnapshot()") < worker.index("BuildExecutionPlan()") < worker.index("CloseSelectedSettingsProcesses(")
+assert worker.index("CreateRollbackSnapshot()") < worker.index("BuildExecutionPlan()") < worker.index("WaitForSelectedSettings(")
+settings_wait=section(engine, "bool InstallEngine::WaitForSelectedSettings()", "bool InstallEngine::StopRunningHosts()")
+assert "CloseSelectedSettingsProcesses(" in settings_wait and "HoldKind::Settings" in settings_wait and "ERROR_TIMEOUT" in settings_wait
 execution_plan=section(engine,"bool InstallEngine::BuildExecutionPlan()", "bool InstallEngine::RunMsiSequence()")
 for token in ("GlassProductInspect::Run", "input.inspectSources=false", "CheckProductContexts", "RecheckSnapshottedProduct", "RecheckRelatedProducts", "GlassMaintenanceCache::Identity", "P::Build(facts,request)"):
     assert token in execution_plan, token
@@ -856,14 +859,14 @@ assert '(std::numeric_limits<ULONG>::max)()' in trust_src
 assert '#include "GlassOpenGlassTrust.h"' in provider_src
 
 # Fonts exist before first visible frame; pending WebView never exposes the
-# native wizard. Runtime bootstrap and confirmed failure keep native recovery.
+# native wizard. A missing runtime stays on the loading donut.
 loading_init = setup_main.split('void InitializeLoading() {',1)[1].split('void InitializeControls()',1)[0]
 assert 'CreateFonts();' in loading_init
 assert 'footerFont_ = create(8.5,FW_NORMAL);' in setup_main
 assert 'kContentHeight+34,450,16),footerFont_' in setup_main
 pending_ui = setup_main.split('bool WaitingForWebUi() const noexcept {',1)[1].split('void ShowContentControls()',1)[0]
 assert '!NativeDemo() && !webReady_ && SUCCEEDED(webError_)' in pending_ui
-assert 'Page::RuntimeRequired' in pending_ui and 'Page::Error' in pending_ui
+assert 'Page::RuntimeRequired' not in pending_ui and 'page_!=Page::Error' in pending_ui
 render_content = setup_main.split('void RenderContent(HDC dc) {',1)[1].split('void RenderFooterText',1)[0]
 assert render_content.index('if (WaitingForWebUi())') < render_content.index('DrawBanner')
 assert 'SetPage(page_); // Restore controls only after a confirmed WebView failure.' in setup_main

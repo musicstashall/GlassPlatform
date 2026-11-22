@@ -61,6 +61,9 @@ bool QuerySelectedSettingsRunning(const std::wstring& root64,const std::wstring&
     unsigned settingsMask,bool& running) noexcept;
 bool CloseSelectedSettingsProcesses(const std::wstring& root64,const std::wstring& root32,
     unsigned settingsMask,const std::atomic_bool* cancelled = nullptr) noexcept;
+// Строки «GlassSettings.exe (PID n): …» для страницы ожидания. Пусто, если выбранные процессы уже завершились.
+std::wstring FormatSelectedSettingsReport(const std::wstring& root64,const std::wstring& root32,
+    unsigned settingsMask) noexcept;
 bool QueryImageRunning(const wchar_t* imageName, bool& found) noexcept;
 bool ImageRunning(const wchar_t* imageName) noexcept;
 // A disabled legacy task can still have a running instance. Failure to inspect

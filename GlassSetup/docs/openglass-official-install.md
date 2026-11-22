@@ -968,8 +968,7 @@ Setup now detects WebView runtime availability even for duplicate launches and
 queues UI-STA initialization before all startup terminal branches. Error and
 AlreadyRunning wait on WebView when initialization is expected (native loading
 placeholder, not permanent native error); an actual WebView failure still exposes
-usable native controls. AlreadyRunning and RuntimeError map to the web error
-state, with the appropriate localized labels/details rather than endless loading.
+usable native controls.
 GlassUnins also initializes WebView for its duplicate-launch Error page instead
 of deliberately skipping it, and detects failure to post the initialization.
 
@@ -978,11 +977,10 @@ Page coverage audit:
   Conflicts, Downgrade, VersionInvalid, License, Components, Certificate,
   FullCleanup, SettingsRemovalRisk, Installing, ModulesBusy, ProcessesStuck,
   ConfirmCancel, Cancelling, Cancelled, Launching, Complete and Error have WebView
-  states. Installing preserves its dynamic unlock routing. AlreadyRunning and
-  RuntimeError use the web error state if a runtime is available.
-- RuntimeRequired/RuntimeInstalling necessarily use native bootstrap UI while
-  WebView2 is absent (and RuntimeError likewise needs native fallback if runtime
-  installation failed). Successful runtime installation initializes WebView.
+  states. Installing preserves its dynamic unlock routing.
+- A missing WebView2 runtime stays on the loading indicator while the bootstrapper
+  runs in the background. Installation failure opens the final Error page.
+  Successful runtime installation initializes WebView.
   Absence/environment/controller/navigation failure and debug --demo-native
   remain intentional native fallback, not missing business-page coverage.
 - GlassUnins: all 10 Page values mapped: Select, Cleanup, SettingsRisk, Stopping,
