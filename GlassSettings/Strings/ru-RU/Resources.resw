@@ -1163,4 +1163,7 @@
   <data name="Reflection_GroupNoise" xml:space="preserve"><value>Шум</value></data>
   <data name="Reflection_NoiseSand" xml:space="preserve"><value>Мелкозернистое</value></data>
   <data name="Reflection_NoiseNone" xml:space="preserve"><value>Без шума</value></data>
+  <data name="Reflection_ColorTitle" xml:space="preserve"><value>Цвет и прозрачность</value></data>
+  <data name="Reflection_PresetDark" xml:space="preserve"><value>Для тёмной темы</value></data>
+  <data name="Reflection_PresetLight" xml:space="preserve"><value>Для светлой темы</value></data>
 </root>

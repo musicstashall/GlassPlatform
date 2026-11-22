@@ -1158,4 +1158,7 @@
   <data name="Reflection_GroupNoise" xml:space="preserve"><value>Noise</value></data>
   <data name="Reflection_NoiseSand" xml:space="preserve"><value>Fine grain</value></data>
   <data name="Reflection_NoiseNone" xml:space="preserve"><value>No noise</value></data>
+  <data name="Reflection_ColorTitle" xml:space="preserve"><value>Color and opacity</value></data>
+  <data name="Reflection_PresetDark" xml:space="preserve"><value>Dark theme</value></data>
+  <data name="Reflection_PresetLight" xml:space="preserve"><value>Light theme</value></data>
 </root>

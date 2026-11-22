@@ -1,6 +1,7 @@
 namespace GlassSettings.Services;
 
 using GlassSettings.Strings;
+using GlassSettings.Controls;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
@@ -16,7 +17,12 @@ public static class ReflectionSettingsDialog
     {
         var initial = ReflectionRenderState.Settings;
         var scale = Number("Reflection_SettingScale", 25, 200, initial.ScalePercent);
-        var opacity = Number("Reflection_SettingOpacity", 0, 100, initial.OpacityPercent);
+        var picker = new GlassAlphaColorPicker { IsAlphaVisible = true };
+        picker.SetColor(((uint)Math.Round(initial.OpacityPercent * 255.0 / 100) << 24) | (initial.ColorRgb ?? 0));
+        var presets = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var darkPreset = new Button { Content = GlassSettingsResources.Get("Reflection_PresetDark") };
+        var lightPreset = new Button { Content = GlassSettingsResources.Get("Reflection_PresetLight") };
+        presets.Children.Add(darkPreset); presets.Children.Add(lightPreset);
         var softness = Number("Reflection_SettingSoftness", 0, 20, initial.Softness);
         var noise = Number("Reflection_SettingNoise", 0, 100, initial.NoisePercent);
         var noiseDensity = Number("Reflection_SettingNoiseDensity", 0, 100, initial.NoiseDensity);
@@ -31,7 +37,8 @@ public static class ReflectionSettingsDialog
         {
             Header = GlassSettingsResources.Get("Reflection_EnableProcessing"), IsOn = initial.Enabled
         };
-        var preview = new Image { Height = 144, Stretch = Stretch.Uniform };
+        using var preview = new ReflectionDesktopPreview();
+        var renderGate = new SemaphoreSlim(1, 1);
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
         var reset = new Button { Content = GlassSettingsResources.Get("Reflection_Reset") };
         var body = new StackPanel { Spacing = 8, Margin = new Thickness(0, 12, 0, 0) };
@@ -41,7 +48,7 @@ public static class ReflectionSettingsDialog
             TextTrimming = TextTrimming.CharacterEllipsis,
             Opacity = 0.7
         });
-        body.Children.Add(PreviewCard(preview));
+        body.Children.Add(preview);
         var processingRow = new Grid { ColumnSpacing = 16 };
         processingRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         processingRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -53,7 +60,6 @@ public static class ReflectionSettingsDialog
         body.Children.Add(processingRow);
         var imageGroup = new StackPanel { Spacing = 12 };
         imageGroup.Children.Add(Row("Reflection_SettingScale", scale));
-        imageGroup.Children.Add(Row("Reflection_SettingOpacity", opacity));
         imageGroup.Children.Add(Row("Reflection_SettingSoftness", softness));
         var noiseGroup = new StackPanel { Spacing = 12 };
         noiseGroup.Children.Add(Row("Reflection_SettingNoiseType", noiseType));
@@ -85,30 +91,55 @@ public static class ReflectionSettingsDialog
         groups.IsEnabled = enabled.IsOn;
         body.Children.Add(groups);
         body.Children.Add(error);
+        var pickerRail = new StackPanel { Spacing = 12, MaxWidth = 330 };
+        pickerRail.Children.Add(new TextBlock
+        {
+            Text = GlassSettingsResources.Get("Reflection_ColorTitle"),
+            Style = (Style)Application.Current.Resources["SubtitleTextBlockStyle"]
+        });
+        pickerRail.Children.Add(picker); pickerRail.Children.Add(presets);
+        var layout = new Grid { ColumnSpacing = 28, RowSpacing = 20 };
+        layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        layout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        Grid.SetColumn(pickerRail, 1);
+        layout.Children.Add(body); layout.Children.Add(pickerRail);
+        layout.SizeChanged += (_, args) =>
+        {
+            bool narrow = args.NewSize.Width < 740;
+            Grid.SetColumn(pickerRail, narrow ? 0 : 1);
+            Grid.SetRow(pickerRail, narrow ? 1 : 0);
+            Grid.SetColumnSpan(body, narrow ? 2 : 1);
+            Grid.SetColumnSpan(pickerRail, narrow ? 2 : 1);
+        };
         int revision = 0;
         bool closed = false;
         ReflectionRenderSettings Values() => new(
             double.IsFinite(scale.Value) ? (int)scale.Value : 100,
-            double.IsFinite(opacity.Value) ? (int)opacity.Value : 100,
+            (int)Math.Round((picker.GetColorArgb() >> 24) * 100.0 / 255),
             double.IsFinite(softness.Value) ? (int)softness.Value : 0,
             double.IsFinite(noise.Value) ? (int)noise.Value : 0,
             1, Math.Clamp(noiseType.SelectedIndex - 1, -1, 4),
-            double.IsFinite(noiseDensity.Value) ? (int)noiseDensity.Value : 50, enabled.IsOn);
+            double.IsFinite(noiseDensity.Value) ? (int)noiseDensity.Value : 50, enabled.IsOn, picker.GetColorArgb() & 0x00FFFFFFu);
         async Task RefreshAsync()
         {
             int current = ++revision;
             await Task.Delay(180);
             if (closed || current != revision) return;
+            await renderGate.WaitAsync();
             try
             {
-                var png = await ReflectionTextureService.RenderConfiguredAsync(source, 384, 216, Values());
+                if (closed || current != revision) return;
+                var png = await ReflectionTextureService.RenderConfiguredAsync(
+                    source, preview.DesktopWidth, preview.DesktopHeight, Values());
                 if (closed || current != revision) return;
                 using var stream = new MemoryStream(png);
                 using var random = stream.AsRandomAccessStream();
                 var bitmap = new BitmapImage();
                 await bitmap.SetSourceAsync(random);
                 if (closed || current != revision) return;
-                preview.Source = bitmap; error.Text = ""; error.Visibility = Visibility.Collapsed;
+                preview.SetReflection(bitmap); error.Text = ""; error.Visibility = Visibility.Collapsed;
             }
             catch (Exception exception)
             {
@@ -118,9 +149,16 @@ public static class ReflectionSettingsDialog
                     error.Visibility = Visibility.Visible;
                 }
             }
+            finally { renderGate.Release(); }
         }
         scale.ValueChanged += (_, _) => _ = RefreshAsync();
-        opacity.ValueChanged += (_, _) => _ = RefreshAsync();
+        picker.ColorChanged += (_, _) => _ = RefreshAsync();
+        void ApplyPreset(uint argb)
+        {
+            picker.SetColor(argb); _ = RefreshAsync();
+        }
+        darkPreset.Click += (_, _) => ApplyPreset(0xFF000000u);
+        lightPreset.Click += (_, _) => ApplyPreset(0xFFA0A0A0u);
         softness.ValueChanged += (_, _) => _ = RefreshAsync();
         noise.ValueChanged += (_, _) => _ = RefreshAsync();
         noiseDensity.ValueChanged += (_, _) => _ = RefreshAsync();
@@ -131,62 +169,26 @@ public static class ReflectionSettingsDialog
             noiseDensity.IsEnabled = hasNoise;
         }
         noiseType.SelectionChanged += (_, _) => { SyncNoiseControls(); _ = RefreshAsync(); };
-        enabled.Toggled += (_, _) => { groups.IsEnabled = enabled.IsOn; SyncNoiseControls(); _ = RefreshAsync(); };
+        enabled.Toggled += (_, _) =>
+        {
+            groups.IsEnabled = pickerRail.IsEnabled = enabled.IsOn;
+            SyncNoiseControls(); _ = RefreshAsync();
+        };
+        pickerRail.IsEnabled = enabled.IsOn;
         SyncNoiseControls();
-        reset.Click += (_, _) => { enabled.IsOn = true; scale.Value = 100; opacity.Value = 100; softness.Value = 0; noise.Value = 0; noiseDensity.Value = 50; noiseType.SelectedIndex = 0; };
+        reset.Click += (_, _) => { enabled.IsOn = true; scale.Value = 100; picker.SetColor(0xFF000000u); softness.Value = 0; noise.Value = 0; noiseDensity.Value = 50; noiseType.SelectedIndex = 0; };
         _ = RefreshAsync();
         try
         {
             var result = await HostedDialogService.ShowAsync(new HostedDialogSpec
             {
-                Title = GlassSettingsResources.Get("Reflection_Configure"), Body = HostedDialogLayout.WrapBodyWithContentPadding(body),
-                MinWidth = 420, MaxWidth = 480, MaxHeight = 620,
+                Title = GlassSettingsResources.Get("Reflection_Configure"), Body = HostedDialogLayout.WrapBodyWithContentPadding(layout),
+                MinWidth = 780, MaxWidth = 1100, MaxHeight = 760,
                 Footer = HostedConfirmationDialogService.CreateCancelConfirmFooter(GlassSettingsResources.Get("CmdApply"))
             });
             return result == HostedDialogResult.Primary ? Values().Normalize() : null;
         }
         finally { closed = true; revision++; }
-    }
-
-    private static Border PreviewCard(Image preview)
-    {
-        // Checkerboard is UI-only: never included in the encoded reflection PNG.
-        var content = new Grid { Height = 144 };
-        var white = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 255, 255, 255));
-        var blueGrey = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 153, 170, 187));
-        for (int x = 0; x < 32; x++) content.ColumnDefinitions.Add(new ColumnDefinition());
-        for (int y = 0; y < 12; y++) content.RowDefinitions.Add(new RowDefinition());
-        for (int y = 0; y < 12; y++)
-        for (int x = 0; x < 32; x++)
-        {
-            var square = new Border
-            {
-                Background = (x + y) % 2 == 0 ? white : blueGrey,
-                Opacity = 0.07 // Only the substrate is faint; leave the image untouched.
-            };
-            Grid.SetColumn(square, x); Grid.SetRow(square, y);
-            content.Children.Add(square);
-        }
-        preview.Stretch = Stretch.UniformToFill;
-        Grid.SetColumnSpan(preview, 32); Grid.SetRowSpan(preview, 12);
-        content.Children.Add(preview);
-        content.SizeChanged += (_, _) =>
-        {
-            var visual = Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(content);
-            var geometry = visual.Compositor.CreateRoundedRectangleGeometry();
-            geometry.Size = new System.Numerics.Vector2((float)content.ActualWidth, (float)content.ActualHeight);
-            geometry.CornerRadius = new System.Numerics.Vector2(8);
-            visual.Clip = visual.Compositor.CreateGeometricClip(geometry);
-        };
-        return new Border
-        {
-            CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1),
-            Margin = new Thickness(8, 4, 8, 12),
-            Shadow = new ThemeShadow(), Translation = new System.Numerics.Vector3(0, 0, 16),
-            BorderBrush = (Brush)Application.Current.Resources["ControlStrongStrokeColorDefaultBrush"],
-            Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"],
-            Child = content
-        };
     }
 
     private static NumberBox Number(string label, double minimum, double maximum, double value)

@@ -5,11 +5,11 @@ using System.Text.Json;
 using System.Security.Cryptography;
 
 // NoiseSize is retained only to read older registry recipes; rendering ignores it.
-public sealed record ReflectionRenderSettings(int ScalePercent = 100, int OpacityPercent = 100, int Softness = 0, int NoisePercent = 0, int NoiseSize = 1, int NoiseType = -1, int NoiseDensity = 50, bool Enabled = true)
+public sealed record ReflectionRenderSettings(int ScalePercent = 100, int OpacityPercent = 100, int Softness = 0, int NoisePercent = 0, int NoiseSize = 1, int NoiseType = -1, int NoiseDensity = 50, bool Enabled = true, uint? ColorRgb = null)
 {
     public ReflectionRenderSettings Normalize() => new(
         Math.Clamp(ScalePercent, 25, 200), Math.Clamp(OpacityPercent, 0, 100), Math.Clamp(Softness, 0, 20),
-        Math.Clamp(NoisePercent, 0, 100), 1, Math.Clamp(NoiseType, -1, 4), Math.Clamp(NoiseDensity, 0, 100), Enabled);
+        Math.Clamp(NoisePercent, 0, 100), 1, Math.Clamp(NoiseType, -1, 4), Math.Clamp(NoiseDensity, 0, 100), Enabled, ColorRgb is { } rgb ? rgb & 0x00FFFFFFu : null);
 }
 
 /// <summary>One record for the single generated canvas; not per-source profiles or PNG metadata.</summary>
@@ -35,7 +35,19 @@ public static class ReflectionRenderState
         catch { return null; }
     }
 
-    public static ReflectionRenderSettings Settings => (Read()?.Settings ?? new()).Normalize();
+    public static ReflectionRenderSettings Settings
+    {
+        get
+        {
+            var state = Read();
+            var settings = state?.Settings ?? new();
+            // Older recipes encoded their paint in the source filename. Preserve
+            // Lite when opening that recipe with the new single-source catalog.
+            uint legacy = state?.Source.Contains("_Lite.", StringComparison.OrdinalIgnoreCase) == true
+                ? 0x00A0A0A0u : 0u;
+            return (settings with { ColorRgb = settings.ColorRgb ?? legacy }).Normalize();
+        }
+    }
 
     // Invalidate before changing the output, so a failed copy never leaves a valid stale recipe.
     public static void Invalidate() => Write(new(1, false, "", "", 0, 0, "", "", new()));

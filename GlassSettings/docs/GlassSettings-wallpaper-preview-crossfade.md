@@ -58,6 +58,7 @@
 
 | Страница | Контрол | Что анимируется | Особенности |
 |----------|---------|-----------------|-------------|
+| **Отражения: диалог** | `ReflectionDesktopPreview` | обои + стекло в прямоугольниках реальных мониторов | плоские обои → стекло → отражение; общий watcher/cache/composition pipeline; reflection-overlay сохраняется |
 | **Обзор** (главная) | [`DesktopWallpaperPreviewTile`](../../GlassSettings/Controls/DesktopWallpaperPreviewTile.xaml) | только обои 148×86 | `WallpaperPreviewCrossfade`; источник — `DesktopWallpaperImageCache` |
 | **Визуальные стили** | [`ThemeHeroPreview`](../../GlassSettings/Controls/ThemeHeroPreview.xaml) | только обои 340×192 | `RefreshPreview` / `ForceRefreshPreview`; chrome overlay не участвует в crossfade |
 | **Композиция** | два [`DwmCompositionCascadePreview`](../../GlassSettings/Controls/DwmCompositionCascadePreview.xaml) | обои + blur + glow (Win7) | sync snapshot; Vista split inactive — отдельная логика tint, обои общие |
