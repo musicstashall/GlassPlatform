@@ -1,7 +1,15 @@
 // Panel-only extensions to the existing portable Win32/IAT doubles. No real
 // Windows rasterization is claimed; the production DIB bytes are inspected.
 #pragma once
+#if !defined(GLASS_TEST_REAL_OPAQUE_BITMAP)
+#define HookDispatcher LegacyPanelHookDispatcher
+#endif
 #include "coolbar_test_shim.h"
+#if !defined(GLASS_TEST_REAL_OPAQUE_BITMAP)
+#undef HookDispatcher
+#endif
+#include <limits>
+#include <stdexcept>
 using BYTE = std::uint8_t;
 using ULONG_PTR = std::uintptr_t;
 using LONG_PTR = std::intptr_t;
@@ -51,7 +59,7 @@ namespace PanelTest
     inline std::unordered_map<HWND, HWND> parents;
     inline std::unordered_map<HWND, HMODULE> instances;
     inline std::unordered_map<HDC, int> maps;
-    inline DWORD error{};
+    inline thread_local DWORD error{};
 }
 inline HWND GetParent(HWND w) { return PanelTest::parents.count(w) ? PanelTest::parents.at(w) : nullptr; }
 inline LONG_PTR GetWindowLongPtrW(HWND w, int index)
@@ -224,6 +232,207 @@ namespace GlassCore::Text
         return PanelTest::bufferResult;
     }
 }
+// Narrow ANSI/codepage doubles. They deliberately model only the fixture byte
+// sequences below, not the Windows NLS tables or GDI's actual font selection.
+struct CHARSETINFO { UINT ciCharset{}, ciACP{}; };
+inline constexpr int DEFAULT_CHARSET = 1, SYMBOL_CHARSET = 2, TCI_SRCCHARSET = 1, CP_ACP = 0;
+// Keep this new fixture constant local: the ListView suite also reuses this
+// shim indirectly and already defines its own global DT_NOCLIP.
+namespace GlassCore::DelphiPanel { inline constexpr UINT DT_NOCLIP = 0x100; }
+namespace PanelTest
+{
+    inline std::unordered_map<HFONT, int> fontCharsets;
+    inline UINT systemCodepage = 1252, codepage{};
+    inline int conversions = 0, translations = 0;
+    inline bool failTranslate = false, failConvert = false, partialConvert = false, throwConvert = false;
+    inline bool failSave = false, failMode = false, mutateRenderer = false, throwRenderer = false;
+    inline int nativeAnsi = 0, chainedAnsi = 0, renderedResult = 15, nativeResult = 43;
+    inline HDC ansiDc{}, alphaDc{};
+    inline LPCSTR ansiPointer{};
+    inline LPRECT ansiRect{}, alphaRectPointer{};
+    inline int ansiCount{}, alphaCount{};
+    inline UINT ansiFlags{}, alphaFlags{};
+    inline DWORD nativeEntryError{}, nativeError = 0x5151;
+    inline bool nativeLeavesError = false;
+    inline DcState nativeState{}, alphaState{};
+    struct DcDetails { RECT clip{2,3,90,40}; int viewportX{4}, viewportY{6}; };
+    inline std::unordered_map<HDC, DcDetails> dcDetails;
+    struct SavedDetails { int index{}; DcDetails details{}; int map{}; };
+    inline std::unordered_map<HDC, std::vector<SavedDetails>> savedDetails;
+    inline DcDetails alphaDetails{}, nativeDetails{};
+    inline RECT alphaRect{};
+    inline std::wstring alphaText;
+    inline thread_local ULONGLONG clock = 100;
+    inline thread_local std::vector<std::wstring> logFormats;
+    inline std::unordered_map<HMODULE, std::unordered_map<std::string, std::vector<void*>>> occupants;
+    inline std::unordered_map<HMODULE, std::vector<std::string>> registrationFailures, noOriginal;
+}
+inline int GetTextCharset(HDC dc)
+{
+    SetLastError(0xd101);
+    const auto it = PanelTest::fontCharsets.find(dc ? dc->font : nullptr);
+    return it == PanelTest::fontCharsets.end() ? DEFAULT_CHARSET : it->second;
+}
+inline BOOL TranslateCharsetInfo(DWORD* source, CHARSETINFO* out, DWORD mode)
+{
+    SetLastError(0xd102); ++PanelTest::translations;
+    assert(mode == TCI_SRCCHARSET);
+    if (PanelTest::failTranslate) return FALSE;
+    const auto charset = reinterpret_cast<ULONG_PTR>(source);
+    if (charset != 0 && charset != 128 && charset != 204) return FALSE;
+    out->ciACP = charset == 128 ? 932 : charset == 204 ? 1251 : 1252; return TRUE;
+}
+inline int MultiByteToWideChar(UINT cp, DWORD flags, LPCSTR text, int bytes, LPWSTR out, int capacity)
+{
+    SetLastError(0xd103); ++PanelTest::conversions; PanelTest::codepage = cp;
+    assert(flags == 0 && text && (bytes > 0 || bytes == -1));
+    if (PanelTest::throwConvert) throw std::bad_alloc{};
+    if (PanelTest::failConvert || (out && PanelTest::partialConvert)) return 0;
+    const UINT actual = cp == CP_ACP ? PanelTest::systemCodepage : cp;
+    const size_t n = bytes == -1 ? std::strlen(text) + 1 : static_cast<size_t>(bytes);
+    std::wstring value;
+    for (size_t i = 0; i < n; ++i)
+    {
+        const auto ch = static_cast<unsigned char>(text[i]);
+        if (actual == 932 && ch == 0x82 && i+1 < n && static_cast<unsigned char>(text[i+1]) == 0xa0)
+        { value.push_back(L'\u3042'); ++i; }
+        else if (actual == 65001 && ch == 0xf0 && i+3 < n
+            && static_cast<unsigned char>(text[i+1]) == 0x9f
+            && static_cast<unsigned char>(text[i+2]) == 0x99
+            && static_cast<unsigned char>(text[i+3]) == 0x82)
+        { value.push_back(wchar_t(0xd83d)); value.push_back(wchar_t(0xde42)); i += 3; }
+        else if (actual == 1251 && ch >= 0xc0) value.push_back(wchar_t(0x410 + ch - 0xc0));
+        else if (actual == 1252 && ch == 0xe9) value.push_back(L'\u00e9');
+        else value.push_back(wchar_t(ch));
+    }
+    if (out)
+    {
+        assert(capacity >= static_cast<int>(value.size()));
+        std::copy(value.begin(), value.end(), out);
+    }
+    return static_cast<int>(value.size());
+}
+inline int DrawTextA(HDC dc, LPCSTR text, int count, LPRECT rect, UINT flags)
+{
+    ++PanelTest::nativeAnsi; PanelTest::nativeEntryError = GetLastError();
+    PanelTest::ansiDc = dc; PanelTest::ansiPointer = text; PanelTest::ansiCount = count;
+    PanelTest::ansiRect = rect; PanelTest::ansiFlags = flags;
+    if (dc) { PanelTest::nativeState = *dc; PanelTest::nativeDetails = PanelTest::dcDetails[dc]; }
+    if (rect && (flags & DT_CALCRECT)) rect->right += 7;
+    if (text && (flags & DT_MODIFYSTRING)) const_cast<char*>(text)[0] = 'X';
+    if (!PanelTest::nativeLeavesError) SetLastError(PanelTest::nativeError);
+    return PanelTest::nativeResult;
+}
+inline int WINAPI ChainedPanelAnsi(HDC dc, LPCSTR text, int count, LPRECT rect, UINT flags)
+{ ++PanelTest::chainedAnsi; return ::DrawTextA(dc, text, count, rect, flags); }
+
+#if !defined(GLASS_TEST_REAL_OPAQUE_BITMAP)
+namespace GlassCore::Hooks
+{
+    // Ref-delta + first-active-occupant model, not executable PE/IAT machinery.
+    // A nested EnableHook returns false even though it acquired another ref.
+    // Other registrants may hold refs without becoming the active occupant.
+    template <size_t N, size_t M> struct HookDispatcher
+    {
+        const HookDispatcherDependency<N, M>& dependency;
+        void* moduleAddress{};
+        std::array<int, N> refs{};
+        HookDispatcher(const HookDispatcherDependency<N, M>& dep, void* base)
+            : dependency(dep), moduleAddress(base) {}
+        void CacheHookData() {}
+        int GetRef(size_t i) const { return refs.at(i); }
+        bool EnableHook(size_t i, bool enable)
+        {
+            auto* mod = static_cast<HMODULE>(moduleAddress);
+            const std::string name = std::get<1>(dependency.at(i));
+            if (!mod || !mod->originals.count(name)) return false;
+            auto& entries = PanelTest::occupants[mod][name];
+            void* detour = std::get<2>(dependency.at(i));
+            if (enable)
+            {
+                const auto& fails = PanelTest::registrationFailures[mod];
+                if (std::find(fails.begin(), fails.end(), name) != fails.end()) return false;
+                ++mod->refs[name];
+                if (refs[i]++) return false;
+                entries.push_back(detour);
+            }
+            else
+            {
+                if (!refs[i]) return false;
+                --mod->refs[name];
+                if (--refs[i]) return false;
+                const auto found = std::find(entries.begin(), entries.end(), detour);
+                assert(found != entries.end()); entries.erase(found);
+            }
+            if (entries.empty()) mod->hooks.erase(name);
+            else mod->hooks[name] = entries.front();
+            return true;
+        }
+        template <size_t I, typename Fn> Fn GetOrg() const
+        {
+            SetLastError(0xd104);
+            auto* mod = static_cast<HMODULE>(moduleAddress);
+            if (!mod || !refs[I]) return nullptr;
+            const std::string name = std::get<1>(dependency.at(I));
+            const auto& missing = PanelTest::noOriginal[mod];
+            if (std::find(missing.begin(), missing.end(), name) != missing.end()) return nullptr;
+            return reinterpret_cast<Fn>(mod->originals.at(name));
+        }
+        void DisableAllHooks()
+        { for (size_t i = N; i > 0; --i) while (refs[i-1]) EnableHook(i-1, false); }
+    };
+}
+inline int PanelSaveDC(HDC dc)
+{
+    SetLastError(0xd105);
+    if (PanelTest::failSave) return 0;
+    const int index = ::SaveDC(dc);
+    PanelTest::savedDetails[dc].push_back({index, PanelTest::dcDetails[dc], GetMapMode(dc)});
+    return index;
+}
+inline BOOL PanelRestoreDC(HDC dc, int index)
+{
+    SetLastError(0xd106);
+    auto& details = PanelTest::savedDetails.at(dc);
+    const auto it = std::find_if(details.begin(), details.end(), [=](const auto& s) { return s.index == index; });
+    assert(it != details.end());
+    PanelTest::dcDetails[dc] = it->details; PanelTest::maps[dc] = it->map;
+    details.erase(it, details.end());
+    return ::RestoreDC(dc, index);
+}
+inline int PanelSetBkMode(HDC dc, int mode)
+{ SetLastError(0xd107); return PanelTest::failMode ? 0 : ::SetBkMode(dc, mode); }
+inline ULONGLONG PanelTickCount64() { SetLastError(0xd108); return PanelTest::clock; }
+template <typename... Args> inline void PanelDebugLog(int, LPCWSTR format, Args...)
+{ PanelTest::logFormats.emplace_back(format); SetLastError(0xd109); }
+namespace GlassCore::Text
+{
+    inline HRESULT PanelDrawTextWithAlpha(HDC dc, LPCWSTR text, int count,
+        LPRECT rect, UINT flags, int& result, bool transparent)
+    {
+        assert(transparent);
+        PanelTest::alphaDc = dc; PanelTest::alphaText.assign(text, count);
+        PanelTest::alphaCount = count; PanelTest::alphaFlags = flags;
+        PanelTest::alphaRect = *rect; PanelTest::alphaRectPointer = rect;
+        PanelTest::alphaState = *dc; PanelTest::alphaDetails = PanelTest::dcDetails[dc];
+        const HRESULT hr = DrawTextWithAlpha(dc, text, count, rect, flags, result, transparent);
+        if (PanelTest::mutateRenderer)
+        {
+            dc->text = 0x123456; dc->background = 0x654321; dc->bkMode = OPAQUE;
+            dc->font = nullptr; dc->brush = nullptr; *rect = RECT{-1,-2,-3,-4};
+            PanelTest::maps[dc] = 5; PanelTest::dcDetails[dc] = {{9,8,7,6}, -5, -4};
+        }
+        if (PanelTest::throwRenderer) throw std::runtime_error("injected renderer failure");
+        result = PanelTest::renderedResult; SetLastError(0xd110); return hr;
+    }
+}
+#define SaveDC PanelSaveDC
+#define RestoreDC PanelRestoreDC
+#define SetBkMode PanelSetBkMode
+#define GetTickCount64 PanelTickCount64
+#define DebugLog PanelDebugLog
+#define DrawTextWithAlpha PanelDrawTextWithAlpha
+#endif
 #define GetCurrentObject PanelCurrentObject
 #define GetSysColor PanelGetSysColor
 #define GetClientRect PanelGetClientRect

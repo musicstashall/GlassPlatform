@@ -2,8 +2,10 @@
 """Execute production VCL panel hooks/message bridge with Win32/IAT doubles.
 
 The root themed-text gate and IAT handler are also compiled directly from
-production source excerpts. Checks routing, DIB bytes, options and scoped state,
-not Windows pixels, real IAT chains, uxtheme alpha, or MSVC build compatibility.
+production source excerpts. The complete TPanelDraw unit is compiled in three
+configurations, including its private DrawTextA slot and ANSI decoding. Checks
+routing, DIB bytes, options and scoped state, not Windows NLS tables, pixels,
+real IAT chains, uxtheme alpha, or MSVC build compatibility.
 """
 from pathlib import Path
 import os
@@ -50,20 +52,30 @@ class PanelRenderingTest(unittest.TestCase):
             'inline RootHookCache PanelTextSpecsForTest(HMODULE instMod, LPCWSTR cls) {\n'
             'RootHookCache cache;\n' + gate + '\nreturn cache;\n}\n' + handler + '\n}\n',
             encoding='utf-8')
-        cls.binary = tmp / 'panel-tests'
-        result = subprocess.run(compiler + [
+        cls.binaries = {}
+        cls.build_args = compiler + [
             '-std=c++20', '-Wall', '-Wextra', '-Werror', '-Wno-sign-compare',
-            '-Wno-unknown-pragmas', '-I', str(stubs),
+            '-Wno-unknown-pragmas', '-pthread', '-I', str(stubs),
             '-I', str(ROOT / 'GlassCore/Include'), '-I', str(ROOT / 'WndCompat'),
             '-I', str(ROOT / 'GlassShared/include'),
-            str(ROOT / 'WndCompat/tests/panel_rendering_tests.cpp'), '-o', str(cls.binary),
-        ], capture_output=True, text=True, timeout=90)
-        if result.returncode:
-            raise AssertionError(f'Panel C++ test build failed:\n{result.stdout}{result.stderr}')
+        ]
+        for mode, defines in (
+            ('Release', ['-O2']), ('Debug', ['-O0', '-g', '-D_DEBUG']),
+            ('DebugProbe', ['-O0', '-g', '-D_DEBUG', '-DGLASS_DELPHI_DRAW_PROBE']),
+        ):
+            binary = tmp / ('panel-tests-' + mode)
+            result = subprocess.run(cls.build_args + defines + [
+                str(ROOT / 'WndCompat/tests/panel_rendering_tests.cpp'), '-o', str(binary),
+            ], capture_output=True, text=True, timeout=90)
+            if result.returncode:
+                raise AssertionError(f'Panel {mode} C++ test build failed:\n{result.stdout}{result.stderr}')
+            cls.binaries[mode] = binary
 
     def run_case(self, name):
-        result = subprocess.run([str(self.binary), name], capture_output=True, text=True, timeout=10)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for mode, binary in self.binaries.items():
+            with self.subTest(mode=mode):
+                result = subprocess.run([str(binary), name], capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_exact_classes_and_native_erase_reach_color_brush(self):
         self.run_case('classes-and-erase')
@@ -100,6 +112,54 @@ class PanelRenderingTest(unittest.TestCase):
 
     def test_card_and_radio_group_use_probe_options_without_panel_background_changes(self):
         self.run_case('card-and-radio-captions')
+
+    def test_ansi_only_exe_import_renders_through_private_scoped_slot(self):
+        self.run_case('ansi-route')
+
+    def test_ansi_slot_is_exact_tpanel_paint_print_only(self):
+        self.run_case('ansi-classes')
+
+    def test_ansi_bounded_embedded_nul_dbcs_and_utf16_lengths(self):
+        self.run_case('ansi-lengths')
+
+    def test_ansi_codepage_tracks_selected_font_charset_not_global_mode(self):
+        self.run_case('ansi-codepages')
+
+    def test_ansi_window_tracked_memory_and_explicit_print_dc_ownership(self):
+        self.run_case('ansi-dcs')
+
+    def test_ansi_full_backdrop_window_class_and_shutdown_are_checked_at_call(self):
+        self.run_case('ansi-gates')
+
+    def test_ansi_native_measure_modify_invalid_geometry_and_mapping_semantics(self):
+        self.run_case('ansi-native-args')
+
+    def test_ansi_caption_preserves_tint_clipping_rect_and_entire_saved_dc(self):
+        self.run_case('ansi-state')
+
+    def test_ansi_translation_allocation_and_both_conversion_pass_failures(self):
+        self.run_case('ansi-conversion-failures')
+
+    def test_ansi_save_mode_renderer_exception_failure_and_zero_result(self):
+        self.run_case('ansi-render-failures')
+
+    def test_ansi_actual_original_missing_original_and_stale_hook_native_once(self):
+        self.run_case('ansi-original')
+
+    def test_ansi_lookup_logging_cleanup_and_native_last_error(self):
+        self.run_case('ansi-last-error')
+
+    def test_ansi_nested_ref_delta_and_ineligible_inner_session_do_not_leak(self):
+        self.run_case('ansi-nested')
+
+    def test_ansi_missing_import_registration_failure_and_first_occupant(self):
+        self.run_case('ansi-imports')
+
+    def test_ansi_renderer_reentry_and_log_budget_do_not_suppress_calls(self):
+        self.run_case('ansi-reentry-budget')
+
+    def test_ansi_other_thread_cannot_use_the_owning_thread_panel_context(self):
+        self.run_case('ansi-tls')
 
 
 if __name__ == '__main__':
