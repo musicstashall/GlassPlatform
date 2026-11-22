@@ -1,12 +1,13 @@
 #pragma once
 #include <windows.h>
 
-namespace GlassCore::RestoratorMemo
+namespace GlassCore::BomeMemo
 {
     // The root dispatcher owns these four EXE slots as one paint/GetDC route.
     inline constexpr unsigned kReadyMask = 0xF; // Text=1, BrushIndirect=2, SysColor=4, Fill=8.
     bool IsClassName(LPCWSTR name) noexcept;
-    // Exact classes in Restorator.exe only; not an alias for Edit/TMemo.
+    // Exact TBomeMemo / TBMGutter whose HINSTANCE is the process EXE.
+    // Not an alias for Edit/TMemo and not tied to a process name.
     bool IsWindow(HWND hwnd) noexcept;
     // Record a native barrier too when acquisition failed. IAT is process-wide,
     // whereas readiness and DC authorization must belong to this thread/session.

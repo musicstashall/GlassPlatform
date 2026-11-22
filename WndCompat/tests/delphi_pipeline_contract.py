@@ -115,56 +115,70 @@ class DelphiPipelineContract(unittest.TestCase):
             self.assertIn('IsDelphiButtonGroupsWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd())', body)
             self.assertIn(passthrough, body)
 
-    def test_restorator_memo_exact_process_classes_and_no_generic_half_route(self):
-        code = read('GlassCore/src/Hooks/delphi/RestoratorMemoDraw.cpp')
+    def test_iat_walk_searches_every_descriptor_with_the_same_dll_name(self):
+        code = read('GlassCore/src/Core/Intercept/HookHelper.cpp')
+        walk = code.split('void WalkIAT(', 1)[1].split('void WalkDelayloadIAT(', 1)[0]
+        delay = code.split('void WalkDelayloadIAT(', 1)[1].split('void** GetIAT(', 1)[0]
+        for body, head in ((walk, 'for (auto desc = importDesc; desc->Name; ++desc)'),
+                           (delay, 'for (auto desc = importDesc; desc->DllNameRVA; ++desc)')):
+            self.assertIn(head, body)
+            self.assertNotIn('found = true', body)
+            self.assertIn('if (!SafeCStringEqualI(moduleName, dllName.data()))\n                continue;', body)
+            self.assertIn('if (stop)\n                return;', body)
+        self.assertIn('if (desc->Attributes.RvaBased != 1)\n                continue;', delay)
+        self.assertEqual(code.count('if (stop)\n                return;'), 2)
+
+    def test_bome_memo_exact_process_classes_and_no_generic_half_route(self):
+        code = read('GlassCore/src/Hooks/delphi/BomeMemoDraw.cpp')
         gate = code.split('bool IsClassName(', 1)[1].split('void BeginSession(', 1)[0]
         for cls in ('TBomeMemo', 'TBMGutter'):
             self.assertIn('_wcsicmp(name, L"' + cls + '")', gate)
-        self.assertIn('L"Restorator.exe") == 0', gate)
-        self.assertIn('GetModuleFileNameW(GlassCore::ModuleHandler::g_entryPointModule', gate)
+        self.assertIn('GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)', gate)
+        self.assertNotIn('Restorator.exe', gate)
+        self.assertNotIn('GetModuleFileNameW', gate)
         for forbidden in ('wcsstr', 'wcsncmp', 'find(', 'L"TMemo"', 'L"Edit"'):
             self.assertNotIn(forbidden, gate)
         root = read('GlassCore/src/Hooks/RootWindowHooks.cpp')
-        self.assertIn('cache.restoratorMemo = instMod == GlassCore::ModuleHandler::g_entryPointModule', root)
-        self.assertIn('&& !cache.restoratorMemo)', root)
-        self.assertIn('if (!cache.restoratorMemo)\n                    PushPaint(ep, OHK_DRAWTEXT, cache)', root)
-        self.assertIn('&& !GlassCore::RestoratorMemo::IsWindow(hWnd)', root)
-        self.assertIn('entry.restoratorMemo |= cache.restoratorMemo', root)
+        self.assertIn('cache.bomeMemo = instMod == GlassCore::ModuleHandler::g_entryPointModule', root)
+        self.assertIn('&& !cache.bomeMemo)', root)
+        self.assertIn('if (!cache.bomeMemo)\n                    PushPaint(ep, OHK_DRAWTEXT, cache)', root)
+        self.assertIn('&& !GlassCore::BomeMemo::IsWindow(hWnd)', root)
+        self.assertIn('entry.bomeMemo |= cache.bomeMemo', root)
         gdi = read('GlassCore/src/Hooks/RootGdiHooks.cpp')
-        self.assertIn('RestoratorMemo::IsWindow(hFromDc)) return o(hdc, color)', gdi)
-        self.assertEqual(gdi.count('RestoratorMemo::IsWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd())'), 3)
-        thunks = gdi.split('// Restorator memo EXE thunks:', 1)[1].split('// Dedicated EXE slots:', 1)[0]
+        self.assertIn('BomeMemo::IsWindow(hFromDc)) return o(hdc, color)', gdi)
+        self.assertEqual(gdi.count('BomeMemo::IsWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd())'), 3)
+        thunks = gdi.split('// Bome memo EXE thunks:', 1)[1].split('// Dedicated EXE slots:', 1)[0]
         self.assertEqual(thunks.count('GlassCore::ModuleHandler::g_entryPointModule'), 4)
         self.assertNotIn('_ReturnAddress', thunks)
         self.assertNotIn('GetCallerModule', thunks)
         for slot, api in (('TEXT', 'DrawTextA'), ('BRUSH', 'CreateBrushIndirect'),
                           ('COLOR', 'GetSysColor'), ('FILL', 'FillRect')):
-            self.assertIn('GetRootOrg<OHK_RESTORATOR_MEMO_' + slot + ', decltype(&::' + api + ')>', thunks)
+            self.assertIn('GetRootOrg<OHK_BOME_MEMO_' + slot + ', decltype(&::' + api + ')>', thunks)
         enum = read('GlassCore/Include/Hooks/RootGdiHooks.h').split('enum RootHookIndex : size_t', 1)[1].split('#if defined(_DEBUG)', 1)[0]
         names = re.findall(r'\bOHK_\w+', enum)
         rows = re.findall(r'"([A-Za-z][A-Za-z0-9_]*)",\s*reinterpret_cast<PVOID>',
                           gdi.split('g_rootHookDep', 1)[1].split('#if defined(_DEBUG)', 1)[0])
-        start = names.index('OHK_RESTORATOR_MEMO_TEXT')
+        start = names.index('OHK_BOME_MEMO_TEXT')
         self.assertEqual(rows[start:start+4], ['DrawTextA', 'CreateBrushIndirect', 'GetSysColor', 'FillRect'])
 
-    def test_restorator_memo_transaction_native_barrier_and_both_channels(self):
+    def test_bome_memo_transaction_native_barrier_and_both_channels(self):
         gdi = read('GlassCore/src/Hooks/RootGdiHooks.cpp')
-        acquire = gdi.split('unsigned AcquireRestoratorMemoHooks()', 1)[1].split('void ReleaseRestoratorMemoHooks()', 1)[0]
+        acquire = gdi.split('unsigned AcquireBomeMemoHooks()', 1)[1].split('void ReleaseBomeMemoHooks()', 1)[0]
         for required in ('g_rootLock.lock_exclusive()', 'const int before = it->second.GetRef(slot)',
-                         'it->second.GetRef(slot) > before', 'mask != GlassCore::RestoratorMemo::kReadyMask',
-                         'if (mask & (1u << i)) it->second.EnableHook(kRestoratorMemoSlots[i], false)'):
+                         'it->second.GetRef(slot) > before', 'mask != GlassCore::BomeMemo::kReadyMask',
+                         'if (mask & (1u << i)) it->second.EnableHook(kBomeMemoSlots[i], false)'):
             self.assertIn(required, acquire)
         root = read('GlassCore/src/Hooks/RootWindowHooks.cpp')
         for begin, end, paint in (('Root_OnBeginPaint', 'Root_OnEndPaint', 'true'),
                                   ('Root_OnGetDC', 'Root_OnReleaseDC', 'false')):
             body = root.split('static void ' + begin + '(', 1)[1].split('static void ' + end + '(', 1)[0]
             self.assertIn('callerMod == GlassCore::ModuleHandler::g_entryPointModule', body)
-            self.assertIn('? AcquireRestoratorMemoHooks() : 0', body)
-            self.assertIn('RestoratorMemo::BeginSession(hWnd, ' + paint + ', mask)', body)
-            self.assertIn('RestoratorMemo::EndSession(hWnd, ' + paint + ')', root)
-        self.assertIn('RegisterPostPaintProvider({ Root_OnRestoratorMemoAfterBeginPaint })', root)
-        self.assertIn('GlassCore::RestoratorMemo::ClearSessions()', root)
-        code = read('GlassCore/src/Hooks/delphi/RestoratorMemoDraw.cpp')
+            self.assertIn('? AcquireBomeMemoHooks() : 0', body)
+            self.assertIn('BomeMemo::BeginSession(hWnd, ' + paint + ', mask)', body)
+            self.assertIn('BomeMemo::EndSession(hWnd, ' + paint + ')', root)
+        self.assertIn('RegisterPostPaintProvider({ Root_OnBomeMemoAfterBeginPaint })', root)
+        self.assertIn('GlassCore::BomeMemo::ClearSessions()', root)
+        code = read('GlassCore/src/Hooks/delphi/BomeMemoDraw.cpp')
         for guard in ('g_sessions.back().ready', 'g_sessions.back().hwnd',
                       'IsTopWindowDrawingSession(host)', 'IsPaintStackDcForHwnd(host, dc)',
                       'GetStackOwnerForDc(dc) == host', 'owner && owner != host',
@@ -182,17 +196,18 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('if (backgroundCleared && lpPaint)\n                lpPaint->fErase = 0', dispatcher)
         self.assertIn('for (auto& p : g_paintProviders) p.onEnd(hWnd, callerMod)', dispatcher)
 
-    def test_restorator_memo_ansi_counts_operation_backgrounds_and_diagnostic_not_bpp_gate(self):
-        code = read('GlassCore/src/Hooks/delphi/RestoratorMemoDraw.cpp')
+    def test_bome_memo_ansi_counts_operation_backgrounds_and_diagnostic_not_bpp_gate(self):
+        code = read('GlassCore/src/Hooks/delphi/BomeMemoDraw.cpp')
         for required in ('GetTextCharset(dc)', 'TranslateCharsetInfo(', 'TCI_SRCCHARSET', 'CP_ACP',
                          'MultiByteToWideChar(cp, 0, text, count', 'if (count == -1) wide.pop_back()',
                          'static_cast<int>(wide.size())', 'DT_CALCRECT | DT_MODIFYSTRING | DT_NOCLIP',
                          'SaveDC(dc)', 'const auto fallback = [&](LPCWSTR reason) { restoreNow(); return nativeReason(reason); }',
-                         'GetSysColor(COLOR_WINDOW)', 'GetSysColor(COLOR_BTNFACE)', 'brush->lbStyle != BS_SOLID',
-                         'LOGBRUSH copy = *brush; copy.lbColor = 0', 'original(&copy)',
-                         'BufferedPaintSetAlpha(buffer, nullptr, 255)', 'GdiFlush()',
+                         'GetSysColor(COLOR_WINDOW)', 'GetSysColor(COLOR_BTNFACE)',
+                         'copy.lbStyle = BS_SOLID', 'copy.lbColor = 0', 'copy.lbHatch = 0', 'original(&copy)',
+                         'info.bmiHeader.biBitCount = 32', 'CreateDIBSection(', 'CreatePatternBrush(',
+                         'FillRect(dc, &r, brush.get())',
                          'flags, result, true)', 'bitmap.bmBitsPixel', 'ansiCount=%d wideCount=%d cp=%u',
-                         '[RestoratorMemo] hooks route=2', 'mask=0x%X ready=%d', 'text-skip'):
+                         '[BomeMemo] hooks route=2', 'mask=0x%X ready=%d', 'text-skip'):
             self.assertIn(required, code)
         for forbidden in ('CreateSolidColorBrushWithAlpha', 'BLACK_BRUSH', 'StretchBltAttach',
                           'GdipCreateBitmapAlpha', 'SetWindowLong', 'SetAlpha255', 'ApplyBlackKeyAlpha'):
@@ -200,15 +215,15 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertNotRegex(code, r'bmBitsPixel\s*(?:==|!=|<|>)')
         self.assertNotIn('100, false, true', code)
         for project in ('GlassCore/GlassCore.vcxproj', 'GlassCore/GlassCore.vcxproj.filters'):
-            self.assertIn(r'src\Hooks\delphi\RestoratorMemoDraw.cpp', read(project))
-            self.assertIn(r'Include\Hooks\delphi\RestoratorMemoDraw.h', read(project))
-        runner = read('WndCompat/tests/restorator_memo_rendering_test.py')
+            self.assertIn(r'src\Hooks\delphi\BomeMemoDraw.cpp', read(project))
+            self.assertIn(r'Include\Hooks\delphi\BomeMemoDraw.h', read(project))
+        runner = read('WndCompat/tests/bome_memo_rendering_test.py')
         for production in ('Root_OnBeginPaint', 'Root_OnEndPaint', 'Root_OnGetDC', 'Root_OnReleaseDC',
-                           'kRestoratorMemoSlots', 'Restorator memo EXE thunks:'):
+                           'kBomeMemoSlots', 'Bome memo EXE thunks:'):
             self.assertIn(production, runner)
 
-    def test_restorator_memo_scope_exit_matches_wil_callback_constraints(self):
-        code = read('GlassCore/src/Hooks/delphi/RestoratorMemoDraw.cpp')
+    def test_bome_memo_scope_exit_matches_wil_callback_constraints(self):
+        code = read('GlassCore/src/Hooks/delphi/BomeMemoDraw.cpp')
         self.assertIn('wil::scope_exit([&]() noexcept { restoreNow(); })', code)
         self.assertNotIn('wil::scope_exit(restoreNow)', code)
         shim = read('WndCompat/tests/coolbar_test_shim.h')
@@ -1432,7 +1447,7 @@ class DelphiPipelineContract(unittest.TestCase):
         cache = read('GlassCore/src/Hooks/RootWindowHooks.cpp')
         self.assertIn('if (!GlassShared::IsDelphiPanelClassName(cls)\n'
                       '                    && !GlassShared::IsDelphiButtonGroupsClassName(cls)\n'
-                      '                    && !cache.restoratorMemo)', cache)
+                      '                    && !cache.bomeMemo)', cache)
         self.assertIn('&& !GlassShared::IsDelphiPanelWindow(hWnd)', cache)
 
     def test_panel_sessions_release_only_acquired_refs_and_isolate_dcs(self):

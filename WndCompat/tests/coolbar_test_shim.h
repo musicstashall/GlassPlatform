@@ -44,7 +44,7 @@ using HGDIOBJ = void*;
 struct RECT { LONG left{}, top{}, right{}, bottom{}; };
 using LPRECT = RECT*;
 using LPCRECT = const RECT*;
-struct LOGBRUSH { UINT lbStyle{}; COLORREF lbColor{}; };
+struct LOGBRUSH { UINT lbStyle{}; COLORREF lbColor{}; std::uintptr_t lbHatch{}; };
 struct LOGFONTW { int marker{}; };
 struct DRAWTEXTPARAMS { UINT cbSize{}; };
 using LPDRAWTEXTPARAMS = DRAWTEXTPARAMS*;

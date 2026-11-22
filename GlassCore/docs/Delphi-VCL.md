@@ -4032,3 +4032,54 @@ TCoolBar **9/9**, input icons **6/6** — PASS. UTF-8/diff checks — PASS.
 Полная Windows/MSVC-сборка здесь недоступна; это адресная правка установленной
 причины C2338, не заявление о проверке всей Windows-сборки. Визуальный результат
 memo/gutter из теста 97 по-прежнему требует проверки в Restorator.
+
+## Тест 99: TBomeMemo / TBMGutter — IAT не в первой записи user32 и отвязка от имени процесса
+
+`dumpbin /imports` для `D:\Programs\Restorator 2007\Restorator.exe` (linker 2.25,
+x86) показывает три записи `user32.dll`: первая — 5 функций System.pas
+(GetKeyboardType, DestroyWindow, LoadStringA, MessageBoxA, CharNextA), вторая —
+203 функции, и именно в ней `DrawTextA`, `GetSysColor`, `FillRect`,
+`GetSysColorBrush`, `BeginPaint`, `GetDCEx`; третья — 18 функций DDE.
+`gdi32.dll` — одна запись, поэтому `CreateBrushIndirect` и `SetBkColor` находились.
+
+`WalkIAT` / `WalkDelayloadIAT` останавливались на первом дескрипторе с этим
+именем DLL. Три слота user32 группы memo были невалидны, маска приобретения
+равнялась `0x2`, транзакция откатывала и её, сессия оставалась `ready=0`.
+В логах жил только generic `[Root] SetBkColor` из gdi32. Это не два модуля в
+памяти (как два comctl32): загружен один `user32.dll`, а таблица импорта EXE
+разрезана линкером. Теперь обход смотрит каждую запись с тем же именем и
+по-прежнему возвращает первый найденный слот. Поиск по-прежнему один раз на
+пару (модуль, слот): `HookDispatcher` кэширует и найденный, и отсутствующий
+результат.
+
+Имя процесса снято. Маршрут больше не требует `Restorator.exe`: точные классы
+`TBomeMemo` / `TBMGutter`, `GWLP_HINSTANCE` окна равен EXE, caller BeginPaint/GetDC
+равен EXE, Full и разрешённый backdrop. Код переименован в `BomeMemo`
+(`BomeMemoDraw.h/.cpp`, `OHK_BOME_MEMO_*`, лог `[GlassCore][BomeMemo]`).
+`{ L"Restorator.exe", kModeFull }` в списке режимов процессов не менялся.
+
+Ожидаемая запись обслуженной сессии: `[GlassCore][BomeMemo] hooks route=2`
+с `mask=0xF ready=1`, затем `erase` и `text`. `text-skip ... unowned-or-mapped-dc`
+означает, что DC не из стека сессии — это следующая проверка, не этот шаг.
+Визуальный PASS не заявлен.
+
+## Тест 100: выделение TBomeMemo — пара кисти и фона DrawTextA как в BWM
+
+Скриншот Glass: полоса выделения уходит вправо и синеет к краю, глифы темнеют.
+Скриншот BWM: сплошной прямоугольник по тексту, читаемый светлый текст.
+Одна замена фона `DrawTextA` на pattern-кисть этого не убирает: VCL сначала
+делает `FillRect` широкого прямоугольника кистью, созданной через
+`CreateBrushIndirect`. Пока эта кисть остаётся цветной, широкая заливка живёт
+поверх строки.
+
+В `MyCreateBrushIndirect` донора любая кисть EXE становится чёрной. На сессии
+`TBomeMemo` / `TBMGutter` теперь то же: `LOGBRUSH` копируется в solid black и
+отдаётся как кисть вызывающего, не stock `BLACK_BRUSH`. Кэшированный
+`FillRect` WINDOW/BTNFACE по-прежнему очищается отдельно. Непрозрачный фон
+`DrawTextA`, который не 0/WINDOW/BTNFACE, снова пишется как в доноре:
+1×1 top-down 32bpp, premultiply `(channel * 256) >> 8`, alpha 255,
+`CreatePatternBrush`, `FillRect` только layout-прямоугольника. Сплошная кисть
+альфу не пишет, поэтому прежний `DrawThemeContent` для этого фона снят.
+`GetSysColor` остаётся внутри сессии. StretchBlt, GDI+ и финальный
+DoubleBuffered-блит приложения не трогались. Визуальный PASS ждёт перезагрузки
+x86 `GlassCore.dll`.

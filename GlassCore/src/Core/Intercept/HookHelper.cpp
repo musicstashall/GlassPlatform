@@ -291,64 +291,65 @@ namespace GlassCore::Hooks
         if (!importDesc)
             return;
 
-        bool found = false;
-        auto desc = importDesc;
-        while (desc->Name)
+        // Delphi-линкер кладёт один DLL в несколько IMAGE_IMPORT_DESCRIPTOR
+        // (по модулю исходников). Ищем функцию во всех записях с этим именем:
+        // первый слот по-прежнему единственный, false из callback останавливает весь обход.
+        for (auto desc = importDesc; desc->Name; ++desc)
         {
             auto moduleName = reinterpret_cast<LPCSTR>(
                 reinterpret_cast<UINT_PTR>(baseAddress) + desc->Name
                 );
-            if (SafeCStringEqualI(moduleName, dllName.data()))
+            if (!SafeCStringEqualI(moduleName, dllName.data()))
+                continue;
+
+            auto thunk = reinterpret_cast<PIMAGE_THUNK_DATA>(
+                reinterpret_cast<UINT_PTR>(baseAddress) + desc->FirstThunk
+                );
+            auto nameThunk = reinterpret_cast<PIMAGE_THUNK_DATA>(
+                reinterpret_cast<UINT_PTR>(baseAddress) + desc->OriginalFirstThunk
+                );
+
+            bool stop = false;
+            while (thunk->u1.Function)
             {
-                found = true;
-                break;
-            }
-            ++desc;
-        }
-        if (!found)
-            return;
-
-        auto thunk = reinterpret_cast<PIMAGE_THUNK_DATA>(
-            reinterpret_cast<UINT_PTR>(baseAddress) + desc->FirstThunk
-            );
-        auto nameThunk = reinterpret_cast<PIMAGE_THUNK_DATA>(
-            reinterpret_cast<UINT_PTR>(baseAddress) + desc->OriginalFirstThunk
-            );
-
-        while (thunk->u1.Function)
-        {
-            // H67: один битый thunk в HWiNFO не должен валить весь WalkIAT.
-            bool cont = true;
-            __try
-            {
-                LPCSTR funcName{};
-                BOOL importedByName = !IMAGE_SNAP_BY_ORDINAL(nameThunk->u1.Ordinal);
-
-                if (importedByName)
+                // H67: один битый thunk в HWiNFO не должен валить весь WalkIAT.
+                bool cont = true;
+                __try
                 {
-                    auto byName = reinterpret_cast<PIMAGE_IMPORT_BY_NAME>(
-                        reinterpret_cast<UINT_PTR>(baseAddress) + nameThunk->u1.AddressOfData
-                        );
-                    funcName = byName->Name;
+                    LPCSTR funcName{};
+                    BOOL importedByName = !IMAGE_SNAP_BY_ORDINAL(nameThunk->u1.Ordinal);
+
+                    if (importedByName)
+                    {
+                        auto byName = reinterpret_cast<PIMAGE_IMPORT_BY_NAME>(
+                            reinterpret_cast<UINT_PTR>(baseAddress) + nameThunk->u1.AddressOfData
+                            );
+                        funcName = byName->Name;
+                    }
+                    else
+                    {
+                        funcName = MAKEINTRESOURCEA(IMAGE_ORDINAL(nameThunk->u1.Ordinal));
+                    }
+
+                    auto funcAddr = reinterpret_cast<void**>(&thunk->u1.Function);
+                    cont = callback(funcAddr, funcName, importedByName);
                 }
-                else
+                __except (EXCEPTION_EXECUTE_HANDLER)
                 {
-                    funcName = MAKEINTRESOURCEA(IMAGE_ORDINAL(nameThunk->u1.Ordinal));
+                    cont = true;
                 }
 
-                auto funcAddr = reinterpret_cast<void**>(&thunk->u1.Function);
-                cont = callback(funcAddr, funcName, importedByName);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                cont = true;
-            }
+                if (!cont)
+                {
+                    stop = true;
+                    break;
+                }
 
-            if (!cont)
-                break;
-
-            ++thunk;
-            ++nameThunk;
+                ++thunk;
+                ++nameThunk;
+            }
+            if (stop)
+                return;
         }
     }
 
@@ -368,69 +369,68 @@ namespace GlassCore::Hooks
         if (!importDesc)
             return;
 
-        bool found = false;
-        auto desc = importDesc;
-        while (desc->DllNameRVA)
+        // Как WalkIAT: одно имя DLL может стоять в нескольких delay-дескрипторах.
+        // RvaBased проверяется у каждой подходящей записи отдельно.
+        for (auto desc = importDesc; desc->DllNameRVA; ++desc)
         {
             auto moduleName = reinterpret_cast<LPCSTR>(
                 reinterpret_cast<UINT_PTR>(baseAddress) + desc->DllNameRVA
                 );
-            if (SafeCStringEqualI(moduleName, dllName.data()))
+            if (!SafeCStringEqualI(moduleName, dllName.data()))
+                continue;
+            if (desc->Attributes.RvaBased != 1)
+                continue;
+
+            auto moduleHandle = reinterpret_cast<HMODULE*>(
+                reinterpret_cast<UINT_PTR>(baseAddress) + desc->ModuleHandleRVA
+                );
+            auto thunk = reinterpret_cast<PIMAGE_THUNK_DATA>(
+                reinterpret_cast<UINT_PTR>(baseAddress) + desc->ImportAddressTableRVA
+                );
+            auto nameThunk = reinterpret_cast<PIMAGE_THUNK_DATA>(
+                reinterpret_cast<UINT_PTR>(baseAddress) + desc->ImportNameTableRVA
+                );
+
+            bool stop = false;
+            while (thunk->u1.Function)
             {
-                found = true;
-                break;
-            }
-            ++desc;
-        }
-        if (!found)
-            return;
-
-        if (desc->Attributes.RvaBased != 1)
-            return;
-
-        auto moduleHandle = reinterpret_cast<HMODULE*>(
-            reinterpret_cast<UINT_PTR>(baseAddress) + desc->ModuleHandleRVA
-            );
-        auto thunk = reinterpret_cast<PIMAGE_THUNK_DATA>(
-            reinterpret_cast<UINT_PTR>(baseAddress) + desc->ImportAddressTableRVA
-            );
-        auto nameThunk = reinterpret_cast<PIMAGE_THUNK_DATA>(
-            reinterpret_cast<UINT_PTR>(baseAddress) + desc->ImportNameTableRVA
-            );
-
-        while (thunk->u1.Function)
-        {
-            bool cont = true;
-            __try
-            {
-                LPCSTR funcName{};
-                BOOL importedByName = !IMAGE_SNAP_BY_ORDINAL(nameThunk->u1.Ordinal);
-
-                if (importedByName)
+                bool cont = true;
+                __try
                 {
-                    auto byName = reinterpret_cast<PIMAGE_IMPORT_BY_NAME>(
-                        reinterpret_cast<UINT_PTR>(baseAddress) + nameThunk->u1.AddressOfData
-                        );
-                    funcName = byName->Name;
+                    LPCSTR funcName{};
+                    BOOL importedByName = !IMAGE_SNAP_BY_ORDINAL(nameThunk->u1.Ordinal);
+
+                    if (importedByName)
+                    {
+                        auto byName = reinterpret_cast<PIMAGE_IMPORT_BY_NAME>(
+                            reinterpret_cast<UINT_PTR>(baseAddress) + nameThunk->u1.AddressOfData
+                            );
+                        funcName = byName->Name;
+                    }
+                    else
+                    {
+                        funcName = MAKEINTRESOURCEA(IMAGE_ORDINAL(nameThunk->u1.Ordinal));
+                    }
+
+                    auto funcAddr = reinterpret_cast<void**>(&thunk->u1.Function);
+                    cont = callback(moduleHandle, funcAddr, funcName, importedByName);
                 }
-                else
+                __except (EXCEPTION_EXECUTE_HANDLER)
                 {
-                    funcName = MAKEINTRESOURCEA(IMAGE_ORDINAL(nameThunk->u1.Ordinal));
+                    cont = true;
                 }
 
-                auto funcAddr = reinterpret_cast<void**>(&thunk->u1.Function);
-                cont = callback(moduleHandle, funcAddr, funcName, importedByName);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                cont = true;
-            }
+                if (!cont)
+                {
+                    stop = true;
+                    break;
+                }
 
-            if (!cont)
-                break;
-
-            ++thunk;
-            ++nameThunk;
+                ++thunk;
+                ++nameThunk;
+            }
+            if (stop)
+                return;
         }
     }
 

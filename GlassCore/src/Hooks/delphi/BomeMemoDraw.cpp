@@ -1,8 +1,10 @@
 // BWM RestoratorPaintHandler::Paint/Dc (window): erase + ANSI text + brush
-// creation. Keep cached default FillRect brushes covered too; never change the
+// creation. During the session every EXE brush becomes solid black, as in
+// MyCreateBrushIndirect; an opaque custom text background is a 32bpp pattern
+// brush. Cached WINDOW/BTNFACE FillRect stays covered. Do not touch the
 // application's DoubleBuffered/final StretchBlt or the shared text renderer.
 #include "CorePch.h"
-#include <Hooks/delphi/RestoratorMemoDraw.h>
+#include <Hooks/delphi/BomeMemoDraw.h>
 #include <Subsystems/PaintDispatcher.h>
 #include <Subsystems/RootSwcaGradient.h>
 #include <Subsystems/RenderText.h>
@@ -15,7 +17,7 @@
 #include <string>
 #include <vector>
 
-namespace GlassCore::RestoratorMemo
+namespace GlassCore::BomeMemo
 {
     namespace
     {
@@ -37,7 +39,7 @@ namespace GlassCore::RestoratorMemo
             if (g_inside || g_sessions.empty() || !g_sessions.back().ready
                 || !GlassCore::Root::IsFullInjectionMode()) return nullptr;
             const HWND host = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
-            return host == g_sessions.back().hwnd && GlassCore::RestoratorMemo::IsWindow(host)
+            return host == g_sessions.back().hwnd && GlassCore::BomeMemo::IsWindow(host)
                 && GlassShared::GlassIsBackdropAllowedForHwnd(host)
                 && GlassCore::PaintDispatcher::IsTopWindowDrawingSession(host) ? host : nullptr;
         }
@@ -70,16 +72,30 @@ namespace GlassCore::RestoratorMemo
         { return PatBlt(dc, r.left, r.top, r.right-r.left, r.bottom-r.top, BLACKNESS) != FALSE; }
         bool OpaqueColor(HDC dc, const RECT& r, COLORREF color)
         {
-            wil::unique_hbrush brush{CreateSolidBrush(color)};
+            // Непрозрачный нестандартный фон текста, как в BWM: сплошная кисть
+            // альфу не пишет, pattern-кисть из 1×1 32bpp DIB пишет.
+            BITMAPINFO info{};
+            info.bmiHeader.biSize = sizeof(info.bmiHeader);
+            info.bmiHeader.biWidth = 1;
+            info.bmiHeader.biHeight = -1;
+            info.bmiHeader.biPlanes = 1;
+            info.bmiHeader.biBitCount = 32;
+            info.bmiHeader.biCompression = BI_RGB;
+            void* bits = nullptr;
+            wil::unique_hbitmap dib{CreateDIBSection(nullptr, &info, DIB_RGB_COLORS, &bits, nullptr, 0)};
+            auto* px = static_cast<BYTE*>(bits);
+            if (!dib || !px) return false;
+            constexpr BYTE alpha = 255;
+            const auto channel = [](unsigned value) noexcept -> BYTE {
+                return static_cast<BYTE>((value * (alpha + 1u)) >> 8);
+            };
+            px[0] = channel(GetBValue(color));
+            px[1] = channel(GetGValue(color));
+            px[2] = channel(GetRValue(color));
+            px[3] = alpha;
+            wil::unique_hbrush brush{CreatePatternBrush(dib.get())};
             if (!brush) return false;
-            // The donor uses A255 for a non-default opaque text background.
-            // Compose only this operation's rect, without a GDI pattern brush.
-            return SUCCEEDED(GlassCore::Text::DrawThemeContent(dc, r, nullptr, nullptr, 0,
-                [&](HDC memory, HPAINTBUFFER buffer, RGBQUAD*, int) {
-                    THROW_HR_IF(E_FAIL, !::FillRect(memory, &r, brush.get()));
-                    THROW_HR_IF(E_FAIL, !GdiFlush());
-                    THROW_IF_FAILED(BufferedPaintSetAlpha(buffer, nullptr, 255));
-                }, 255, false, true, false));
+            return FillRect(dc, &r, brush.get()) != 0;
         }
         bool Decode(HDC dc, LPCSTR text, int count, std::wstring& wide, UINT& cp)
         {
@@ -106,14 +122,11 @@ namespace GlassCore::RestoratorMemo
     { return name && (!_wcsicmp(name, L"TBomeMemo") || !_wcsicmp(name, L"TBMGutter")); }
     bool IsWindow(HWND hwnd) noexcept
     {
-        wchar_t name[64]{}, path[MAX_PATH]{};
+        wchar_t name[64]{};
         if (!hwnd || !::IsWindow(hwnd) || !GetClassNameW(hwnd, name, _countof(name))
             || !IsClassName(name) || !GlassCore::ModuleHandler::g_entryPointModule) return false;
-        const DWORD length = GetModuleFileNameW(GlassCore::ModuleHandler::g_entryPointModule,
-            path, _countof(path));
-        if (!length || length >= _countof(path)) return false;
-        const wchar_t* base = wcsrchr(path, L'\\');
-        return _wcsicmp(base ? base + 1 : path, L"Restorator.exe") == 0;
+        return reinterpret_cast<HMODULE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE))
+            == GlassCore::ModuleHandler::g_entryPointModule;
     }
     void BeginSession(HWND hwnd, bool paint, unsigned mask) noexcept
     {
@@ -122,7 +135,7 @@ namespace GlassCore::RestoratorMemo
         {
             wchar_t cls[64]{}; GetClassNameW(hwnd, cls, _countof(cls));
             DebugLog(DBG_NORMAL,
-                L"[GlassCore][RestoratorMemo] hooks route=2 hwnd=0x%p class=%s channel=%s mask=0x%X ready=%d (Text=1 BrushIndirect=2 SysColor=4 Fill=8)",
+                L"[GlassCore][BomeMemo] hooks route=2 hwnd=0x%p class=%s channel=%s mask=0x%X ready=%d (Text=1 BrushIndirect=2 SysColor=4 Fill=8)",
                 hwnd, cls, paint ? L"Paint" : L"GetDC", mask, mask == kReadyMask ? 1 : 0);
         }
     }
@@ -144,13 +157,13 @@ namespace GlassCore::RestoratorMemo
         // Authenticate the pre-BeginPaint session here, not an ambient paint host.
         if (g_inside || g_sessions.empty() || !g_sessions.back().ready
             || !g_sessions.back().paint || g_sessions.back().hwnd != hwnd
-            || !GlassCore::Root::IsFullInjectionMode() || !GlassCore::RestoratorMemo::IsWindow(hwnd)
+            || !GlassCore::Root::IsFullInjectionMode() || !GlassCore::BomeMemo::IsWindow(hwnd)
             || !GlassShared::GlassIsBackdropAllowedForHwnd(hwnd)
             || caller != GlassCore::ModuleHandler::g_entryPointModule
             || !dc || !ps || !ValidRect(&ps->rcPaint)) return false;
         const bool ok = Clear(dc, ps->rcPaint);
         if (Diag(1)) DebugLog(DBG_NORMAL,
-            L"[GlassCore][RestoratorMemo] erase hwnd=0x%p dc=0x%p rect=[%ld,%ld,%ld,%ld] ok=%d",
+            L"[GlassCore][BomeMemo] erase hwnd=0x%p dc=0x%p rect=[%ld,%ld,%ld,%ld] ok=%d",
             hwnd, dc, ps->rcPaint.left, ps->rcPaint.top, ps->rcPaint.right, ps->rcPaint.bottom, ok ? 1 : 0);
         return ok; // PaintDispatcher resets fErase only on success.
     }
@@ -160,7 +173,7 @@ namespace GlassCore::RestoratorMemo
         if (ActiveHost() && (index == COLOR_WINDOW || index == COLOR_BTNFACE))
         {
             if (Diag(3)) DebugLog(DBG_NORMAL,
-                L"[GlassCore][RestoratorMemo] syscolor index=%d default-to-black=1", index);
+                L"[GlassCore][BomeMemo] syscolor index=%d default-to-black=1", index);
             return 0;
         }
         return original(index);
@@ -168,14 +181,19 @@ namespace GlassCore::RestoratorMemo
     HBRUSH CreateBrush(decltype(&::CreateBrushIndirect) original, const LOGBRUSH* brush)
     {
         if (!original) return ::CreateBrushIndirect(brush);
-        if (!ActiveHost() || !brush || brush->lbStyle != BS_SOLID || !SystemBackground(brush->lbColor))
+        if (!ActiveHost() || !brush)
             return original(brush);
-        LOGBRUSH copy = *brush; copy.lbColor = 0;
-        // Return a real caller-owned brush, not the donor's borrowed stock brush.
+        // BWM: любая кисть EXE на время этого окна становится чёрной.
+        // Иначе FillRect выделения рисует широкую цветную полосу поверх строки.
+        // Кисть принадлежит вызывающему, её можно удалить через DeleteObject.
+        LOGBRUSH copy = *brush;
+        copy.lbStyle = BS_SOLID;
+        copy.lbColor = 0;
+        copy.lbHatch = 0;
         const auto result = original(&copy);
         if (Diag(1)) DebugLog(DBG_NORMAL,
-            L"[GlassCore][RestoratorMemo] brush rgb=0x%06X default=1 result=0x%p",
-            brush->lbColor & 0xFFFFFFu, result);
+            L"[GlassCore][BomeMemo] brush rgb=0x%06X style=%u session-black=1 result=0x%p",
+            brush->lbColor & 0xFFFFFFu, brush->lbStyle, result);
         return result;
     }
     int Fill(decltype(&::FillRect) original, HDC dc, const RECT* rect, HBRUSH brush)
@@ -196,7 +214,7 @@ namespace GlassCore::RestoratorMemo
         g_inside = true; auto leave = wil::scope_exit([] { g_inside = false; });
         const bool ok = Clear(dc, *rect);
         if (Diag(1)) DebugLog(DBG_NORMAL,
-            L"[GlassCore][RestoratorMemo] fill hwnd=0x%p dc=0x%p rgb=0x%06X ok=%d",
+            L"[GlassCore][BomeMemo] fill hwnd=0x%p dc=0x%p rgb=0x%06X ok=%d",
             host, dc, color & 0xFFFFFFu, ok ? 1 : 0);
         return ok ? 1 : original(dc, rect, brush);
     }
@@ -208,13 +226,13 @@ namespace GlassCore::RestoratorMemo
         if (!host)
         {
             if (ActiveHost() && Diag(2)) DebugLog(DBG_NORMAL,
-                L"[GlassCore][RestoratorMemo] text-skip dc=0x%p dcWnd=0x%p stackOwner=0x%p reason=unowned-or-mapped-dc",
+                L"[GlassCore][BomeMemo] text-skip dc=0x%p dcWnd=0x%p stackOwner=0x%p reason=unowned-or-mapped-dc",
                 dc, WindowFromDC(dc), GlassCore::PaintDispatcher::GetStackOwnerForDc(dc));
             return native();
         }
         const auto nativeReason = [&](LPCWSTR reason) {
             if (Diag(2)) DebugLog(DBG_NORMAL,
-                L"[GlassCore][RestoratorMemo] text-native hwnd=0x%p dc=0x%p ansiCount=%d flags=0x%X reason=%s",
+                L"[GlassCore][BomeMemo] text-native hwnd=0x%p dc=0x%p ansiCount=%d flags=0x%X reason=%s",
                 host, dc, count, flags, reason);
             return native();
         };
@@ -252,7 +270,7 @@ namespace GlassCore::RestoratorMemo
             const bool known = selected && GetObjectW(selected, sizeof(bitmap), &bitmap) == sizeof(bitmap);
             // Observational only: no guessed 32bpp prerequisite or pixel colour key.
             DebugLog(DBG_NORMAL,
-                L"[GlassCore][RestoratorMemo] text hwnd=0x%p dc=0x%p dcType=%lu bitmap=0x%p bpp=%u size=[%ld,%ld] ansiCount=%d wideCount=%d cp=%u flags=0x%X rect=[%ld,%ld,%ld,%ld] bk=0x%06X opaque=%d hr=0x%08X result=%d",
+                L"[GlassCore][BomeMemo] text hwnd=0x%p dc=0x%p dcType=%lu bitmap=0x%p bpp=%u size=[%ld,%ld] ansiCount=%d wideCount=%d cp=%u flags=0x%X rect=[%ld,%ld,%ld,%ld] bk=0x%06X opaque=%d hr=0x%08X result=%d",
                 host, dc, GetObjectType(dc), selected,
                 known ? unsigned(bitmap.bmBitsPixel) * bitmap.bmPlanes : 0u,
                 bitmap.bmWidth, bitmap.bmHeight, count, static_cast<int>(wide.size()), cp, flags,

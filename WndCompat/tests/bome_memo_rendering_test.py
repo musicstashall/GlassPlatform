@@ -26,13 +26,13 @@ def block(source, marker):
     raise AssertionError('Unclosed production block: ' + marker)
 
 
-class RestoratorMemoRenderingTest(unittest.TestCase):
+class BomeMemoRenderingTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         compiler = shlex.split(os.environ.get('CXX', 'g++'))
         if not compiler or not shutil.which(compiler[0]):
             raise unittest.SkipTest('A GCC-compatible C++20 compiler is required')
-        cls.tmp = tempfile.TemporaryDirectory(prefix='restorator-memo-')
+        cls.tmp = tempfile.TemporaryDirectory(prefix='bome-memo-')
         cls.addClassCleanup(cls.tmp.cleanup)
         tmp = Path(cls.tmp.name)
         stubs = tmp / 'include'
@@ -44,14 +44,14 @@ class RestoratorMemoRenderingTest(unittest.TestCase):
             path.write_text('#pragma once\n', encoding='utf-8')
         root = (ROOT / 'GlassCore/src/Hooks/RootWindowHooks.cpp').read_text(encoding='utf-8')
         gdi = (ROOT / 'GlassCore/src/Hooks/RootGdiHooks.cpp').read_text(encoding='utf-8')
-        rows = gdi.split('// Restorator memo route:', 1)[1]
+        rows = gdi.split('// Bome memo route:', 1)[1]
         rows = rows[rows.index('            std::tuple{'):].split('#if defined(_DEBUG)', 1)[0]
-        thunks = gdi.split('// Restorator memo EXE thunks:', 1)[1]
-        thunks = thunks[thunks.index('        int WINAPI Root_MyRestoratorMemoText('):].split('// Dedicated EXE slots:', 1)[0]
+        thunks = gdi.split('// Bome memo EXE thunks:', 1)[1]
+        thunks = thunks[thunks.index('        int WINAPI Root_MyBomeMemoText('):].split('// Dedicated EXE slots:', 1)[0]
         declarations = '\n'.join(line for line in gdi.splitlines()
-                                 if ' WINAPI Root_MyRestoratorMemo' in line and line.endswith(';'))
+                                 if ' WINAPI Root_MyBomeMemo' in line and line.endswith(';'))
         data = root[root.index('        struct RootHookCache'):root.index('        // ── Утилиты')]
-        memo_classification = root.split('            cache.restoratorMemo =', 1)[1].split(';', 1)[0]
+        memo_classification = root.split('            cache.bomeMemo =', 1)[1].split(';', 1)[0]
         generic = block(root.split('// Точка входа процесса —', 1)[1],
                         '            if (instMod == GlassCore::ModuleHandler::g_entryPointModule)')
         root_stubs = '''
@@ -70,7 +70,7 @@ class RestoratorMemoRenderingTest(unittest.TestCase):
                 'inline const GlassCore::Hooks::HookDispatcherDependency<4,3> MemoDependencies{{\n' + rows + '\n}};\n'
                 'inline const GlassCore::Hooks::HookDispatcherDependency<OHK_COUNT,3> g_rootHookDep = [] {\n'
                 'GlassCore::Hooks::HookDispatcherDependency<OHK_COUNT,3> result{};\n'
-                'for (size_t i=0;i<4;++i) result[OHK_RESTORATOR_MEMO_TEXT+i]=MemoDependencies[i];\n'
+                'for (size_t i=0;i<4;++i) result[OHK_BOME_MEMO_TEXT+i]=MemoDependencies[i];\n'
                 'return result; }();\n'
                 'using RootDispatcher = MemoTest::Dispatcher<OHK_COUNT,3>;\n'
                 'inline wil::srwlock g_rootLock;\n'
@@ -78,7 +78,7 @@ class RestoratorMemoRenderingTest(unittest.TestCase):
                 + gdi[gdi.index('        template <size_t idx, typename T>'):].split('#if defined(_DEBUG)', 1)[0]
                 + block(gdi, '        bool EnableRootHook(') + '\n'
                 + block(gdi, '        void PrewarmRootHook(') + '\n'
-                + gdi[gdi.index('        static constexpr size_t kRestoratorMemoSlots[]'):gdi.index('        void DisableAllRootHooks(')]
+                + gdi[gdi.index('        static constexpr size_t kBomeMemoSlots[]'):gdi.index('        void DisableAllRootHooks(')]
                 + block(gdi, '        void DisableAllRootHooks(') + '\n' + thunks + '\n' + data + '\n'
                 + block(root, '        static bool StrEqI(') + '\n'
                 + block(root, '        [[nodiscard]] static std::wstring BasenamePtr(') + '\n'
@@ -86,13 +86,13 @@ class RestoratorMemoRenderingTest(unittest.TestCase):
                 + block(root, '        static void PushDc(') + '\n' + root_stubs
                 + 'inline RootHookCache MemoSpecsForTest(HWND hWnd, HMODULE instMod) {\n'
                 'RootHookCache cache; wchar_t cls[256]{}; GetClassNameW(hWnd,cls,_countof(cls));\n'
-                'cache.restoratorMemo =' + memo_classification + ';\n' + generic + '\nreturn cache; }\n'
-                + block(root, '        static bool Root_OnRestoratorMemoAfterBeginPaint(') + '\n'
+                'cache.bomeMemo =' + memo_classification + ';\n' + generic + '\nreturn cache; }\n'
+                + block(root, '        static bool Root_OnBomeMemoAfterBeginPaint(') + '\n'
                 + block(root, '        static void EnableSpecs(') + '\n'
                 + '\n'.join(block(root, '        static void ' + fn + '(') for fn in (
                     'Root_OnBeginPaint', 'Root_OnEndPaint', 'Root_OnGetDC', 'Root_OnReleaseDC'))
                 + '\n}\n')
-        (stubs / 'root_restorator_memo_test.inc').write_text(text, encoding='utf-8')
+        (stubs / 'root_bome_memo_test.inc').write_text(text, encoding='utf-8')
         cls.binaries = []
         for config, flags in (('release', ['-O2']), ('debug', ['-O0', '-g', '-D_DEBUG', '-DGLASS_DELPHI_DRAW_PROBE'])):
             binary = tmp / ('memo-tests-' + config)
@@ -100,7 +100,7 @@ class RestoratorMemoRenderingTest(unittest.TestCase):
                 '-std=c++20', '-Wall', '-Wextra', '-Werror', '-Wno-sign-compare',
                 '-Wno-unknown-pragmas', '-pthread', *flags, '-I', str(stubs),
                 '-I', str(ROOT / 'GlassCore/Include'), '-I', str(ROOT / 'GlassShared/include'),
-                str(ROOT / 'WndCompat/tests/restorator_memo_rendering_tests.cpp'), '-o', str(binary),
+                str(ROOT / 'WndCompat/tests/bome_memo_rendering_tests.cpp'), '-o', str(binary),
             ], capture_output=True, text=True, timeout=90)
             if result.returncode:
                 raise AssertionError(f'{config} memo C++ test build failed:\n{result.stdout}{result.stderr}')

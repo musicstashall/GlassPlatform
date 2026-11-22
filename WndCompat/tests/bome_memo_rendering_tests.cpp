@@ -1,8 +1,8 @@
-#include "restorator_memo_test_shim.h"
+#include "bome_memo_test_shim.h"
 #include <GlassDelphiPanel.h>
 #include <GlassDelphiButtonGroups.h>
-#include "../../GlassCore/src/Hooks/delphi/RestoratorMemoDraw.cpp"
-#include <root_restorator_memo_test.inc>
+#include "../../GlassCore/src/Hooks/delphi/BomeMemoDraw.cpp"
+#include <root_bome_memo_test.inc>
 #include <stdexcept>
 
 #define CHECK(x) do { if (!(x)) throw std::runtime_error(#x); } while (false)
@@ -21,7 +21,6 @@ namespace
         Context()
         {
             ModuleHandler::g_entryPointModule = &module;
-            MemoTest::exePath = LR"(C:\Tools\Restorator.exe)";
             Test::full = true; Root::g_shutdown = false;
             window.cls = L"TBomeMemo"; gutter.cls = L"TBMGutter"; other.cls = L"TPanel";
             dc.owner = &window; gutterDc.owner = &gutter; foreign.owner = &other;
@@ -31,17 +30,18 @@ namespace
                 {"FillRect", reinterpret_cast<void*>(ChainFill)}};
             Root::s_rootCache[&window] = Root::MemoSpecsForTest(&window,&module);
             Root::s_rootCache[&gutter] = Root::MemoSpecsForTest(&gutter,&module);
-            CHECK(Root::s_rootCache[&window].restoratorMemo && Root::s_rootCache[&gutter].restoratorMemo);
+            CHECK(Root::s_rootCache[&window].bomeMemo && Root::s_rootCache[&gutter].bomeMemo);
             Test::host = Test::topWindow = nullptr; Test::stackOwners.clear();
         }
         ~Context()
         {
             while (!Root::g_rootPaintStack.empty()) Root::Root_OnEndPaint(Root::g_rootPaintStack.back().hWnd,&module);
             while (!Root::g_rootDcStack.empty()) Root::Root_OnReleaseDC(Root::g_rootDcStack.back().hWnd,&module);
-            RestoratorMemo::ClearSessions(); Root::DisableAllRootHooks(); Root::s_rootCache.clear();
+            BomeMemo::ClearSessions(); Root::DisableAllRootHooks(); Root::s_rootCache.clear();
             for (const auto& [name, ref] : module.refs) { (void)name; assert(!ref); }
             assert(module.hooks.empty() && !MemoTest::formAttachCalls);
             Test::stackOwners.clear(); Test::host = Test::topWindow = nullptr;
+            MemoTest::instances.clear();
         }
         void Activate(HWND host, HDC target)
         { Test::host = Test::topWindow = host; Test::stackOwners[target] = host; }
@@ -62,27 +62,28 @@ namespace
         DWORD Color(int index) { return Call("GetSysColor", &GetSysColor, index); }
         HBRUSH Brush(const LOGBRUSH* b) { return Call("CreateBrushIndirect", &CreateBrushIndirect, b); }
         int Ref(size_t offset = 0)
-        { return Root::g_rootMap.at(&module).GetRef(Root::OHK_RESTORATOR_MEMO_TEXT + offset); }
+        { return Root::g_rootMap.at(&module).GetRef(Root::OHK_BOME_MEMO_TEXT + offset); }
     };
     void Classes()
     {
         Context c;
-        CHECK(!RestoratorMemo::IsClassName(nullptr));
+        CHECK(!BomeMemo::IsClassName(nullptr));
         for (LPCWSTR cls : {L"TBomeMemo",L"TBMGutter",L"tbomememo"})
         {
             c.window.cls = cls;
             const auto cache = Root::MemoSpecsForTest(&c.window,&c.module);
-            CHECK(cache.restoratorMemo && cache.paintHooks.empty() && cache.dcHooks.empty());
-            CHECK(!Root::MemoSpecsForTest(&c.window,&c.otherModule).restoratorMemo);
+            CHECK(cache.bomeMemo && cache.paintHooks.empty() && cache.dcHooks.empty());
+            CHECK(!Root::MemoSpecsForTest(&c.window,&c.otherModule).bomeMemo);
         }
         for (LPCWSTR cls : {L"TMemo",L"Edit",L"TRichEdit",L"MyTBomeMemo",L"TBomeMemo2",L"TBMGutterChild",L""})
-        { c.window.cls = cls; CHECK(!RestoratorMemo::IsWindow(&c.window)); CHECK(!Root::MemoSpecsForTest(&c.window,&c.module).restoratorMemo); }
-        c.window.cls = L"TBomeMemo"; MemoTest::exePath = LR"(C:\Tools\OtherRestorator.exe)";
-        CHECK(!RestoratorMemo::IsWindow(&c.window));
-        CHECK(!Root::MemoSpecsForTest(&c.window,&c.module).restoratorMemo);
-        MemoTest::exePath.assign(MAX_PATH+1,L'x'); CHECK(!RestoratorMemo::IsWindow(&c.window));
-        MemoTest::exePath = L"RESTORATOR.EXE"; CHECK(RestoratorMemo::IsWindow(&c.window));
-        c.window.valid = false; CHECK(!RestoratorMemo::IsWindow(&c.window));
+        { c.window.cls = cls; CHECK(!BomeMemo::IsWindow(&c.window)); CHECK(!Root::MemoSpecsForTest(&c.window,&c.module).bomeMemo); }
+        c.window.cls = L"TBomeMemo";
+        MemoTest::instances[&c.window] = &c.otherModule;
+        CHECK(!BomeMemo::IsWindow(&c.window));
+        CHECK(!Root::MemoSpecsForTest(&c.window,&c.module).bomeMemo);
+        MemoTest::instances.clear();
+        CHECK(BomeMemo::IsWindow(&c.window));
+        c.window.valid = false; CHECK(!BomeMemo::IsWindow(&c.window));
     }
     void Transaction()
     {
@@ -92,26 +93,26 @@ namespace
         {
             void* original = c.module.originals.at(names[missing]);
             c.module.originals.erase(names[missing]);
-            const unsigned mask = Root::AcquireRestoratorMemoHooks();
+            const unsigned mask = Root::AcquireBomeMemoHooks();
             CHECK(mask == (15u & ~(1u << missing)) && c.module.hooks.empty());
             for (size_t i=0;i<4;++i) CHECK(!c.Ref(i));
             c.module.originals[names[missing]] = original;
             c.module.hooks[names[missing]] = original; // foreign IAT owner
-            CHECK(Root::AcquireRestoratorMemoHooks() == mask);
+            CHECK(Root::AcquireBomeMemoHooks() == mask);
             CHECK(c.module.hooks.size() == 1 && c.module.hooks.at(names[missing]) == original);
             for (size_t i=0;i<4;++i) CHECK(!c.Ref(i));
             c.module.hooks.clear();
         }
         // A prior independently owned ref must survive a failed transaction.
-        CHECK(Root::EnableRootHook(&c.module,Root::OHK_RESTORATOR_MEMO_TEXT,true));
+        CHECK(Root::EnableRootHook(&c.module,Root::OHK_BOME_MEMO_TEXT,true));
         c.module.originals.erase("FillRect");
-        CHECK(Root::AcquireRestoratorMemoHooks() == 7 && c.Ref() == 1 && c.module.hooks.size() == 1);
-        CHECK(Root::EnableRootHook(&c.module,Root::OHK_RESTORATOR_MEMO_TEXT,false));
+        CHECK(Root::AcquireBomeMemoHooks() == 7 && c.Ref() == 1 && c.module.hooks.size() == 1);
+        CHECK(Root::EnableRootHook(&c.module,Root::OHK_BOME_MEMO_TEXT,false));
         c.module.originals["FillRect"] = reinterpret_cast<void*>(ChainFill);
-        CHECK(Root::AcquireRestoratorMemoHooks() == 15);
-        CHECK(Root::AcquireRestoratorMemoHooks() == 15); // nested EnableHook returns false, still acquired
+        CHECK(Root::AcquireBomeMemoHooks() == 15);
+        CHECK(Root::AcquireBomeMemoHooks() == 15); // nested EnableHook returns false, still acquired
         for (size_t i=0;i<4;++i) CHECK(c.Ref(i) == 2);
-        Root::ReleaseRestoratorMemoHooks(); Root::ReleaseRestoratorMemoHooks();
+        Root::ReleaseBomeMemoHooks(); Root::ReleaseBomeMemoHooks();
         CHECK(c.module.hooks.empty());
     }
     void Paint()
@@ -122,19 +123,19 @@ namespace
         CHECK(c.Text() == 43); // returned BeginPaint DC is not on the dispatcher stack yet
         PAINTSTRUCT ps{&c.dc,TRUE,{8,16,420,80}};
         const int black = Test::black;
-        CHECK(Root::Root_OnRestoratorMemoAfterBeginPaint(&c.window,&c.dc,&ps,&c.module));
+        CHECK(Root::Root_OnBomeMemoAfterBeginPaint(&c.window,&c.dc,&ps,&c.module));
         CHECK(Test::black == black+1 && Same(MemoTest::blackRect,ps.rcPaint));
         CHECK(ps.fErase == TRUE); // only PaintDispatcher owns resetting fErase on success
         c.Activate(&c.window,&c.dc); Test::stackOwners[&c.memory] = &c.window;
         CHECK(c.Text(&c.memory) == 15);
         Root::Root_OnEndPaint(&c.window,&c.module);
         CHECK(c.module.hooks.empty() && Root::g_rootPaintStack.empty());
-        CHECK(!Root::Root_OnRestoratorMemoAfterBeginPaint(&c.window,&c.dc,&ps,&c.module));
+        CHECK(!Root::Root_OnBomeMemoAfterBeginPaint(&c.window,&c.dc,&ps,&c.module));
         // Incomplete acquisition cannot erase and cannot keep a partial import.
         c.module.originals.erase("CreateBrushIndirect");
         Root::Root_OnBeginPaint(&c.window,&c.module);
         CHECK(c.module.hooks.empty() && c.Text() == 43);
-        CHECK(!Root::Root_OnRestoratorMemoAfterBeginPaint(&c.window,&c.dc,&ps,&c.module));
+        CHECK(!Root::Root_OnBomeMemoAfterBeginPaint(&c.window,&c.dc,&ps,&c.module));
         Root::Root_OnEndPaint(&c.window,&c.module);
     }
     void GetDc()
@@ -207,20 +208,20 @@ namespace
     void Backgrounds()
     {
         Context c; c.Begin();
-        for (COLORREF rgb : {MemoTest::windowColor,MemoTest::faceColor})
+        for (LOGBRUSH input : {LOGBRUSH{BS_SOLID,MemoTest::windowColor},LOGBRUSH{BS_SOLID,MemoTest::faceColor},
+                               LOGBRUSH{BS_SOLID,RGB(45,67,89)},LOGBRUSH{BS_SOLID,0},LOGBRUSH{3,0xffffff,9}})
         {
-            LOGBRUSH input{BS_SOLID,rgb};
+            const LOGBRUSH saved = input;
             std::unique_ptr<LOGBRUSH> created(c.Brush(&input));
-            CHECK(created && created.get() != &input && created->lbColor == 0 && created->lbStyle == BS_SOLID);
-            CHECK(input.lbColor == rgb && MemoTest::brushPointer != &input);
-            c.brush.lbColor = rgb; CHECK(c.Fill() == 1);
+            CHECK(created && created.get() != &input && created->lbColor == 0
+                && created->lbStyle == BS_SOLID && created->lbHatch == 0);
+            CHECK(input.lbStyle == saved.lbStyle && input.lbColor == saved.lbColor
+                && input.lbHatch == saved.lbHatch);
+            CHECK(MemoTest::brushPointer != &input && MemoTest::lastBrush.lbColor == 0
+                && MemoTest::lastBrush.lbStyle == BS_SOLID);
         }
-        for (LOGBRUSH input : {LOGBRUSH{BS_SOLID,RGB(45,67,89)},LOGBRUSH{BS_SOLID,0},LOGBRUSH{3,0xffffff}})
-        {
-            std::unique_ptr<LOGBRUSH> created(c.Brush(&input));
-            CHECK(created && created->lbStyle == input.lbStyle && created->lbColor == input.lbColor);
-            CHECK(MemoTest::brushPointer == &input && c.Fill(nullptr,&input) == 37);
-        }
+        c.brush.lbColor = MemoTest::windowColor; CHECK(c.Fill() == 1);
+        c.brush.lbColor = RGB(45,67,89); CHECK(c.Fill() == 37);
         CHECK(!c.Brush(nullptr));
         CHECK(c.Fill(nullptr,reinterpret_cast<HBRUSH>(ULONG_PTR(COLOR_WINDOW+1))) == 1);
         CHECK(c.Fill(nullptr,reinterpret_cast<HBRUSH>(ULONG_PTR(9+1))) == 37);
@@ -230,12 +231,15 @@ namespace
         c.brush.lbColor = MemoTest::windowColor; CHECK(c.Fill() == 1);
         Root::Root_OnEndPaint(&c.window,&c.module);
         CHECK(c.Color(COLOR_WINDOW) == MemoTest::windowColor && c.Fill() == 37);
+        LOGBRUSH after{BS_SOLID, RGB(45,67,89)};
+        std::unique_ptr<LOGBRUSH> passed(c.Brush(&after));
+        CHECK(passed && passed->lbColor == RGB(45,67,89) && passed->lbStyle == BS_SOLID);
     }
     void Opaque()
     {
         Context c; c.Begin(); c.dc.background = RGB(35,65,95);
         const int commits = MemoTest::commits, black = Test::black;
-        CHECK(c.Text() == 15 && MemoTest::commits == commits+1 && MemoTest::normalized == 1);
+        CHECK(c.Text() == 15 && MemoTest::commits == commits+1 && MemoTest::normalized == 0);
         const auto p = MemoTest::committed;
         CHECK(p.rgbRed == 35 && p.rgbGreen == 65 && p.rgbBlue == 95 && p.rgbReserved == 255);
         CHECK(Test::black == black && c.dc.background == RGB(35,65,95) && c.dc.bkMode == OPAQUE);
@@ -266,8 +270,8 @@ namespace
         MemoTest::failSave = true; CHECK(c.Text() == 43); MemoTest::failSave = false;
         MemoTest::failBlack = true; CHECK(c.Text() == 43 && c.Fill() == 37); MemoTest::failBlack = false;
         PAINTSTRUCT ps{&c.dc,TRUE,c.rect};
-        MemoTest::failBlack = true; CHECK(!Root::Root_OnRestoratorMemoAfterBeginPaint(&c.window,&c.dc,&ps,&c.module)); MemoTest::failBlack = false;
-        for (bool* fail : {&MemoTest::failBrush,&MemoTest::failBuffer,&MemoTest::failFlush,&MemoTest::failAlpha})
+        MemoTest::failBlack = true; CHECK(!Root::Root_OnBomeMemoAfterBeginPaint(&c.window,&c.dc,&ps,&c.module)); MemoTest::failBlack = false;
+        for (bool* fail : {&MemoTest::failDib,&MemoTest::failBrush})
         {
             c.dc.background = RGB(20,40,60); *fail = true;
             CHECK(c.Text() == 43 && MemoTest::nativeMode == OPAQUE && MemoTest::nativeBackground == c.dc.background);
@@ -313,13 +317,13 @@ namespace
         LOGBRUSH input{BS_SOLID,0xffffff};
         { std::unique_ptr<LOGBRUSH> result(c.Brush(&input)); CHECK(result && result->lbColor == 0xffffff); }
         Root::g_shutdown = false;
-        RestoratorMemo::ClearSessions(); Root::DisableAllRootHooks();
+        BomeMemo::ClearSessions(); Root::DisableAllRootHooks();
         CHECK(c.module.hooks.empty() && c.Text() == 43);
         // No original in a slot: thunk's explicit Win32 fallback, no guessed caller.
-        CHECK(Root::Root_MyRestoratorMemoText(&c.dc,"native",6,&c.rect,kFlags) == 43);
-        CHECK(Root::Root_MyRestoratorMemoColor(COLOR_WINDOW) == MemoTest::windowColor);
-        CHECK(Root::Root_MyRestoratorMemoFill(&c.dc,&c.rect,&c.brush) == 37);
-        { std::unique_ptr<LOGBRUSH> result(Root::Root_MyRestoratorMemoBrush(&input)); CHECK(result && result->lbColor == 0xffffff); }
+        CHECK(Root::Root_MyBomeMemoText(&c.dc,"native",6,&c.rect,kFlags) == 43);
+        CHECK(Root::Root_MyBomeMemoColor(COLOR_WINDOW) == MemoTest::windowColor);
+        CHECK(Root::Root_MyBomeMemoFill(&c.dc,&c.rect,&c.brush) == 37);
+        { std::unique_ptr<LOGBRUSH> result(Root::Root_MyBomeMemoBrush(&input)); CHECK(result && result->lbColor == 0xffffff); }
     }
 }
 int main(int argc, char** argv)

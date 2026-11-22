@@ -23,7 +23,7 @@
 #include "CorePch.h"
 #include <Hooks/delphi/TPanelDraw.h>
 #include <Hooks/delphi/TButtonGroupsDraw.h>
-#include <Hooks/delphi/RestoratorMemoDraw.h>
+#include <Hooks/delphi/BomeMemoDraw.h>
 #include <GlassDelphiButtonGroups.h>
 #include <Hooks/RootGdiHooks.h>
 #include <Hooks/RootWindowHooks.h>
@@ -517,10 +517,10 @@ namespace GlassCore::Root
         int WINAPI Root_MyDelphiGroupText(HDC, LPWSTR, int, LPRECT, UINT, LPDRAWTEXTPARAMS);
         int WINAPI Root_MyDelphiGroupFill(HDC, const RECT*, HBRUSH);
         template <size_t slot> BOOL WINAPI Root_MyDelphiGroupGradient(HDC, PTRIVERTEX, ULONG, PVOID, ULONG, ULONG);
-        int WINAPI Root_MyRestoratorMemoText(HDC, LPCSTR, int, LPRECT, UINT);
-        HBRUSH WINAPI Root_MyRestoratorMemoBrush(const LOGBRUSH*);
-        DWORD WINAPI Root_MyRestoratorMemoColor(int);
-        int WINAPI Root_MyRestoratorMemoFill(HDC, const RECT*, HBRUSH);
+        int WINAPI Root_MyBomeMemoText(HDC, LPCSTR, int, LPRECT, UINT);
+        HBRUSH WINAPI Root_MyBomeMemoBrush(const LOGBRUSH*);
+        DWORD WINAPI Root_MyBomeMemoColor(int);
+        int WINAPI Root_MyBomeMemoFill(HDC, const RECT*, HBRUSH);
 
 #if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
         int WINAPI VclProbeFill(HDC, const RECT*, HBRUSH);
@@ -595,15 +595,15 @@ namespace GlassCore::Root
                 "GradientFill", reinterpret_cast<PVOID>(Root_MyDelphiGroupGradient<OHK_DELPHI_GROUP_GRADIENT>) },
             std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv },
                 "GdiGradientFill", reinterpret_cast<PVOID>(Root_MyDelphiGroupGradient<OHK_DELPHI_GROUP_GDIGRADIENT>) },
-            // Restorator memo route: keep order in sync with its readiness bits.
+            // Bome memo route: keep order in sync with its readiness bits.
             std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv },
-                "DrawTextA", reinterpret_cast<PVOID>(Root_MyRestoratorMemoText) },
+                "DrawTextA", reinterpret_cast<PVOID>(Root_MyBomeMemoText) },
             std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv },
-                "CreateBrushIndirect", reinterpret_cast<PVOID>(Root_MyRestoratorMemoBrush) },
+                "CreateBrushIndirect", reinterpret_cast<PVOID>(Root_MyBomeMemoBrush) },
             std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv },
-                "GetSysColor", reinterpret_cast<PVOID>(Root_MyRestoratorMemoColor) },
+                "GetSysColor", reinterpret_cast<PVOID>(Root_MyBomeMemoColor) },
             std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv },
-                "FillRect", reinterpret_cast<PVOID>(Root_MyRestoratorMemoFill) },
+                "FillRect", reinterpret_cast<PVOID>(Root_MyBomeMemoFill) },
 #if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
             std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv }, "FillRect", reinterpret_cast<PVOID>(VclProbeFill) },
             std::tuple{ std::array{ "gdi32.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv, ""sv }, "PatBlt", reinterpret_cast<PVOID>(VclProbePatBlt) },
@@ -900,13 +900,13 @@ namespace GlassCore::Root
             }
         }
 
-        // Restorator memo acquisition is deliberately separate from EnableSpecs:
+        // Bome memo acquisition is deliberately separate from EnableSpecs:
         // EnableHook(false) is not paired with a failed enable (nor is its return
         // value an acquisition indicator when a nested ref already exists).
-        static constexpr size_t kRestoratorMemoSlots[] = {
-            OHK_RESTORATOR_MEMO_TEXT, OHK_RESTORATOR_MEMO_BRUSH,
-            OHK_RESTORATOR_MEMO_COLOR, OHK_RESTORATOR_MEMO_FILL };
-        unsigned AcquireRestoratorMemoHooks() noexcept
+        static constexpr size_t kBomeMemoSlots[] = {
+            OHK_BOME_MEMO_TEXT, OHK_BOME_MEMO_BRUSH,
+            OHK_BOME_MEMO_COLOR, OHK_BOME_MEMO_FILL };
+        unsigned AcquireBomeMemoHooks() noexcept
         {
             void* ep = GlassCore::ModuleHandler::g_entryPointModule;
             if (!ep || g_shutdown.load(std::memory_order_acquire)) return 0;
@@ -920,25 +920,25 @@ namespace GlassCore::Root
                 it->second.CacheHookData();
             }
             unsigned mask = 0;
-            for (size_t i = 0; i < std::size(kRestoratorMemoSlots); ++i)
+            for (size_t i = 0; i < std::size(kBomeMemoSlots); ++i)
             {
-                const size_t slot = kRestoratorMemoSlots[i];
+                const size_t slot = kBomeMemoSlots[i];
                 const int before = it->second.GetRef(slot);
                 it->second.EnableHook(slot, true);
                 if (it->second.GetRef(slot) > before) mask |= 1u << i;
             }
-            if (mask != GlassCore::RestoratorMemo::kReadyMask)
-                for (size_t i = std::size(kRestoratorMemoSlots); i-- > 0;)
-                    if (mask & (1u << i)) it->second.EnableHook(kRestoratorMemoSlots[i], false);
+            if (mask != GlassCore::BomeMemo::kReadyMask)
+                for (size_t i = std::size(kBomeMemoSlots); i-- > 0;)
+                    if (mask & (1u << i)) it->second.EnableHook(kBomeMemoSlots[i], false);
             return mask;
         }
-        void ReleaseRestoratorMemoHooks() noexcept
+        void ReleaseBomeMemoHooks() noexcept
         {
             auto lock = g_rootLock.lock_exclusive();
             const auto it = g_rootMap.find(GlassCore::ModuleHandler::g_entryPointModule);
             if (it == g_rootMap.end()) return;
-            for (size_t i = std::size(kRestoratorMemoSlots); i-- > 0;)
-                it->second.EnableHook(kRestoratorMemoSlots[i], false);
+            for (size_t i = std::size(kBomeMemoSlots); i-- > 0;)
+                it->second.EnableHook(kBomeMemoSlots[i], false);
         }
 
         void DisableAllRootHooks() noexcept
@@ -1534,7 +1534,7 @@ namespace GlassCore::Root
             // An outer root can still own this generic import. Do not run half
             // of another text path when the dedicated ANSI route is unarmed.
             if (caller == GlassCore::ModuleHandler::g_entryPointModule
-                && GlassCore::RestoratorMemo::IsWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd()))
+                && GlassCore::BomeMemo::IsWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd()))
                 return o(hdc, t, c, rc, fmt);
             if ((fmt & DT_CALCRECT) != 0)
                 return o(hdc, t, c, rc, fmt);
@@ -1577,40 +1577,40 @@ namespace GlassCore::Root
                 orig, theme, dc, part, state, text, count, flags, rect, options);
         }
 
-        // Restorator memo EXE thunks: the import owner, not a possible chain
+        // Bome memo EXE thunks: the import owner, not a possible chain
         // trampoline's return address, selects the original. Helpers enforce TLS
         // readiness and exact window/DC scope even while another thread holds IAT.
-        int WINAPI Root_MyRestoratorMemoText(HDC dc, LPCSTR text, int count, LPRECT rect, UINT flags)
+        int WINAPI Root_MyBomeMemoText(HDC dc, LPCSTR text, int count, LPRECT rect, UINT flags)
         {
-            const auto orig = GetRootOrg<OHK_RESTORATOR_MEMO_TEXT, decltype(&::DrawTextA)>(
+            const auto orig = GetRootOrg<OHK_BOME_MEMO_TEXT, decltype(&::DrawTextA)>(
                 GlassCore::ModuleHandler::g_entryPointModule);
             if (!orig) return ::DrawTextA(dc, text, count, rect, flags);
             if (g_shutdown.load(std::memory_order_acquire)) return orig(dc, text, count, rect, flags);
-            return GlassCore::RestoratorMemo::DrawAnsi(orig, dc, text, count, rect, flags);
+            return GlassCore::BomeMemo::DrawAnsi(orig, dc, text, count, rect, flags);
         }
-        HBRUSH WINAPI Root_MyRestoratorMemoBrush(const LOGBRUSH* brush)
+        HBRUSH WINAPI Root_MyBomeMemoBrush(const LOGBRUSH* brush)
         {
-            const auto orig = GetRootOrg<OHK_RESTORATOR_MEMO_BRUSH, decltype(&::CreateBrushIndirect)>(
+            const auto orig = GetRootOrg<OHK_BOME_MEMO_BRUSH, decltype(&::CreateBrushIndirect)>(
                 GlassCore::ModuleHandler::g_entryPointModule);
             if (!orig) return ::CreateBrushIndirect(brush);
             if (g_shutdown.load(std::memory_order_acquire)) return orig(brush);
-            return GlassCore::RestoratorMemo::CreateBrush(orig, brush);
+            return GlassCore::BomeMemo::CreateBrush(orig, brush);
         }
-        DWORD WINAPI Root_MyRestoratorMemoColor(int index)
+        DWORD WINAPI Root_MyBomeMemoColor(int index)
         {
-            const auto orig = GetRootOrg<OHK_RESTORATOR_MEMO_COLOR, decltype(&::GetSysColor)>(
+            const auto orig = GetRootOrg<OHK_BOME_MEMO_COLOR, decltype(&::GetSysColor)>(
                 GlassCore::ModuleHandler::g_entryPointModule);
             if (!orig) return ::GetSysColor(index);
             if (g_shutdown.load(std::memory_order_acquire)) return orig(index);
-            return GlassCore::RestoratorMemo::SystemColor(orig, index);
+            return GlassCore::BomeMemo::SystemColor(orig, index);
         }
-        int WINAPI Root_MyRestoratorMemoFill(HDC dc, const RECT* rect, HBRUSH brush)
+        int WINAPI Root_MyBomeMemoFill(HDC dc, const RECT* rect, HBRUSH brush)
         {
-            const auto orig = GetRootOrg<OHK_RESTORATOR_MEMO_FILL, decltype(&::FillRect)>(
+            const auto orig = GetRootOrg<OHK_BOME_MEMO_FILL, decltype(&::FillRect)>(
                 GlassCore::ModuleHandler::g_entryPointModule);
             if (!orig) return ::FillRect(dc, rect, brush);
             if (g_shutdown.load(std::memory_order_acquire)) return orig(dc, rect, brush);
-            return GlassCore::RestoratorMemo::Fill(orig, dc, rect, brush);
+            return GlassCore::BomeMemo::Fill(orig, dc, rect, brush);
         }
 
         // Dedicated EXE slots: return addresses in IAT chains are not import owners.
@@ -1731,7 +1731,7 @@ namespace GlassCore::Root
             if (caller == GlassCore::ModuleHandler::g_entryPointModule
                 && GlassShared::IsDelphiButtonGroupsClassName(cls)) return o(hdc, color);
             if (caller == GlassCore::ModuleHandler::g_entryPointModule
-                && GlassCore::RestoratorMemo::IsWindow(hFromDc)) return o(hdc, color);
+                && GlassCore::BomeMemo::IsWindow(hFromDc)) return o(hdc, color);
 
             if (!g_shutdown.load(std::memory_order_acquire)
                 && (0xFFFFFF & color) == GetSysColor(COLOR_WINDOW))
@@ -1803,7 +1803,7 @@ namespace GlassCore::Root
                 && GlassShared::IsDelphiButtonGroupsWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd()))
                 return o(nIndex);
             if (caller == GlassCore::ModuleHandler::g_entryPointModule
-                && GlassCore::RestoratorMemo::IsWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd()))
+                && GlassCore::BomeMemo::IsWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd()))
                 return o(nIndex);
             if (!g_shutdown.load(std::memory_order_acquire))
             {
@@ -1863,7 +1863,7 @@ namespace GlassCore::Root
                 && GlassShared::IsDelphiButtonGroupsWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd()))
                 return o(color);
             if (caller == GlassCore::ModuleHandler::g_entryPointModule
-                && GlassCore::RestoratorMemo::IsWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd()))
+                && GlassCore::BomeMemo::IsWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd()))
                 return o(color);
 
             // PopupOnly: без активной paint-сессии (стеклянного popup'а) comctl32

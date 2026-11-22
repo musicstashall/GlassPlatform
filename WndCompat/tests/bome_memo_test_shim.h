@@ -17,6 +17,7 @@ struct RGBQUAD { BYTE rgbBlue{}, rgbGreen{}, rgbRed{}, rgbReserved{}; };
 struct MemoBuffer { RGBQUAD sample{}; };
 using HPAINTBUFFER = MemoBuffer*;
 inline constexpr int MAX_PATH = 260, MM_TEXT = 1, COLOR_MENUBAR = 30, OBJ_BITMAP = 7;
+inline constexpr UINT BS_PATTERN = 3;
 inline constexpr int DEFAULT_CHARSET = 1, SYMBOL_CHARSET = 2, TCI_SRCCHARSET = 1, CP_ACP = 0;
 inline constexpr UINT DT_NOCLIP = 0x100, DT_NOPREFIX = 0x800, DT_SINGLELINE = 0x20, DT_VCENTER = 4;
 inline constexpr int GA_ROOT = 2, DBG_IMPORTANT = 3;
@@ -24,10 +25,11 @@ inline constexpr int GA_ROOT = 2, DBG_IMPORTANT = 3;
 #define THROW_IF_FAILED(expr) do { const HRESULT h = (expr); if (!SUCCEEDED(h)) throw h; } while (false)
 namespace MemoTest
 {
-    inline std::wstring exePath = LR"(C:\Tools\Restorator.exe)";
+    inline std::wstring exePath = LR"(C:\App\Host.exe)";
+    inline std::unordered_map<HWND, HMODULE> instances;
     inline std::unordered_map<HDC, int> maps, charsets;
     inline BITMAP bitmap{640, 480, 1, 32};
-    inline bool haveBitmap = true, failBlack = false, failSave = false, failBrush = false;
+    inline bool haveBitmap = true, failBlack = false, failSave = false, failBrush = false, failDib = false;
     inline bool failConvert = false, failTranslate = false, failBuffer = false, failFlush = false, failAlpha = false;
     inline int nativeAnsi = 0, chainAnsi = 0, nativeBrush = 0, chainBrush = 0, nativeColors = 0;
     inline int nativeFill = 0, chainFill = 0, buffers = 0, commits = 0, discards = 0, normalized = 0;
@@ -81,6 +83,16 @@ namespace MemoTest
         void DisableAllHooks()
         { for (size_t i = 0; i < Count; ++i) while (refs[i]) EnableHook(i, false); }
     };
+}
+using LONG_PTR = std::intptr_t;
+inline constexpr int GWLP_HINSTANCE = -6;
+inline LONG_PTR GetWindowLongPtrW(HWND window, int index)
+{
+    assert(index == GWLP_HINSTANCE);
+    const auto it = MemoTest::instances.find(window);
+    const HMODULE module = it == MemoTest::instances.end()
+        ? GlassCore::ModuleHandler::g_entryPointModule : it->second;
+    return reinterpret_cast<LONG_PTR>(module);
 }
 inline DWORD GetModuleFileNameW(HMODULE, LPWSTR out, DWORD capacity)
 {
@@ -164,6 +176,13 @@ inline int ChainAnsi(HDC dc, LPCSTR text, int count, LPRECT rect, UINT flags)
 inline int MemoNativeFill(HDC dc, const RECT*, HBRUSH brush)
 {
     ++MemoTest::nativeFill;
+    const auto encoded = reinterpret_cast<ULONG_PTR>(brush);
+    if (brush && encoded > COLOR_MENUBAR + 1u && brush->lbStyle == BS_PATTERN)
+    {
+        MemoTest::committed = {BYTE(brush->lbColor >> 16), BYTE(brush->lbColor >> 8),
+            BYTE(brush->lbColor), BYTE(brush->lbHatch)};
+        ++MemoTest::commits; return 1;
+    }
     if (auto it = MemoTest::memoryBuffers.find(dc); it != MemoTest::memoryBuffers.end())
         it->second->sample = {BYTE(brush->lbColor >> 16), BYTE(brush->lbColor >> 8), BYTE(brush->lbColor), 0};
     return 37;
@@ -177,7 +196,40 @@ inline HRESULT BufferedPaintSetAlpha(HPAINTBUFFER buffer, const RECT* rect, BYTE
     if (MemoTest::failAlpha) return E_FAIL;
     ++MemoTest::normalized; buffer->sample.rgbReserved = alpha; return S_OK;
 }
-namespace wil { using unique_hbrush = std::unique_ptr<LOGBRUSH>; }
+struct MemoDib { RGBQUAD px{}; };
+using HBITMAP = MemoDib*;
+struct BITMAPINFOHEADER
+{
+    DWORD biSize{}; LONG biWidth{}, biHeight{}; unsigned short biPlanes{}, biBitCount{};
+    DWORD biCompression{};
+};
+struct BITMAPINFO { BITMAPINFOHEADER bmiHeader{}; };
+inline constexpr DWORD BI_RGB = 0;
+inline constexpr UINT DIB_RGB_COLORS = 0;
+inline BYTE GetRValue(COLORREF c) { return BYTE(c & 255); }
+inline BYTE GetGValue(COLORREF c) { return BYTE((c >> 8) & 255); }
+inline BYTE GetBValue(COLORREF c) { return BYTE((c >> 16) & 255); }
+inline HBITMAP CreateDIBSection(HDC, const BITMAPINFO* info, UINT usage, void** bits, void*, DWORD)
+{
+    assert(info && info->bmiHeader.biSize == sizeof(info->bmiHeader));
+    assert(info->bmiHeader.biWidth == 1 && info->bmiHeader.biHeight == -1);
+    assert(info->bmiHeader.biPlanes == 1 && info->bmiHeader.biBitCount == 32);
+    assert(info->bmiHeader.biCompression == BI_RGB && usage == DIB_RGB_COLORS);
+    if (MemoTest::failDib) { if (bits) *bits = nullptr; return nullptr; }
+    auto* dib = new MemoDib;
+    if (bits) *bits = &dib->px;
+    return dib;
+}
+inline HBRUSH CreatePatternBrush(HBITMAP dib)
+{
+    if (!dib || MemoTest::failBrush) return nullptr;
+    return new LOGBRUSH{BS_PATTERN, RGB(dib->px.rgbRed, dib->px.rgbGreen, dib->px.rgbBlue), dib->px.rgbReserved};
+}
+namespace wil
+{
+    using unique_hbrush = std::unique_ptr<LOGBRUSH>;
+    using unique_hbitmap = std::unique_ptr<MemoDib>;
+}
 namespace GlassCore::Text
 {
     inline HRESULT MemoDrawTextWithAlpha(HDC dc, LPCWSTR text, int count,
