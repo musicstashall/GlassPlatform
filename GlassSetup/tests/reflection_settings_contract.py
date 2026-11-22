@@ -22,7 +22,7 @@ assert '.Where(item => ReflectionCategory(item.FilePath) == category)' in page
 assert 'ReflectionSettingsDialog.ShowAsync(source)' in page
 assert 'if (settings is not null) await ApplyReflectionSourceAsync(source, settings)' in page
 assert 'ReflectionRenderState.Save' not in dialog and 'WriteDwm' not in dialog
-assert 'RenderConfiguredAsync(source, 384, 216, Values())' in dialog
+assert 'source, preview.DesktopWidth, preview.DesktopHeight, Values()' in dialog
 xaml = ET.parse(root / 'GlassSettings/Pages/Dwm/DwmThemeDetailPage.xaml')
 ns = {'x': 'http://schemas.microsoft.com/winfx/2006/xaml', 'ui': 'http://schemas.microsoft.com/winfx/2006/xaml/presentation'}
 pivot = xaml.find('.//ui:Pivot[@x:Name="ReflectionCategoryPivot"]', ns)
@@ -47,7 +47,7 @@ assert header_style.get('BasedOn') == '{StaticResource GlassSettingsPivotHeaderI
 print('PASS: configure precedes intensity in one header table; Pivot reuses Adjacent Windows typography')
 assert 'int NoisePercent = 0' in state and 'Math.Clamp(NoisePercent, 0, 100)' in state
 assert 'noise.ValueChanged' in dialog and 'initial.NoisePercent' in dialog
-assert 'MaxHeight = 620' in dialog and 'HostedDialogSpec' in dialog
+assert 'MaxHeight = 760' in dialog and 'HostedDialogSpec' in dialog
 assert 'CreateCancelConfirmFooter(GlassSettingsResources.Get("CmdApply"))' in dialog
 for language in ('ru-RU', 'en-US'):
     assert 'Reflection_SettingNoise' in (root / f'GlassSettings/Strings/{language}/Resources.resw').read_text()
@@ -75,23 +75,24 @@ assert 'blue / (double)weight' not in effects and 'weight += a' not in effects
 print('PASS: bipolar luminance grain independent of source RGB, Gaussian film samples')
 assert 'bool Enabled = true' in state
 assert 'if (!settings.Enabled) settings = new ReflectionRenderSettings();' in service
-assert 'enabled.IsOn' in dialog and 'groups.IsEnabled = enabled.IsOn' in dialog
+assert 'enabled.IsOn' in dialog and 'groups.IsEnabled = pickerRail.IsEnabled = enabled.IsOn' in dialog
 assert 'new Pivot' in dialog and 'Reflection_GroupImage' in dialog and 'Reflection_GroupNoise' in dialog
 assert 'GlassSettingsPivotHeaderItemStyle' in dialog
-assert 'CreateRoundedRectangleGeometry' in dialog and 'ControlStrongStrokeColorDefaultBrush' in dialog
-assert '255, 153, 170, 187' in dialog and '255, 255, 255, 255' in dialog
+desktop_preview = (root / 'GlassSettings/Controls/ReflectionDesktopPreview.cs').read_text()
+assert 'CornerRadius' in desktop_preview and 'ControlStrongStrokeColorDefaultBrush' in desktop_preview
+assert 'DesktopWallpaperImageCache.GetDisplaySourceOrLoad' in desktop_preview
 assert 'CalibrateNoise' in effects and 'target / value' in effects
-print('PASS: calibrated intensity, persistent bypass, grouped Pivot and rounded checkerboard preview wiring')
+print('PASS: calibrated intensity, persistent bypass, grouped Pivot and wallpaper desktop preview wiring')
 assert 'private static int _selectedGroupIndex' in dialog
 assert 'Math.Clamp(_selectedGroupIndex' in dialog and 'groups.Loaded +=' in dialog
 assert '_selectedGroupIndex = restoredGroupIndex = groups.SelectedIndex' in dialog
 assert 'trackingGroup && groups.IsLoaded' in dialog
 assert 'Margin = new Thickness(0, 12, 0, 0)' in dialog
-assert 'Opacity = 0.07' in dialog and 'preview.Opacity' not in dialog
-print('PASS: process-only Pivot selection, faint checkerboard without image dimming, top content inset')
+assert 'Checkerboard' not in desktop_preview and 'preview.Opacity' not in dialog
+print('PASS: process-only Pivot selection, shared wallpaper without image dimming, top content inset')
 assert 'groups.Loaded +=' in dialog and 'groups.Unloaded +=' in dialog
 assert 'Grid.SetColumn(reset, 1)' in dialog and 'body.Children.Add(reset)' not in dialog
-assert 'Shadow = new ThemeShadow()' in dialog
+assert 'Shadow = new ThemeShadow()' in desktop_preview
 assert 'Reflection_NoiseSand' in (root / 'GlassSettings/Strings/ru-RU/Resources.resw').read_text()
 assert 'if (type == 4)' in effects and 'u < 1311' in effects and 'u < 64004' in effects
 print('PASS: Pivot load restoration, top-right Defaults, preview shadow and independent-pixel sand grain')
@@ -109,3 +110,29 @@ assert 'GlassSettingsNumberBoxStyle' in number_factory
 assert 'NumberBoxSpinButtonPlacementMode.Inline' in number_factory
 assert 'Width = 128' not in number_factory and 'NumberBoxSpinButtonPlacementMode.Compact' not in number_factory
 print('PASS: reflection numeric inputs reuse popup Animation NumberBox style and inline steppers')
+
+assert 'GlassAlphaColorPicker' in dialog and 'IsAlphaVisible = true' in dialog
+assert 'ColorRgb' in state and 'Colorize(pixels, settings.ColorRgb ?? 0)' in service
+assert 'Reflection_PresetDark' in dialog and 'Reflection_PresetLight' in dialog
+assert 'MaxWidth = 1100' in dialog and 'Grid.SetColumn(pickerRail, 1)' in dialog
+assert 'DisplayArea.FindAll()' in desktop_preview
+assert 'WallpaperPreviewCrossfade' in desktop_preview
+assert '_watcher.Changed += OnEnvironmentChanged' in desktop_preview
+assert '_watcher.Changed -= OnEnvironmentChanged' in desktop_preview
+assert 'new DesktopEnvironmentWatcher' not in desktop_preview
+print('PASS: unified source tint/alpha picker, theme presets, proportional monitor layout, shared wallpaper lifecycle')
+flat = (root / 'GlassSettings/Controls/FlatGlassPreviewLayer.cs').read_text()
+shared_state = (root / 'GlassSettings/Services/CompositionPreviewRegistryStates.cs').read_text()
+stylization = (root / 'GlassSettings/Controls/StylizationLayeredPreview.xaml.cs').read_text()
+assert desktop_preview.index('layers.Children.Add(a)') < desktop_preview.index('layers.Children.Add(glass)')
+assert desktop_preview.index('layers.Children.Add(glass)') < desktop_preview.index('layers.Children.Add(reflectionCanvas)')
+assert 'CompositionWallpaperPipelineBuilder.Build(' in flat
+assert 'CompositionPreviewRegistryStates.BuildRuntimeActive()' in flat and 'CompositionPreviewRegistryStates.BuildRuntimeActive()' in stylization
+assert 'CompositionWallpaperPipelineBuilder.CreateBitmap(' in flat and 'CompositionWallpaperPipelineBuilder.CreateBitmap(' in stylization
+assert 'BuildGaussian' not in flat and 'File.ReadAllBytes' not in flat
+assert 'RuntimeReflectionOpacity' in desktop_preview and 'RuntimeReflectionOpacity' in stylization
+assert 'Translation' not in flat and 'Margin' not in flat
+cache = (root / 'GlassSettings/Services/DesktopWallpaperImageCache.cs').read_text()
+assert 'GetMonitorDisplaySourcesAsync' in cache and 'GetMonitorDisplaySourcesAsync' in desktop_preview
+assert 'MonitorSources.Clear()' in cache
+print('PASS: flat wallpaper/glass/reflection order, shared Stylization glass policy/compositor and per-monitor wallpaper cache')

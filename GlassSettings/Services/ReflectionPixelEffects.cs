@@ -26,6 +26,17 @@ public static class ReflectionPixelEffects
         return contrast.Select(value => value > 0 ? target / value : 1).ToArray();
     }
 
+    /// <summary>Source alpha is the pattern; brightness/hue are user-selected, not baked into paired files.</summary>
+    public static void Colorize(byte[] pixels, uint rgb)
+    {
+        for (int i = 0; i < pixels.Length; i += 4)
+        {
+            pixels[i] = (byte)(rgb & 255);
+            pixels[i + 1] = (byte)((rgb >> 8) & 255);
+            pixels[i + 2] = (byte)((rgb >> 16) & 255);
+        }
+    }
+
     public static byte[] Resize(byte[] source, int sw, int sh, int width, int height, double zoom = 0)
     {
         if (zoom == 0 && sw == width && sh == height) return source;

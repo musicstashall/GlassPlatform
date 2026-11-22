@@ -73,6 +73,18 @@ internal static class CompositionPreviewRegistryStates
         return (vistaState, win7State);
     }
 
+    public static double RuntimeReflectionOpacity => .5 * Math.Clamp(
+        DwmRegistryStore.ReadEffectiveDword("ColorizationGlassReflectionIntensity")
+            ?? DwmDefaults.DefaultWhenKeyAbsent("ColorizationGlassReflectionIntensity"), 0u, 100u) / 100.0;
+
+    /// <summary>Active glass layer shared by Stylization and flat reflection previews.</summary>
+    public static DwmCompositionCascadePreview.PreviewState BuildRuntimeActive()
+    {
+        var (vista, win7) = BuildFromRuntimeEffective();
+        return (DwmRegistryStore.ReadEffectiveDword("GlassType") ?? 0) == 1
+            ? win7 : vista with { ShowInactiveSplit = false };
+    }
+
     private static uint ResolveVistaInactiveTintArgb(bool opaqueBlend)
     {
         var inactiveValue = DwmRegistryStore.ReadEffectiveDword("ColorizationColorInactive");

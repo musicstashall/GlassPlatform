@@ -870,6 +870,44 @@ internal static class DesktopWallpaperCom
         }
     }
 
+    internal sealed record MonitorWallpaper(int X, int Y, int Width, int Height,
+        string Path, uint BackgroundColorRef, int Position);
+
+    // Shared COM adapter: consumers must not instantiate their own IDesktopWallpaper.
+    public static IReadOnlyList<MonitorWallpaper> ReadMonitorWallpapers()
+    {
+        IDesktopWallpaper? wall = null;
+        try
+        {
+            wall = CreateWallpaper();
+            wall.GetBackgroundColor(out var background);
+            wall.GetPosition(out var position);
+            wall.GetMonitorDevicePathCount(out var count);
+            var result = new List<MonitorWallpaper>();
+            for (uint index = 0; index < count; index++)
+            {
+                wall.GetMonitorDevicePathAt(index, out var idPointer);
+                try
+                {
+                    var id = Marshal.PtrToStringUni(idPointer);
+                    if (string.IsNullOrEmpty(id)) continue;
+                    wall.GetMonitorRECT(id, out var rect);
+                    wall.GetWallpaper(id, out var pathPointer);
+                    try
+                    {
+                        result.Add(new(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top,
+                            Marshal.PtrToStringUni(pathPointer) ?? "", background, position));
+                    }
+                    finally { if (pathPointer != IntPtr.Zero) Marshal.FreeCoTaskMem(pathPointer); }
+                }
+                finally { if (idPointer != IntPtr.Zero) Marshal.FreeCoTaskMem(idPointer); }
+            }
+            return result;
+        }
+        catch { return Array.Empty<MonitorWallpaper>(); }
+        finally { if (wall is not null) Marshal.ReleaseComObject(wall); }
+    }
+
     /// <summary>Сплошной цвет: COLORREF (0x00BBGGRR).</summary>
     public static bool TryGetBackgroundColor(out uint colorRef)
     {

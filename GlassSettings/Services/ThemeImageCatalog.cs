@@ -101,7 +101,21 @@ public static class ThemeImageCatalog
         foreach (var category in new[] { "Textured", "Pattern" })
             items.AddRange(LoadFromResourceFolders(ReflectionRelativeFolders
                 .Select(folder => Path.Combine(folder, category)).ToArray()));
-        return items;
+        // Installed packages can temporarily contain old paired files beside the
+        // unified source. Prefer the unsuffixed resource and show only one tile.
+        return items.GroupBy(item => ReflectionTextureService.IsTexture(item.FilePath)
+                || SvgReflectionRenderer.IsPattern(item.FilePath)
+                    ? Path.GetDirectoryName(item.FilePath) + "|" + ReflectionSourceNaming.Stem(item.FilePath)
+                    : item.FilePath, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.OrderBy(item => string.Equals(
+                Path.GetFileNameWithoutExtension(item.FilePath), ReflectionSourceNaming.Stem(item.FilePath),
+                StringComparison.OrdinalIgnoreCase) ? 0 : 1).First())
+            .Select(item => new ThemeImageItem
+            {
+                Title = ReflectionTextureService.IsTexture(item.FilePath) || SvgReflectionRenderer.IsPattern(item.FilePath)
+                    ? ReflectionSourceNaming.Stem(item.FilePath) : item.Title,
+                FilePath = item.FilePath, Image = item.Image
+            }).ToList();
     }
 
     public static IReadOnlyList<ThemeImageItem> LoadMaterialImages() =>

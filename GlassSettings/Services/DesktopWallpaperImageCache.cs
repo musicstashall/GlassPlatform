@@ -12,6 +12,7 @@ internal static class DesktopWallpaperImageCache
     public const int DisplayDecodeWidth = 340;
 
     private static readonly object Gate = new();
+    private static readonly Dictionary<string, Task<ImageSource?>> MonitorSources = new(StringComparer.OrdinalIgnoreCase);
 
     private static string? _cachedIdentity;
     private static string? _cachedPath;
@@ -117,6 +118,7 @@ internal static class DesktopWallpaperImageCache
     {
         lock (Gate)
         {
+            MonitorSources.Clear();
             _cachedIdentity = null;
             _cachedPath = null;
             _cachedBytes = null;
@@ -205,6 +207,44 @@ internal static class DesktopWallpaperImageCache
             resolved = CurrentWallpaperResolver.TryGetDesktopWallpaperPath();
 
         return ThemeImageUriHelper.TryCreateBitmap(resolved, DisplayDecodeWidth);
+    }
+
+    internal sealed record MonitorDisplaySource(DesktopWallpaperCom.MonitorWallpaper Monitor, ImageSource? Source);
+
+    /// <summary>Per-monitor extension of the same observer-invalidated read/decode cache.</summary>
+    public static async Task<IReadOnlyList<MonitorDisplaySource>> GetMonitorDisplaySourcesAsync(DispatcherQueue dispatcherQueue)
+    {
+        // COM snapshot on the caller's UI apartment, image IO/decode through our common helpers.
+        var monitors = DesktopWallpaperCom.ReadMonitorWallpapers();
+        var result = new List<MonitorDisplaySource>();
+        foreach (var monitor in monitors)
+        {
+            ImageSource? image = null;
+            if (!string.IsNullOrWhiteSpace(monitor.Path))
+            {
+                Task<ImageSource?> load;
+                lock (Gate)
+                {
+                    if (string.Equals(monitor.Path, _cachedPath, StringComparison.OrdinalIgnoreCase)
+                        && _sharedDisplaySource is not null)
+                        load = Task.FromResult<ImageSource?>(_sharedDisplaySource);
+                    else if (!MonitorSources.TryGetValue(monitor.Path, out load!))
+                    {
+                        load = LoadMonitorSourceAsync(dispatcherQueue, monitor.Path);
+                        MonitorSources[monitor.Path] = load;
+                    }
+                }
+                image = await load;
+            }
+            result.Add(new(monitor, image));
+        }
+        return result;
+    }
+
+    private static async Task<ImageSource?> LoadMonitorSourceAsync(DispatcherQueue dispatcherQueue, string path)
+    {
+        var bytes = await Task.Run(() => ReadWallpaperBytes(path));
+        return bytes is { Length: > 0 } ? await DecodeDisplayBitmapAsync(dispatcherQueue, bytes) : null;
     }
 
     public static byte[]? TryGetCachedBytes()

@@ -21,34 +21,25 @@ public static class ReflectionTextureService
         var full = Path.GetFullPath(path);
         var roots = new[] { PlatformPaths.ReflectionCacheDirectory, PlatformPaths.ReflectionAppliedDirectory,
             PlatformPaths.ReflectionPatternAppliedDirectory };
-        if (!roots.Any(root => full.StartsWith(Path.GetFullPath(root) + Path.DirectorySeparatorChar,
-            StringComparison.OrdinalIgnoreCase))) return path;
+        bool generated = roots.Any(root => full.StartsWith(Path.GetFullPath(root) + Path.DirectorySeparatorChar,
+            StringComparison.OrdinalIgnoreCase));
+        bool sourceCategory = IsTexture(path) || SvgReflectionRenderer.IsPattern(path);
+        if (!generated && !sourceCategory) return path;
         var items = ThemeImageCatalog.LoadReflectionImages();
         var state = ReflectionRenderState.Read();
-        if (state is not null && string.Equals(Path.GetFullPath(state.Output), full, StringComparison.OrdinalIgnoreCase))
-        {
-            var exact = items.FirstOrDefault(item => string.Equals(Path.GetFullPath(item.FilePath),
-                state.Source, StringComparison.OrdinalIgnoreCase));
-            if (exact is not null) return exact.FilePath;
-        }
-        // Preserve selection for canvases generated before the source textures were named.
-        var appliedName = Path.GetFileName(path);
-        foreach (var theme in new[] { "Dark", "Lite" })
-        {
-            if (string.Equals(appliedName, $"GlassReflection_01_{theme}.png", StringComparison.OrdinalIgnoreCase))
-                appliedName = $"FrostWeave_{theme}.png";
-            if (string.Equals(appliedName, $"GlassReflection_02_{theme}.png", StringComparison.OrdinalIgnoreCase))
-                appliedName = $"DiagonalWeave_{theme}.png";
-        }
+        string wanted = generated && state is not null
+            && string.Equals(Path.GetFullPath(state.Output), full, StringComparison.OrdinalIgnoreCase)
+                ? state.Source : path;
+        string stem = ReflectionSourceNaming.Stem(wanted);
         return items.FirstOrDefault(item =>
-            (IsTexture(item.FilePath) || SvgReflectionRenderer.IsPattern(item.FilePath)) &&
-                string.Equals(Path.GetFileName(SvgReflectionRenderer.IsPattern(item.FilePath)
-                    ? Path.ChangeExtension(item.FilePath, ".png") : item.FilePath),
-                appliedName, StringComparison.OrdinalIgnoreCase))?.FilePath ?? path;
+            (IsTexture(item.FilePath) || SvgReflectionRenderer.IsPattern(item.FilePath))
+            && string.Equals(ReflectionSourceNaming.Stem(item.FilePath), stem, StringComparison.OrdinalIgnoreCase))?.FilePath ?? path;
     }
 
     public static async Task<string> PrepareAsync(string source, ReflectionRenderSettings? settings = null)
     {
+        // Canonicalize even missing old Dark/Lite paths before reading their bytes.
+        source = ResolveSource(source);
         var isSvg = SvgReflectionRenderer.IsPattern(source);
         if (!IsTexture(source) && !isSvg) return source;
         settings = (settings ?? ReflectionRenderState.Settings).Normalize();
@@ -117,6 +108,7 @@ public static class ReflectionTextureService
             ColorManagementMode.DoNotColorManage)).DetachPixelData();
         var canvas = await Task.Run(() =>
         {
+            ReflectionPixelEffects.Colorize(pixels, settings.ColorRgb ?? 0);
             if (isSvg)
             {
                 if (settings.ScalePercent != 100)

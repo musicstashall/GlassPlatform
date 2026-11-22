@@ -1,4 +1,6 @@
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.WindowsRuntime;
+using Microsoft.UI.Xaml.Media.Imaging;
 using DrawingBitmap = System.Drawing.Bitmap;
 using DrawingCompositingQuality = System.Drawing.Drawing2D.CompositingQuality;
 using DrawingImageLockMode = System.Drawing.Imaging.ImageLockMode;
@@ -51,6 +53,15 @@ internal static class CompositionWallpaperPipelineBuilder
             state.Win7Mode ? Math.Min(state.BlurBalancePercent, 100u) : 0,
             state.Win7Mode ? state.Win7AfterglowBgr : 0,
             state.Win7Mode ? Math.Min(state.Win7AfterglowBalancePercent, 100u) : 0);
+
+    /// <summary>Shared UI-thread conversion for consumers of the composition snapshot.</summary>
+    public static WriteableBitmap CreateBitmap(int width, int height, byte[] pixels)
+    {
+        var bitmap = new WriteableBitmap(width, height);
+        using var stream = bitmap.PixelBuffer.AsStream();
+        stream.Write(pixels, 0, pixels.Length);
+        return bitmap;
+    }
 
     public static BlurBuffer BuildSharpBuffer(string? wallpaperPath, int width, int height) =>
         BuildBlurBuffer(wallpaperPath, width, height, kernelRadius: 0);
