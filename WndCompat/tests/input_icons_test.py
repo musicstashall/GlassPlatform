@@ -39,7 +39,7 @@ using BOOL=int; using UINT=unsigned; using DWORD=std::uint32_t; using LONG=std::
 using COLORREF=DWORD; using HRESULT=std::int32_t; using BYTE=unsigned char; using ULONGLONG=std::uint64_t;
 using LPCWSTR=const wchar_t*; using HMODULE=void*; using FARPROC=void(*)(); using HGDIOBJ=void*;using ULONG_PTR=std::uintptr_t;
 constexpr BOOL TRUE=1,FALSE=0; constexpr HRESULT S_OK=0,E_FAIL=-1;
-constexpr int COLOR_WINDOW=5,COLOR_BTNFACE=15,COLOR_MENUBAR=30;
+constexpr int COLOR_WINDOW=5,COLOR_BTNFACE=15,COLOR_BTNSHADOW=16,COLOR_MENUBAR=30;
 bool SUCCEEDED(HRESULT h){return h>=0;} bool FAILED(HRESULT h){return h<0;}
 constexpr UINT ILD_TRANSPARENT=1,ILD_MASK=0x10,ILD_ROP=0x40,ILD_PRESERVEALPHA=0x1000,ILD_DPISCALE=0x4000,ILD_OVERLAYMASK=0xf00;
 constexpr DWORD ILS_SATURATE=2,ILS_ALPHA=4;
@@ -81,7 +81,7 @@ namespace Mock {
  bool full=true,failSize=false,failModule=false,failBegin=false,failMemory=false,failClear=false,failEnd=false,failNative=false,failBits=false,failFlush=false,noAlpha=false;
  bool failGeometry=false,failBrushInfo=false,failProbeRegistration=false,failPat=false;
  DWORD error=9;ULONGLONG tick=1;int calls=0,begins=0,ends=0,live=0,missing=-1;
- BOOL update=0;UINT flags=0;HDC target=nullptr;RECT bounds{};BLENDFUNCTION blend{};
+ BOOL update=0;UINT flags=0;HDC target=nullptr,bufferTarget=nullptr;RECT bounds{};BLENDFUNCTION blend{};
  IMAGELISTDRAWPARAMS indirect{};int index=-1,x=0,y=0,width=0,height=0,tag=0;
  COLORREF background=0,foreground=0;std::function<void()> duringNative,duringFill;bool reentered=false,fillReentered=false;
  DC memory,whiteMemory;int padding=0,stride=0,reportedStride=-1,whitePadding=0,whiteStride=0,whiteReportedStride=-1;
@@ -120,7 +120,7 @@ BOOL GetDCOrgEx(HDC dc,POINT* out){SetLastError(77);if(Mock::failGeometry)return
 BOOL ClientToScreen(HWND w,POINT* out){SetLastError(77);if(Mock::failGeometry)return FALSE;*out=w->clientOrigin;return TRUE;}
 BOOL GetViewportOrgEx(HDC dc,POINT* out){SetLastError(77);if(Mock::failGeometry)return FALSE;*out=dc->viewport;return TRUE;}
 BOOL GetWindowOrgEx(HDC dc,POINT* out){SetLastError(77);if(Mock::failGeometry)return FALSE;*out=dc->windowOrg;return TRUE;}
-COLORREF GetSysColor(int index){SetLastError(77);return index==COLOR_WINDOW?0xffffff:0xc0c0c0;}
+COLORREF GetSysColor(int index){SetLastError(77);return index==COLOR_WINDOW?0xffffff:index==COLOR_BTNSHADOW?0x808080:0xc0c0c0;}
 COLORREF GetBkColor(HDC){SetLastError(77);return 0xffffff;}
 int GetBkMode(HDC){SetLastError(77);return 2;}
 BOOL ImageList_GetIconSize(HIMAGELIST images,int* w,int* h){if(Mock::failSize)return FALSE;*w=images->width;*h=images->height;return TRUE;}
@@ -182,8 +182,8 @@ int FillImport(HDC dc,const RECT* rect,HBRUSH brush){
 }
 BOOL GetModuleHandleExW(DWORD,LPCWSTR,HMODULE* out){*out=reinterpret_cast<void*>(1);return !Mock::failModule;}
 FARPROC GetProcAddress(HMODULE,const char* name){return std::strcmp(name,"ImageList_GetIconSize")==0?reinterpret_cast<FARPROC>(&ImageList_GetIconSize):nullptr;}
-HPAINTBUFFER BeginBufferedPaint(HDC,const RECT* r,int format,BP_PAINTPARAMS* p,HDC* memory){
- const bool white=Mock::live==1;CHECK(Mock::live<=1);++Mock::begins;CHECK(format==BPBF_TOPDOWNDIB);CHECK(p->dwFlags==0);Mock::bounds=*r;Mock::blend=*p->pBlendFunction;
+HPAINTBUFFER BeginBufferedPaint(HDC dc,const RECT* r,int format,BP_PAINTPARAMS* p,HDC* memory){
+ const bool white=Mock::live==1;if(!white)Mock::bufferTarget=dc;CHECK(Mock::live<=1);++Mock::begins;CHECK(format==BPBF_TOPDOWNDIB);CHECK(p->dwFlags==0);Mock::bounds=*r;Mock::blend=*p->pBlendFunction;
  const int stride=r->right-r->left+(white?Mock::whitePadding:Mock::padding);auto& pixels=white?Mock::whitePixels:Mock::pixels;
  pixels.assign(stride*(r->bottom-r->top),{});if(white)Mock::whiteStride=stride;else Mock::stride=stride;
  if(Mock::poisonPadding)for(int y=0;y<r->bottom-r->top;++y)for(int x=r->right-r->left;x<stride;++x)pixels[y*stride+x]={9,8,7,201};
@@ -197,9 +197,19 @@ HRESULT GetBufferedPaintBits(HPAINTBUFFER buffer,RGBQUAD** pixels,int* stride){
  return Mock::failBits||(white&&Mock::failWhiteBits)?E_FAIL:S_OK;
 }
 BOOL GdiFlush(){++Mock::flushCalls;SetLastError(77);return !Mock::failFlush&&Mock::flushCalls!=Mock::failFlushAt;}
+void CompositeBuffer(){
+ HDC dc=Mock::bufferTarget;if(!dc)return;
+ for(int y=0;y<dc->surfaceHeight;++y)for(int x=0;x<dc->surfaceWidth;++x){
+  if(!Contains(Mock::bounds,x,y)||!Contains(dc->clip,x,y)||(dc->useHole&&Contains(dc->hole,x,y)))continue;
+  const auto& p=Mock::pixels[(y-Mock::bounds.top)*Mock::stride+x-Mock::bounds.left];auto& dst=dc->surface[y*dc->surfaceWidth+x];
+  const unsigned inv=255-p.rgbReserved;
+  dst=((p.rgbReserved+(dst>>24)*inv/255)<<24)|((p.rgbRed+((dst>>16)&255)*inv/255)<<16)
+     |((p.rgbGreen+((dst>>8)&255)*inv/255)<<8)|(p.rgbBlue+(dst&255)*inv/255);
+ }
+}
 HRESULT EndBufferedPaint(HPAINTBUFFER buffer,BOOL update){
  CHECK(buffer==reinterpret_cast<void*>(1)||buffer==reinterpret_cast<void*>(2));CHECK(buffer!=reinterpret_cast<void*>(2)||!update);
- ++Mock::ends;--Mock::live;CHECK(Mock::live>=0);Mock::update=update;if(update)Mock::committedPixels=Mock::pixels;SetLastError(88);return Mock::failEnd?E_FAIL:S_OK;
+ ++Mock::ends;--Mock::live;CHECK(Mock::live>=0);Mock::update=update;if(update){Mock::committedPixels=Mock::pixels;if(!Mock::failEnd)CompositeBuffer();}SetLastError(88);return Mock::failEnd?E_FAIL:S_OK;
 }
 ULONGLONG GetTickCount64(){SetLastError(77);return Mock::tick;}
 template<class T>Mock::Arg LogArg(T value){
@@ -498,6 +508,90 @@ void BackgroundFailures(){
   Mock::duringFill=[&]{CHECK(FillImport(&f.dc,&r,&b)==7);};CHECK(FillImport(&f.dc,&r,&b)==7);
   CHECK(Mock::fills.size()==2&&Mock::pats.size()==1&&GetLastError()==55);}
 }
+RECT SearchGeometry(Fixture& f,bool left=false,int border=2,int buttonWidth=24,int width=130,int height=23){
+ f.search.outer={100,200,100+width,200+height};
+ f.search.client={0,0,width-2*border-buttonWidth,height-2*border};
+ f.search.clientOrigin={100+border+(left?buttonWidth:0),200+border};
+ f.dc.window=&f.search;f.dc.origin={100,200};f.dc.viewport=f.dc.windowOrg={0,0};
+ const RECT button=left?RECT{border,border,border+buttonWidth,height-border}:RECT{width-border-buttonWidth,border,width-border,height-border};
+ f.dc.clip=button;f.dc.surfaceWidth=width;f.dc.surfaceHeight=height;f.dc.surface.assign(width*height,0x7f123456);
+ return button;
+}
+void SearchBackground(){
+ for(bool left:{false,true})for(int border:{2,3})for(bool system:{false,true}){
+  Fixture f;const int w=border==2?130:195,h=border==2?23:35,bw=border==2?24:36;const RECT r=SearchGeometry(f,left,border,bw,w,h);
+  if(!left&&border==2)CHECK(r.left==104&&r.top==2&&r.right==128&&r.bottom==21);
+  if(left){f.search.cls=L"tsearchbox";f.search.outer={-300,-100,-300+w,-100+h};f.search.clientOrigin.x-=400;f.search.clientOrigin.y-=300;f.dc.origin={-300,-100};}
+  f.dc.clip={0,0,w,h};const auto clip=f.dc.clip;LOGBRUSH b{BS_SOLID,0xffffff};const auto brush=system?reinterpret_cast<HBRUSH>(COLOR_WINDOW+1u):&b;SetLastError(19);
+  CHECK(FillImport(&f.dc,&r,brush)==7&&GetLastError()==55);CHECK(Mock::fills.size()==1&&Mock::fills[0].pointer==&r&&Mock::fills[0].brush==brush&&Mock::fills[0].entryError==19);
+  CHECK(Mock::pats.size()==1&&EqualRect(&Mock::pats[0].rect,&r)&&EqualRect(&f.dc.clip,&clip));
+  for(int y=0;y<h;++y)for(int x=0;x<w;++x)CHECK(At(f.dc,x,y)==(Contains(r,x,y)?0u:0x7f123456u));
+  CHECK(b.lbColor==0xffffff&&Mock::begins==0);
+  if(ProbeBuild)CHECK(Number(LastLog(L"stage=fill"),L"patched")==1);
+ }
+}
+void SearchClip(){
+ for(int which=0;which<5;++which){
+  Fixture f;const RECT r=SearchGeometry(f);LOGBRUSH b{BS_SOLID,0xffffff};
+  if(which==1)f.dc.clip={107,4,122,17};else if(which==2){f.dc.clipKind=3;f.dc.useHole=true;f.dc.hole={110,6,119,15};}
+  else if(which==3){f.dc.clipKind=1;f.dc.clip={0,0,0,0};}else if(which==4)f.dc.clip={2,2,104,21};
+  const auto clip=f.dc.clip;CHECK(FillImport(&f.dc,&r,&b)==7&&Mock::pats.size()==1);
+  for(int y=0;y<23;++y)for(int x=0;x<130;++x){const bool painted=Contains(r,x,y)&&Contains(clip,x,y)&&(!f.dc.useHole||!Contains(f.dc.hole,x,y));CHECK(At(f.dc,x,y)==(painted?0u:0x7f123456u));}
+  CHECK(EqualRect(&f.dc.clip,&clip)&&f.dc.useHole==(which==2)&&f.dc.clipKind==(which==2?3:which==3?1:2));
+ }
+}
+void SearchStates(){
+ Fixture f;const RECT r=SearchGeometry(f);unsigned patched=0;
+ for(COLORREF color:{0xffffffu,0xc0c0c0u,0x808080u,0x123456u,0xffffffu}){
+  LOGBRUSH b{BS_SOLID,color};SetLastError(19);CHECK(FillImport(&f.dc,&r,&b)==7&&GetLastError()==55);if(color==0xffffff)++patched;
+  CHECK(Mock::pats.size()==patched&&b.lbColor==color);
+  for(int y=0;y<23;++y)for(int x=0;x<130;++x)CHECK(At(f.dc,x,y)==(Contains(r,x,y)?(color==0xffffff?0:color):0x7f123456u));
+ }
+ CHECK(Mock::fills.size()==5&&Mock::begins==0); // hot/pressed/custom fills remain native
+}
+void SearchImages(){
+ for(int api=0;api<3;++api)for(int indicator=0;indicator<2;++indicator)for(int state=0;state<4;++state){
+  Fixture f;const RECT r=SearchGeometry(f);f.images.width=f.images.height=16;Images audio=f.images;const auto images=indicator?&audio:&f.images;
+  const COLORREF bg=state==1?0xc0c0c0:state==2?0x808080:0xffffff;LOGBRUSH b{BS_SOLID,bg};CHECK(FillImport(&f.dc,&r,&b)==7);
+  const DWORD background=bg==0xffffff?0:bg;CHECK(Mock::pats.size()==size_t(state==0||state==3));
+  Mock::drawPixels.assign(256,{});Mock::drawPixels[0]={0,0,0,255};Mock::drawPixels[1]={255,255,255,255};
+  Mock::drawPixels[2]=indicator?RGBQUAD{200,60,10,255}:RGBQUAD{40,80,120,255};Mock::drawPixels[3]={10,20,30,100};Mock::padding=2;
+  constexpr int x=108,y=3;
+  if(api==0)CHECK(Draw(images,state,&f.dc,x,y,0));
+  else if(api==1)CHECK(DrawEx(images,state,&f.dc,x,y,0,0,0x112233,0x445566,0));
+  else{IMAGELISTDRAWPARAMS p{sizeof(p),images,state,&f.dc,x,y,0,0,0,0,44,55,0,66,0,0,99};const auto before=p;CHECK(DrawIndirect(&p));CHECK(p==before&&Mock::indirect.himl==images);}
+  CHECK(Mock::calls==1&&Mock::begins==1&&Mock::ends==1&&Mock::live==0&&Mock::update&&Mock::whitePixels.empty()&&GetLastError()==123);
+  CHECK(Mock::index==state&&Mock::flags==(ILD_TRANSPARENT|ILD_PRESERVEALPHA));
+  for(int row=0;row<16;++row)for(int col=0;col<16;++col)CHECK(Mock::committedPixels[row*Mock::stride+col]==Mock::drawPixels[row*16+col]);
+  CHECK(At(f.dc,x,y)==0xff000000&&At(f.dc,x+1,y)==0xffffffff&&At(f.dc,x+2,y)==(indicator?0xff0a3cc8u:0xff785028u));
+  CHECK((At(f.dc,x+3,y)>>24)==100);
+  for(int row=0;row<23;++row)for(int col=0;col<130;++col){if(row==y&&col>=x&&col<x+4)continue;CHECK(At(f.dc,col,row)==(Contains(r,col,row)?background:0x7f123456u));}
+#ifdef _DEBUG
+  CHECK(Number(LastLog(L"stage=result"),L"legacyMask")==0);
+#endif
+ }
+}
+void SearchIsolation(){
+ for(int which=0;which<34;++which){
+  Fixture f;RECT r=SearchGeometry(f);LOGBRUSH b{BS_SOLID,0xffffff};
+  switch(which){
+   case 0:f.search.cls=L"TSearchBoxExtra";break;case 1:f.search.cls=L"MyTSearchBox";break;case 2:f.dc.window=&f.other;break;
+   case 3:f.dc.window=&f.glyph;f.glyph.parent=&f.search;break;case 4:Mock::full=false;break;case 5:f.search.backdrop=false;break;
+   case 6:f.search.kind=GlassShared::GlassControlKind::None;break;case 7:f.dc.map=2;break;case 8:f.dc.graphicsMode=GM_ADVANCED;break;
+   case 9:f.dc.layout=1;break;case 10:f.dc.origin=f.search.clientOrigin;break;case 11:f.dc.viewport={1,0};break;case 12:f.dc.windowOrg={0,1};break;
+   case 13:f.dc.window=nullptr;break;case 14:f.dc.window=nullptr;f.dc.registered=&f.search;break;case 15:Mock::failGeometry=true;break;
+   case 16:Mock::failBrushInfo=true;break;case 17:b.lbStyle=BS_PATTERN;break;case 18:b.lbColor=0x123456;break;
+   case 19:r={0,0,130,23};break;case 20:r=f.search.client;break;case 21:r={108,3,124,19};break;case 22:r.right++;break;
+   case 23:f.search.client.right+=24;break;case 24:f.search.clientOrigin.x=90;break;case 25:f.search.clientOrigin.y++;break;
+   case 26:f.search.client.bottom++;break;case 27:f.search.client.right=0;break;case 28:f.search.outer.right=100;break;
+   case 29:f.search.outer={100,200,2300,223};f.search.client.right=1171;r={1173,2,2198,21};break;
+   case 30:f.search.clientOrigin.x=INT32_MAX;break;case 31:g_inside=true;break;
+   case 32:f.search.outer.bottom=1230;f.search.client.bottom=1026;r={104,2,128,1028};break;case 33:r=SearchGeometry(f,false,0);break;
+  }
+  SetLastError(19);CHECK(FillImport(&f.dc,&r,&b)==7&&GetLastError()==55);g_inside=false;
+  CHECK(Mock::pats.empty()&&Mock::fills.size()==1&&Mock::fills[0].pointer==&r&&Mock::fills[0].entryError==19);
+ }
+}
 void LegacyFixture(Fixture& f){
  f.dc.window=&f.glyph;f.images.width=3;f.images.height=3;f.images.legacy=true;
  const MaskIcon icon{{{0,0,0,0},{255,255,255,0},{0,0,0,0},{255,255,255,0},{31,79,151,0},{0,0,0,0},{17,99,201,0},{0,0,0,0},{255,255,255,0}},
@@ -569,6 +663,20 @@ void LegacyFailures(){
 int PriorFill(HDC dc,const RECT* r,HBRUSH b){
  CHECK(GetLastError()==19);CHECK(FillRect(dc,r,b)==7);SetLastError(67);return 13;
 }
+void SearchFailures(){
+ for(int which=0;which<5;++which){
+  Fixture f;const RECT r=SearchGeometry(f);LOGBRUSH b{BS_SOLID,0xffffff};void* captured=Mock::hooks.at("FillRect");
+  if(which==0)Mock::fillResult=0;else if(which==1)Mock::failPat=true;else if(which==2)Shutdown();else if(which==3){Shutdown();Mock::failProbeRegistration=true;Startup();}else Shutdown();
+  SetLastError(19);const int result=which==4?reinterpret_cast<decltype(&::FillRect)>(captured)(&f.dc,&r,&b):FillImport(&f.dc,&r,&b);
+  CHECK(result==Mock::fillResult&&GetLastError()==55&&Mock::fills.size()==1&&Mock::fills[0].entryError==19&&Mock::pats.size()==size_t(which==1));
+  for(int y=0;y<23;++y)for(int x=0;x<130;++x)CHECK(At(f.dc,x,y)==(Contains(r,x,y)&&which!=0?0xffffffu:0x7f123456u));
+ }
+ {Fixture f;const RECT r=SearchGeometry(f);LOGBRUSH b{BS_SOLID,0xffffff};Mock::duringFill=[&]{CHECK(FillImport(&f.dc,&r,&b)==7);};CHECK(FillImport(&f.dc,&r,&b)==7);CHECK(Mock::fills.size()==2&&Mock::pats.size()==1&&GetLastError()==55);}
+ {Fixture f;auto cleanup=wil::scope_exit([]{Shutdown();Mock::hooks.clear();});const RECT r=SearchGeometry(f);LOGBRUSH b{BS_SOLID,0xffffff};
+  Shutdown();Mock::hooks["FillRect"]=reinterpret_cast<void*>(&PriorFill);Startup();SetLastError(19);
+  CHECK(FillImport(&f.dc,&r,&b)==13&&GetLastError()==67&&Mock::fills.size()==1&&Mock::fills[0].pointer==&r&&Mock::pats.size()==1);
+  Shutdown();CHECK(Mock::hooks.at("FillRect")==reinterpret_cast<void*>(&PriorFill));}
+}
 void ProbeOriginal(){
  Fixture f;auto cleanup=wil::scope_exit([]{Shutdown();Mock::hooks.clear();});
  Shutdown();Mock::hooks["FillRect"]=reinterpret_cast<void*>(&PriorFill);Startup();
@@ -589,7 +697,7 @@ int main(int argc,char** argv){try{
  CHECK(argc==2);std::string c=argv[1];
  if(c=="targets")Targets();else if(c=="qualified")Qualified();else if(c=="isolation")Isolation();else if(c=="params")Params();
  else if(c=="failures")Failures();else if(c=="reentry")Reentry();else if(c=="lifecycle")Lifecycle();else if(c=="mixed")Mixed();
- else if(c=="probe-fill")ProbeFill();else if(c=="probe-pixels")ProbePixels();else if(c=="probe-budget")ProbeBudget();else if(c=="probe-lifecycle")ProbeLifecycle();else if(c=="probe-original")ProbeOriginal();else if(c=="bg-child")BackgroundChild();else if(c=="bg-parent")BackgroundParent();else if(c=="bg-clip")BackgroundClip();else if(c=="bg-isolation")BackgroundIsolation();else if(c=="bg-failures")BackgroundFailures();else if(c=="legacy-mask")LegacyMask();else if(c=="legacy-params")LegacyParams();else if(c=="legacy-isolation")LegacyIsolation();else if(c=="legacy-failures")LegacyFailures();else return 2;
+ else if(c=="probe-fill")ProbeFill();else if(c=="probe-pixels")ProbePixels();else if(c=="probe-budget")ProbeBudget();else if(c=="probe-lifecycle")ProbeLifecycle();else if(c=="probe-original")ProbeOriginal();else if(c=="bg-child")BackgroundChild();else if(c=="bg-parent")BackgroundParent();else if(c=="bg-clip")BackgroundClip();else if(c=="bg-isolation")BackgroundIsolation();else if(c=="bg-failures")BackgroundFailures();else if(c=="legacy-mask")LegacyMask();else if(c=="legacy-params")LegacyParams();else if(c=="legacy-isolation")LegacyIsolation();else if(c=="legacy-failures")LegacyFailures();else if(c=="search-bg")SearchBackground();else if(c=="search-clip")SearchClip();else if(c=="search-states")SearchStates();else if(c=="search-images")SearchImages();else if(c=="search-isolation")SearchIsolation();else if(c=="search-failures")SearchFailures();else return 2;
  std::cout<<"PASS "<<c<<'\n';return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
 '''
@@ -658,6 +766,12 @@ class InputIconsTest(unittest.TestCase):
     def test_rgb_only_mask_branch_preserves_index_overlay_crop_state_colors_and_caller_params(self): self.run_case('legacy-params')
     def test_rgb_only_branch_leaves_searchbox_alpha_icons_unsupported_styles_and_reentry_alone(self): self.run_case('legacy-isolation')
     def test_rgb_only_secondary_buffer_failures_discard_and_repeat_the_original_native_call(self): self.run_case('legacy-failures')
+    def test_searchbox_background_uses_current_left_or_right_nc_reservation_not_fixed_width(self): self.run_case('search-bg')
+    def test_searchbox_nc_background_keeps_partial_complex_empty_and_foreign_clips(self): self.run_case('search-clip')
+    def test_searchbox_hot_pressed_and_custom_background_colors_stay_native(self): self.run_case('search-states')
+    def test_searchbox_nc_fill_and_existing_text_audio_image_alpha_remain_separate(self): self.run_case('search-images')
+    def test_searchbox_background_rejects_client_memory_transformed_foreign_and_unproven_geometry(self): self.run_case('search-isolation')
+    def test_searchbox_background_failures_reentry_missing_import_shutdown_and_effective_original(self): self.run_case('search-failures')
 
 
 if __name__ == '__main__':

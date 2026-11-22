@@ -4948,3 +4948,113 @@ Windows comctl32/uxtheme/GDI/DWM или проверка PE/IAT concurrency. В�
 картинками/состояниями, hide → show и частичный repaint; контроль — неизменённый
 SearchBox. Новый захват исходного LogViewer-21 для реализации не требовался;
 сохранённые выводы §107 и image-60 остаются основанием этого изменения.
+
+## Тест 110: TButtonedEdit принят; отдельная non-client подложка TSearchBox
+
+Пользователь **принял успех TButtonedEdit** после `7b212c3` / `b632cfa` и поручил
+продолжить так же с SearchBox. Для TButtonedEdit это визуальная приёмка, не только
+portable GREEN. Его фон и mask-aware image renderer больше не меняются.
+Сохраняется уточнение §106: **изображение TSearchBox уже непрозрачно**, открыта
+именно белая подложка. Поэтому здесь только один фоновой implementation-шаг,
+без переноса RGB-only ветки на SearchBox и без новой обработки alpha его картинки.
+
+### Почему нужен другой план геометрии
+
+SearchBox не рисует эту кнопку в прямом TGlyph-child. Повторно проверен Berlin
+reference [`Vcl.WinXCtrls.pas`, 2094–2244](https://github.com/bergsteiger/realwork/blob/master/common/components/rtl/external/Embarcadero/DelphiBerlin/vcl/Vcl.WinXCtrls.pas#L2094-L2244),
+blob **`fd5164437510ab2216b386b162c9f7bdbbc31ce6`**:
+
+- WM_NCCALCSIZE резервирует ButtonWidth с правой или левой стороны client;
+- WM_NCPAINT получает GetWindowDC, ограничивает clip кнопкой и рисует её фон;
+- DrawButton сначала вызывает Canvas.FillRect(FButtonRect), затем штатный
+  text/audio ImageList с native normal/hot/pressed/disabled index;
+- hot и pressed используют отдельные `clBtnFace` / `clBtnShadow`. Custom styles
+  имеют отдельный DrawElement-путь, не тождественный ImageList.
+
+Это reference, **не доказательство версии пользовательской VCL**. Сохранённый
+runtime-факт §105 — ImageList bounds `[108,3,124,19]` и ReleaseDC clip
+`[104,2,128,21]`: очистки одних 16×16 недостаточно для окружающих 24×19.
+В том логе нет исходного SearchBox FillRect; новый захват для этого изменения
+не запрашивался. Допуск новой ветки доказывается текущими Win32 geometry/DC
+проверками на каждом вызове, а не предположением о FButtonRect/private offsets.
+
+### PlanSearchBackground: только доказанный зарезервированный NC strip
+
+В существующий EXE FillRect hook добавлен отдельный `PlanSearchBackground`.
+Прежний `PlanButtonBackground` вызывается как раньше; новый план рассматривается
+только если первый пуст. Не добавлены subclass, paint-провайдеры, IAT imports,
+bridge exports или изменения EditHooks/RenderText/DoubleBuffered.
+
+Помимо прежних Full/MM_TEXT/Edit/backdrop/shutdown/reentry gates обязательно:
+
+- owner **равен target**, exact case-insensitive TSearchBox; не child/ancestor,
+  похожее имя, обычный Edit или TButtonedEdit;
+- `WindowFromDC == owner`, `GM_COMPATIBLE`, layout=0 и нулевые window/viewport
+  origins. DC origin должен совпадать с **window top-left**, не client origin:
+  GetDC/BeginPaint и зарегистрированный MEMDC не принимаются за GetWindowDC;
+- исходная solid/pseudo-system brush имеет текущий RGB **COLOR_WINDOW**.
+  Цветные hot/pressed/custom fills остаются native: это не удаление всех состояний
+  кнопки и не color-key для белых деталей изображения;
+- GetWindowRect/GetClientRect/ClientToScreen задают непустой client внутри window.
+  Все вычитания/суммы экранной геометрии выполняются в wide-типе с проверкой
+  диапазона LONG перед переводом в RECT.
+
+В window coordinates пусть client=`[L,T,R,B]`, outer size=`W×H`,
+right inset=`W−R`, frame=`min(L, W−R)`. Требуется положительная симметричная рамка:
+`T == H−B == frame` и **один** больший горизонтальный отступ. Тогда область кнопки:
+
+- справа: `[R,T,W−frame,B]`;
+- слева: `[frame,T,L,B]`.
+
+Обе размерности strip ограничены **1…1024**. Исходный FillRect RECT обязан
+**целиком и точно совпасть** с этим strip. Это не предположение «24 пикселя справа»,
+не image bounds и не bounding box clip. В примере тестовой среды W=130/H=23,
+client=`[2,2,104,21]` даёт `[104,2,128,21]`, согласующийся с сохранённым runtime
+clip. Окружающие размеры в этом примере — **fixture**, не новые runtime-измерения.
+Borderless/asymmetric/unproved geometry, mirrored или преобразованный DC остаются
+native; отдельный DrawElement renderer здесь не заявляется покрытым.
+
+Дальше используется прежний протокол: effective original FillRect **ровно один
+раз** с теми же аргументами и входным LastError; после успеха — button-only
+PatBlt(BLACKNESS) с сохранённым фактическим clip. Непустой/частичный/сложный clip
+не заменяется, фон client/рамка и остальные пиксели не очищаются. Native return
+и LastError сохранены; ошибка original не запускает очистку, ошибка PatBlt
+оставляет native fill. Opt-in `stage=fill patched=1` применим и к этой ветке.
+Повторный NC repaint каждый раз заново проверяет нынешние bounds и цвет кисти.
+
+### Проверки
+
+- Новые NC-background и background+image сценарии сначала дали ожидаемый
+  **RED в Release / Debug / Debug+probe** на прежнем production.
+- Полный production `TInputIcons.cpp`: **28/28 × Release / Debug / Debug+probe —
+  PASS**, также ASan/UBSan. Все 22 прежних сценария, включая принятый TButtonedEdit,
+  оставлены. Добавлены шесть SearchBox-сценариев с внутренними комбинациями:
+  - левая/правая reservation, ширины 24/36, frame 2/3, перенос в отрицательные
+    экранные координаты, lowercase exact class и pseudo-system brush;
+  - full/partial/complex/empty clip и clip вне кнопки; sentinel-пиксели client
+    и рамки, в том числе при полном оконном clip;
+  - normal → hot → pressed → custom → normal без стирания цветных состояний;
+  - **3 API × 2 тестовых text/audio набора × native indices 0…3**: отдельная
+    подложка, затем прежний image renderer. Сравниваются все image bytes, A0/
+    A100/A255, чёрные/белые/цветные детали и прозрачные дырки. EndBufferedPaint
+    double выполняет source-over в тестовую surface, а не только записывает вызов;
+  - 34 отказных варианта class/kind/backdrop/DC/кисти/RECT/геометрии, включая
+    client/registered memory DC, чужую рамку, >1024 strip и borderless;
+  - native/PatBlt failure, missing import, reentry, shutdown/captured detour и
+    supplied effective original с return=13/LastError=67.
+- Source contracts **106/106 — PASS**: раздельный SearchBox NC planner, отсутствие
+  фиксированной ширины/clip/image эвристик и неизменная граница RGB-only ветки.
+- Побайтовое сравнение с принятым `b632cfa`: префикс с owner gate и всеми
+  TButtonedEdit background helpers **не изменён**; весь суффикс от pixel probe
+  через alpha/mask/ImageList renderer до Startup/Shutdown также **не изменён**.
+- Восемь complete-source мутантов отвергнуты **поведенчески в Release и
+  Debug+probe**: client DC вместо window DC, whole-window clear, только правая
+  кнопка, фиксированная ширина, непроверенный RECT, стирание hot/pressed,
+  обход effective original и очистка после native failure. Mutation scratch удалён.
+- Контрольные runners: ListBox background **13**, VCL images **14**, ListView
+  images **13**, Panel **12**, ButtonGroups **9**, CoolBar **9**, BomeMemo **14** — PASS.
+
+Новый результат **SearchBox ещё не принят визуально**: здесь нет MSVC/настоящих
+Windows comctl32/GDI/DWM или PE/IAT concurrency. На Windows остаётся проверить
+первый показ и NC repaint, text/audio, normal/hot/pressed/disabled, смену размера
+и положения; контроль — принятый TButtonedEdit и неизменённое изображение SearchBox.
