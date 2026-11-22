@@ -4,26 +4,9 @@
 #define Detours RestoratorDetours
 #include "../../GlassCore/src/Hooks/delphi/RestoratorImages.cpp"
 #undef Detours
-#include <cstdlib>
-#include <new>
 #include <thread>
 
 #define CHECK(expr) do { if (!(expr)) throw std::runtime_error(#expr); } while (false)
-
-// The shim arms this countdown only while the production pixel policy runs.
-// noinline: the replaced pair must stay opaque to GCC's new/delete matching.
-[[gnu::noinline]] void* operator new(std::size_t size)
-{
-    if (RestoratorTest::allocationCountdown >= 0 && RestoratorTest::allocationCountdown-- == 0)
-    {
-        RestoratorTest::allocationCountdown = -1; RestoratorTest::allocationFailed = true;
-        throw std::bad_alloc{};
-    }
-    if (void* p = std::malloc(size ? size : 1)) return p;
-    throw std::bad_alloc{};
-}
-[[gnu::noinline]] void operator delete(void* p) noexcept { std::free(p); }
-[[gnu::noinline]] void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 
 namespace
 {
@@ -38,7 +21,7 @@ namespace
     {
         using namespace RestoratorTest;
         failBegin = failCommit = false; failAttachAt = failDetachAt = 0;
-        armAllocations = allocationCountdown = -1; copyFault = 0;
+        copyFault = 0;
     }
     bool Attached() { return RestoratorTest::bitDetour && RestoratorTest::stretchDetour; }
     bool Detached()
@@ -46,10 +29,6 @@ namespace
         return !RestoratorTest::bitDetour && !RestoratorTest::stretchDetour
             && Ri::g_actualBitBlt == kExportBit && Ri::g_actualStretchBlt == kExportStretch && !Ri::g_attached;
     }
-
-    // What a painted pixel must become. Gone: transparent black. Stroke: its own
-    // colour, as opaque as it is bright. Block: its own colour, A=255.
-    enum Kind { Gone, Stroke, Block };
 
     struct Fixture
     {
@@ -88,7 +67,7 @@ namespace
             static ULONGLONG epoch=0;
             RestoratorTest::clock=epoch+=100000; // a fresh rate-limit window for every fixture
             RestoratorTest::logFormats.clear(); RestoratorTest::logStrings.clear();
-            RestoratorTest::dibQueries=0; RestoratorTest::allocationFailed=false;
+            RestoratorTest::dibQueries=0;
             CHECK(!RestoratorTest::bitDetour && !RestoratorTest::stretchDetour);
             tree.cls=L"TResTreeView"; viewer.cls=L"TImgViewBox"; other.cls=L"TButton";
             treeDc.owner=&tree; treeCanvasDc.owner=&tree; viewerDc.owner=&viewer; foreign.owner=&other;
@@ -121,7 +100,8 @@ namespace
             assert(ImageTest::creates==ImageTest::deletes);
         }
 
-        void PutAlpha(int x, int y, BYTE r, BYTE g, BYTE b, BYTE expected)
+        // A pixel and the alpha it must get; every call states that alpha itself.
+        void Put(int x, int y, BYTE r, BYTE g, BYTE b, BYTE expected)
         {
             assert(x>=0 && y>=0 && x<width && y<height);
             auto* p=picture->pixels.data()+(static_cast<size_t>(y)*width+x)*4;
@@ -129,12 +109,10 @@ namespace
             alpha[static_cast<size_t>(y)*width+x]=expected;
             bytes=picture->pixels;
         }
-        void Put(int x, int y, BYTE r, BYTE g, BYTE b, Kind kind)
-        { PutAlpha(x,y,r,g,b, kind==Gone?BYTE(0):kind==Block?BYTE(255):(std::max)({r,g,b})); }
-        void Grey(int x, int y, BYTE level, Kind kind) { Put(x,y,level,level,level,kind); }
+        void Grey(int x, int y, BYTE level) { Put(x,y,level,level,level,level); }
         // [x0,x1) x [y0,y1)
-        void Box(int x0, int y0, int x1, int y1, BYTE r, BYTE g, BYTE b, Kind kind)
-        { for (int y=y0;y<y1;++y) for (int x=x0;x<x1;++x) Put(x,y,r,g,b,kind); }
+        void Box(int x0, int y0, int x1, int y1, BYTE r, BYTE g, BYTE b, BYTE expected)
+        { for (int y=y0;y<y1;++y) for (int x=x0;x<x1;++x) Put(x,y,r,g,b,expected); }
         void Alpha(int x, int y, BYTE a)
         { picture->pixels[(static_cast<size_t>(y)*width+x)*4+3]=a; bytes=picture->pixels; }
 
@@ -160,8 +138,9 @@ namespace
             CHECK(ImageTest::bitmaps.size()==3 && !Ri::g_inside);
             CHECK(ImageTest::alphaBlends==0 && ImageTest::keys==0 && ImageTest::nativeMasks==0);
         }
-        // The native blit read our copy: every pixel is either transparent black
-        // or the caller's RGB with the stated alpha (never above it: premultiplied).
+        // The native blit read our copy: every pixel is the caller's RGB with the
+        // stated alpha (never above it: premultiplied), black is transparent black,
+        // and nothing dark is opaque: an opaque pixel has a channel at full brightness.
         void Prepared()
         {
             const auto& p=ImageTest::last.pixels;
@@ -174,12 +153,13 @@ namespace
                     ? out[0]==in[0] && out[1]==in[1] && out[2]==in[2] && out[3]==alpha[i]
                         && out[0]<=out[3] && out[1]<=out[3] && out[2]<=out[3]
                     : !out[0] && !out[1] && !out[2] && !out[3];
-                if (!ok)
+                const bool bright=out[3]!=255 || out[0]==255 || out[1]==255 || out[2]==255;
+                if (!ok || !bright)
                 {
                     std::cerr<<"pixel "<<i%width<<","<<i/width<<" expected A="<<int(alpha[i])
                         <<" in="<<int(in[2])<<","<<int(in[1])<<","<<int(in[0])
                         <<" out="<<int(out[2])<<","<<int(out[1])<<","<<int(out[0])<<","<<int(out[3])<<"\n";
-                    CHECK(ok);
+                    CHECK(ok && bright);
                 }
             }
             CHECK(ImageTest::last.entryError==0x29 && GetLastError()==0x51);
@@ -195,46 +175,47 @@ namespace
     };
 
     // A hand-made miniature of the real placeholders (64x40): lossy text on black
-    // above a banner that reaches both edges. Each element states its own result.
+    // above a banner that reaches both edges. Every element states its own alpha:
+    // the value of its brightest channel, wherever it lies and whatever is around it.
     void PaintPlaceholder(Fixture& f)
     {
         CHECK(f.width==64 && f.height==40);
-        // Ringing: near-black speckle up to the background level, in colour too.
-        for (int i=0;i<24;++i) f.Grey((i*11+1)%64, 12+(i%3), BYTE(1+i%16), Gone);
-        f.Put(2,11,6,0,3,Gone); f.Put(60,1,0,16,9,Gone); f.Grey(0,0,16,Gone); f.Grey(63,39,16,Gone);
-        // Dim specks and a dim blob that touch no content are noise as well.
-        f.Grey(40,2,17,Gone); f.Grey(44,6,25,Gone); f.Grey(50,10,32,Gone);
-        f.Box(54,3,57,6,30,30,30,Gone);
-        // Letter "o": a one-pixel light-grey ring. The black inside a letter is background.
-        f.Box(7,3,10,4,200,200,200,Stroke); f.Box(7,9,10,10,200,200,200,Stroke);
-        f.Box(6,4,7,9,200,200,200,Stroke); f.Box(10,4,11,9,200,200,200,Stroke);
-        f.Grey(8,6,9,Gone);
-        // White stem with a lossy edge: bright, just-content, dim-but-chained, detached.
-        f.Box(14,3,16,10,255,255,255,Stroke);
-        f.Grey(16,4,90,Stroke); f.Grey(16,5,33,Stroke); f.Grey(16,6,32,Stroke); f.Grey(17,6,17,Stroke);
-        f.Grey(19,6,17,Gone);
-        // Two-pixel strokes meeting, and a 4x4 coloured dot: still text, not a block.
-        f.Box(22,3,31,5,255,240,200,Stroke); f.Box(25,5,27,10,180,180,180,Stroke);
-        f.Box(34,4,38,8,120,200,90,Stroke);
-        // Glow above the banner: its faint part is background; the rest is one row
-        // more of the block below it.
-        for (int x=0;x<64;++x) f.Put(x,15,4,0,0,Gone);
-        for (int x=0;x<20;++x) f.Put(x,16,12,0,0,Gone);
-        for (int x=20;x<41;++x) f.Put(x,16,36,0,0,Block);
-        for (int x=41;x<64;++x) f.Put(x,16,23,0,0,Block);
+        // Ringing: near-black speckle, in colour too. Barely there, never keyed out.
+        for (int i=0;i<24;++i) f.Grey((i*11+1)%64, 12+(i%3), BYTE(1+i%16));
+        f.Put(2,11,6,0,3,6); f.Put(60,1,0,16,9,16); f.Grey(0,0,16); f.Grey(63,39,16);
+        // Dim specks and a dim blob that touch nothing.
+        f.Grey(40,2,17); f.Grey(44,6,25); f.Grey(50,10,32);
+        f.Box(54,3,57,6,30,30,30,30);
+        // Letter "o": a one-pixel light-grey ring around black.
+        f.Box(7,3,10,4,200,200,200,200); f.Box(7,9,10,10,200,200,200,200);
+        f.Box(6,4,7,9,200,200,200,200); f.Box(10,4,11,9,200,200,200,200);
+        f.Grey(8,6,9);
+        // White stem with a lossy edge.
+        f.Box(14,3,16,10,255,255,255,255);
+        f.Grey(16,4,90); f.Grey(16,5,33); f.Grey(16,6,32); f.Grey(17,6,17);
+        f.Grey(19,6,17);
+        // Coloured strokes and a dot.
+        f.Box(22,3,31,5,255,240,200,255); f.Box(25,5,27,10,180,180,180,180);
+        f.Box(34,4,38,8,120,200,90,200);
+        // Glow above the banner.
+        for (int x=0;x<64;++x) f.Put(x,15,4,0,0,4);
+        for (int x=0;x<20;++x) f.Put(x,16,12,0,0,12);
+        for (int x=20;x<41;++x) f.Put(x,16,36,0,0,36);
+        for (int x=41;x<64;++x) f.Put(x,16,23,0,0,23);
         // Banner rows 17..33: grey strip, dim teal block, darker seam, red body.
-        f.Box(0,17,12,34,33,33,33,Block);
-        f.Box(12,17,24,34,9,31,28,Block);
-        f.Box(24,17,25,34,22,22,22,Block);
-        f.Box(25,17,64,34,176,31,29,Block);
-        // Caption: white strokes inside a dark outline, six banner rows above and
-        // below. The outline is enclosed by a solid block, so it stays opaque.
-        f.Box(30,23,51,28,4,4,4,Block);
-        f.Box(32,24,35,27,255,255,255,Block); f.Box(38,24,40,27,255,255,255,Block);
-        f.Box(44,25,49,26,255,255,255,Block);
-        f.Put(41,25,0,0,0,Block);
-        for (int x=0;x<64;++x) { f.Put(x,34,23,0,0,Block); f.Put(x,35,4,0,0,Gone); }
-        for (int i=0;i<12;++i) f.Grey((i*5+2)%64, 36+(i%4), BYTE(2+i), Gone);
+        // Thick and dark is still dark: each part is as transparent as it is dark.
+        f.Box(0,17,12,34,33,33,33,33);
+        f.Box(12,17,24,34,9,31,28,31);
+        f.Box(24,17,25,34,22,22,22,22);
+        f.Box(25,17,64,34,176,31,29,176);
+        // Caption: white strokes inside a near-black outline, six banner rows above
+        // and below. Black enclosed by the banner is black like any other.
+        f.Box(30,23,51,28,4,4,4,4);
+        f.Box(32,24,35,27,255,255,255,255); f.Box(38,24,40,27,255,255,255,255);
+        f.Box(44,25,49,26,255,255,255,255);
+        f.Put(41,25,0,0,0,0);
+        for (int x=0;x<64;++x) { f.Put(x,34,23,0,0,23); f.Put(x,35,4,0,0,4); }
+        for (int i=0;i<12;++i) f.Grey((i*5+2)%64, 36+(i%4), BYTE(2+i));
     }
 
     void PolicyPlaceholder()
@@ -245,10 +226,14 @@ namespace
             f.Begin(viewer?f.viewer:f.tree);
             if (viewer) CHECK(f.Stretch()); else CHECK(f.Bit());
             f.Prepared();
-            // Exact black inside the banner is opaque black, not a key colour;
-            // the light-grey ring of the letter is as opaque as it is bright.
-            const auto* p=ImageTest::last.pixels.data()+(25u*64+41)*4;
-            CHECK(!p[0] && !p[1] && !p[2] && p[3]==255);
+            // Exact black inside the banner is transparent like the black around it,
+            // and the dark strip of the banner is nearly transparent, not a black patch.
+            const auto* black=ImageTest::last.pixels.data()+(25u*64+41)*4;
+            CHECK(!black[0] && !black[1] && !black[2] && !black[3]);
+            const auto* strip=ImageTest::last.pixels.data()+(20u*64+5)*4;
+            CHECK(strip[0]==33 && strip[1]==33 && strip[2]==33 && strip[3]==33);
+            const auto* body=ImageTest::last.pixels.data()+(20u*64+40)*4;
+            CHECK(body[0]==29 && body[1]==31 && body[2]==176 && body[3]==176);
             const auto* ring=ImageTest::last.pixels.data()+(4u*64+6)*4;
             CHECK(ring[0]==200 && ring[1]==200 && ring[2]==200 && ring[3]==200);
             CHECK(ImageTest::reads==1 && ImageTest::creates==5 && ImageTest::deletes==2);
@@ -264,132 +249,66 @@ namespace
 
     void PolicyLevels()
     {
-        struct Probe { BYTE r, g, b; Kind kind; };
-        // One pixel on black. The brightest channel decides: 16 is background,
-        // 17..32 alone is noise, 33 and above is content with that much alpha.
-        for (const Probe p : {Probe{0,0,0,Gone}, Probe{16,16,16,Gone}, Probe{17,17,17,Gone},
-            Probe{32,32,32,Gone}, Probe{33,33,33,Stroke}, Probe{255,255,255,Stroke},
-            Probe{33,0,0,Stroke}, Probe{0,33,0,Stroke}, Probe{0,0,33,Stroke},
-            Probe{32,0,0,Gone}, Probe{0,32,0,Gone}, Probe{0,0,32,Gone}, Probe{16,32,7,Gone},
-            Probe{200,100,50,Stroke}, Probe{1,2,254,Stroke}})
+        struct Probe { BYTE r, g, b, alpha; };
+        // One pixel on black: alpha is its brightest channel. No level is keyed
+        // out and none is promoted: 16, 17, 32 and 33 differ by exactly that much.
+        for (const Probe p : {Probe{0,0,0,0}, Probe{1,1,1,1}, Probe{16,16,16,16}, Probe{17,17,17,17},
+            Probe{32,32,32,32}, Probe{33,33,33,33}, Probe{128,128,128,128}, Probe{254,254,254,254},
+            Probe{255,255,255,255},
+            Probe{33,0,0,33}, Probe{0,33,0,33}, Probe{0,0,33,33},
+            Probe{255,0,0,255}, Probe{0,255,0,255}, Probe{0,0,255,255},
+            Probe{16,32,7,32}, Probe{200,100,50,200}, Probe{50,200,100,200}, Probe{100,50,200,200},
+            Probe{1,2,254,254}})
         {
-            Fixture f(9,9); f.Put(4,4,p.r,p.g,p.b,p.kind);
+            Fixture f(9,9); f.Put(4,4,p.r,p.g,p.b,p.alpha);
             f.Begin(f.tree); CHECK(f.Bit()); f.Prepared(); f.End(f.tree);
         }
         {
-            // Dim pixels are content only when chained to content, through any of 8 neighbours.
+            // A pixel's alpha depends on nothing but the pixel: the same dim grey
+            // beside white, diagonal to it, alone, in a corner and on two edges.
             Fixture f(13,13);
-            f.Grey(5,5,33,Stroke);
-            f.Grey(6,5,17,Stroke);  // beside
-            f.Grey(4,4,32,Stroke);  // diagonal
-            f.Grey(7,6,20,Stroke);  // chained through (6,5)
-            f.Grey(8,7,17,Stroke);  // and further
-            f.Grey(3,3,25,Stroke);  // chained backwards, before the content in scan order
-            f.Grey(2,2,17,Stroke);
-            f.Grey(10,9,17,Gone);   // one dark pixel short of the chain
-            f.Grey(5,9,32,Gone); f.Grey(6,9,32,Gone); f.Grey(5,10,32,Gone); // dim blob, no content
-            f.Grey(1,6,16,Gone);    // the background level never chains, even beside...
-            f.Grey(4,5,16,Gone);    // ...content itself
+            f.Grey(5,5,255); f.Grey(6,5,20); f.Grey(4,4,20);
+            f.Grey(10,9,20); f.Grey(12,12,20); f.Grey(0,6,20); f.Grey(6,0,20);
             f.Begin(f.tree); CHECK(f.Bit()); f.Prepared(); f.End(f.tree);
         }
         {
-            // A long dim line hanging on one content pixel at its far end.
-            Fixture f(40,7);
-            for (int x=3;x<36;++x) f.Grey(x,3,BYTE(17+x%16),Stroke);
-            f.Grey(36,3,200,Stroke);
+            // The whole ramp: every level from black to white maps to itself.
+            Fixture f(40,12);
+            for (int level=0;level<256;++level) f.Grey(4+level%32, 2+level/32, BYTE(level));
             f.Begin(f.tree); CHECK(f.Bit()); f.Prepared(); f.End(f.tree);
         }
     }
 
-    // A frame [x0,x1)x[y0,y1) around a dark hole [hx0,hx1)x[hy0,hy1).
-    void Frame(Fixture& f, BYTE level, Kind frame, int x0, int y0, int x1, int y1,
-        int hx0, int hy0, int hx1, int hy1, Kind hole)
-    {
-        f.Box(x0,y0,x1,y1,level,level,level,frame);
-        f.Box(hx0,hy0,hx1,hy1,0,0,0,hole);
-        f.Grey(hx0+1,hy0+1,9,hole);   // ringing inside the hole
-        f.Grey(hx1-2,hy1-2,20,hole);  // and a dim speck that touches nothing
-    }
-    void PolicySolid()
+    void PolicyMask()
     {
         {
-            // Walls five thick on every side: a solid block. It is opaque whatever
-            // its brightness, and its dark inside is a detail of it.
-            Fixture f(30,30); Frame(f,200,Block,5,5,25,25,10,10,20,20,Block);
-            f.Begin(f.tree); CHECK(f.Bit()); f.Prepared(); f.End(f.tree);
-        }
-        {
-            // Walls four thick: strokes, not a block; the inside is background.
-            Fixture f(30,30); Frame(f,200,Stroke,5,5,25,25,9,9,21,21,Gone);
-            f.Begin(f.tree); CHECK(f.Bit()); f.Prepared(); f.End(f.tree);
-        }
-        for (int side=0;side<4;++side)
-        {
-            // One wall of four is enough to let the background in. (White frame:
-            // which of its pixels still count as block does not show.)
+            // Thick walls around a black hole. The mask knows no regions: the wall is
+            // as opaque as it is bright and the black it encloses is transparent.
             Fixture f(30,30);
-            Frame(f,255,Stroke,5,5,25,25, side==0?9:10, side==1?9:10, side==2?21:20, side==3?21:20, Gone);
+            f.Box(5,5,25,25,200,200,200,200); f.Box(10,10,20,20,0,0,0,0);
+            f.Grey(11,11,9); f.Grey(18,18,20);
             f.Begin(f.tree); CHECK(f.Bit()); f.Prepared(); f.End(f.tree);
         }
         {
-            // A block lying on the picture's edge still encloses its hole.
-            Fixture f(30,30); Frame(f,200,Block,0,8,15,23,5,13,10,18,Block);
-            f.Begin(f.tree); CHECK(f.Bit()); f.Prepared(); f.End(f.tree);
-        }
-        {
-            // Notches open to each side are background, each entered in one
-            // direction only; the sealed pocket between them is not.
-            Fixture f(50,50);
-            f.Box(10,10,40,40,200,200,200,Block);
-            f.Box(15,10,18,19,0,0,0,Gone);   // from above
-            f.Box(32,31,35,40,0,0,0,Gone);   // from below
-            f.Box(10,24,18,27,0,0,0,Gone);   // from the left
-            f.Box(31,15,40,18,0,0,0,Gone);   // from the right
-            f.Box(23,23,27,27,3,3,3,Block);  // five block pixels away from every notch
-            f.Begin(f.tree); CHECK(f.Bit()); f.Prepared(); f.End(f.tree);
-        }
-        {
-            // Blocks across the whole top and bottom: the background is reached from the sides.
-            Fixture f(6,80);
-            f.Box(0,0,6,5,200,200,200,Block); f.Box(0,75,6,80,200,200,200,Block);
-            f.Box(2,30,4,40,150,150,150,Stroke); f.Grey(1,50,9,Gone);
-            f.Begin(f.tree); CHECK(f.Bit()); f.Prepared(); f.End(f.tree);
-        }
-        {
-            // Blocks down both sides: the background is reached from above and below.
-            Fixture f(80,6);
-            f.Box(0,0,5,6,200,200,200,Block); f.Box(75,0,80,6,200,200,200,Block);
-            f.Box(30,2,40,4,150,150,150,Stroke); f.Grey(50,1,9,Gone);
-            f.Begin(f.tree); CHECK(f.Bit()); f.Prepared(); f.End(f.tree);
-        }
-        {
-            // Dim content counts for thickness once it is chained: a dark banner end
-            // with five dim columns left of its pocket.
+            // A thick dark slab joined to a red body, with a darker pocket: this is
+            // what used to stay behind as an opaque black patch.
             Fixture f(30,30);
-            f.Box(5,5,15,25,28,28,28,Block); f.Box(15,5,25,25,200,30,30,Block);
-            f.Box(10,12,14,16,2,2,2,Block);
+            f.Box(5,5,15,25,28,28,28,28); f.Box(15,5,25,25,200,30,30,200);
+            f.Box(10,12,14,16,2,2,2,2);
             f.Begin(f.tree); CHECK(f.Bit()); f.Prepared(); f.End(f.tree);
         }
         {
-            // With three columns the pocket is open, and that piece of wall is a stroke.
+            // A white block lying on the picture's edge, exact black inside it.
             Fixture f(30,30);
-            f.Box(5,5,15,25,28,28,28,Block); f.Box(15,5,25,25,200,30,30,Block);
-            f.Box(8,12,12,16,2,2,2,Gone); f.Box(5,12,8,16,28,28,28,Stroke);
+            f.Box(0,8,7,23,255,255,255,255); f.Box(2,13,5,18,0,0,0,0);
             f.Begin(f.tree); CHECK(f.Bit()); f.Prepared(); f.End(f.tree);
         }
         {
-            // The same dim slab without anything bright is noise, and so is its pocket.
-            Fixture f(30,30);
-            f.Box(5,5,25,25,28,28,28,Gone);
-            f.Box(8,12,12,16,2,2,2,Gone);
-            f.Begin(f.tree); CHECK(f.Bit()); f.Prepared(); f.End(f.tree);
-        }
-        {
-            // Square letters: the ring of an "o" may be up to four thick.
-            Fixture f(30,30); Frame(f,200,Stroke,3,3,15,15,7,7,11,11,Gone);
-            f.Box(18,18,23,23,200,200,200,Block); // a 5x5 dot is a block, with nothing to enclose
-            f.Box(24,3,28,7,200,200,200,Stroke);  // a 4x4 dot is not
-            f.Begin(f.tree); CHECK(f.Bit()); f.Prepared(); f.End(f.tree);
+            // A saturated colour is opaque; its darker shades fade with it.
+            Fixture f(20,10);
+            f.Box(2,2,6,8,255,0,0,255); f.Box(6,2,10,8,120,0,0,120); f.Box(10,2,14,8,40,0,0,40);
+            f.Box(14,2,18,8,0,36,36,36);
+            f.Begin(f.viewer); CHECK(f.Stretch()); f.Prepared(); f.End(f.viewer);
         }
     }
 
@@ -399,19 +318,19 @@ namespace
         for (int bright : {9,10})
         {
             Fixture f(10,10);
-            for (int x=0;x<bright;++x) f.Grey(x,0,210,Stroke);
-            f.Grey(5,5,210,Stroke);
+            for (int x=0;x<bright;++x) f.Grey(x,0,210);
+            f.Grey(5,5,210);
             f.Begin(f.tree); CHECK(f.Bit());
             CHECK(ImageTest::reads==1); // the copy was made either way
             if (bright==9) f.Prepared(); else f.Native();
             f.End(f.tree);
         }
-        // The outline is judged by the background level alone: 16 is dark, 17 is not.
+        // The outline is judged by the ringing level: 16 is still black, 17 is not.
         for (BYTE level : {BYTE(16),BYTE(17)})
         {
             Fixture f(10,10);
-            for (int y=0;y<10;++y) f.Grey(0,y,level,Gone);
-            f.Grey(5,5,210,Stroke);
+            for (int y=0;y<10;++y) f.Grey(0,y,level);
+            f.Grey(5,5,210);
             f.Begin(f.tree); CHECK(f.Bit());
             if (level==16) f.Prepared(); else f.Native();
             f.End(f.tree);
@@ -419,7 +338,7 @@ namespace
         {
             // An ordinary picture: not on black, not touched, black details included.
             Fixture f(12,12);
-            f.Box(0,0,12,12,240,240,240,Block); f.Box(4,4,8,8,0,0,0,Block);
+            f.Box(0,0,12,12,240,240,240,240); f.Box(4,4,8,8,0,0,0,0);
             f.Begin(f.viewer); CHECK(f.Stretch()); f.Native(); f.End(f.viewer);
         }
         // Degenerate sizes: every pixel is outline.
@@ -427,17 +346,17 @@ namespace
         {
             Fixture f(which<2?1:which<4?7:1, which<2?1:which<4?1:7);
             const bool white=which%2==1;
-            if (white) f.Box(0,0,f.width,f.height,255,255,255,Block);
+            if (white) f.Box(0,0,f.width,f.height,255,255,255,255);
             f.Begin(f.tree); CHECK(f.Bit());
             if (white) f.Native(); else f.Prepared();
             f.End(f.tree);
         }
         {
-            Fixture f(2,2); f.Grey(1,1,210,Stroke); // 3 of 4 dark
+            Fixture f(2,2); f.Grey(1,1,210); // 3 of 4 dark
             f.Begin(f.tree); CHECK(f.Bit()); f.Prepared(); f.End(f.tree);
         }
         {
-            Fixture f(2,2); f.Grey(1,1,210,Stroke); f.Grey(0,0,210,Stroke);
+            Fixture f(2,2); f.Grey(1,1,210); f.Grey(0,0,210);
             f.Begin(f.tree); CHECK(f.Bit()); f.Native(); f.End(f.tree);
         }
     }
@@ -657,7 +576,7 @@ namespace
         }
         {
             // Size: 2^22 pixels is still a candidate (a full-screen buffer), one column more is not.
-            Fixture f(2048,2048); f.Box(500,500,520,520,90,120,60,Block); f.Box(100,100,102,160,90,120,60,Stroke);
+            Fixture f(2048,2048); f.Box(500,500,520,520,90,120,60,120); f.Box(100,100,102,160,90,120,60,120);
             f.Begin(f.tree); CHECK(f.Bit()); f.Prepared(); f.End(f.tree);
         }
         for (int which=0;which<4;++which)
@@ -707,25 +626,6 @@ namespace
             CHECK(f.Bit());
             RestoratorTest::copyFault=0;
             CHECK(ImageTest::reads==1 && ImageTest::calls.size()==1); f.Native(); f.End(f.tree);
-        }
-        {
-            // Out of memory anywhere inside the pixel policy: the copy is dropped
-            // untouched and the caller's bitmap is drawn natively. No exception escapes.
-            int failures=0;
-            for (long after=0;;++after)
-            {
-                Fixture f; PaintPlaceholder(f); f.Begin(f.tree);
-                RestoratorTest::armAllocations=after;
-                CHECK(f.Bit());
-                RestoratorTest::armAllocations=-1;
-                CHECK(RestoratorTest::allocationCountdown==-1 && ImageTest::calls.size()==1 && ImageTest::reads==1);
-                const bool failed=RestoratorTest::allocationFailed;
-                if (failed) { f.Native(); ++failures; } else f.Prepared();
-                f.End(f.tree);
-                if (!failed) break;
-                CHECK(after<64);
-            }
-            CHECK(failures>=3); // the two planes and the work list, at the least
         }
     }
 
@@ -967,7 +867,7 @@ namespace
             CHECK(f.Stretch()); CHECK(LastReason()==L"alpha"); f.End(f.viewer);
         }
         {
-            Fixture f(12,12); f.Box(0,0,12,12,200,200,200,Block); f.Begin(f.viewer);
+            Fixture f(12,12); f.Box(0,0,12,12,200,200,200,200); f.Begin(f.viewer);
             CHECK(f.Stretch()); CHECK(LastReason()==L"background"); f.End(f.viewer);
         }
         {
@@ -994,7 +894,7 @@ namespace
             for (int y=0;y<40;++y) for (int x=0;x<64;++x)
             {
                 const BYTE* p=pixels.data()+(static_cast<size_t>(y)*64+x)*4;
-                f.PutAlpha(70+x,40+y,p[2],p[1],p[0],expected[static_cast<size_t>(y)*64+x]);
+                f.Put(70+x,40+y,p[2],p[1],p[0],expected[static_cast<size_t>(y)*64+x]);
             }
             f.Begin(f.tree);
             SetLastError(0x29);
@@ -1016,7 +916,7 @@ int main(int argc, char** argv)
     const std::string name=argc==2?argv[1]:"";
     const std::pair<const char*, void(*)()> cases[]{
         {"policy-placeholder",PolicyPlaceholder}, {"policy-levels",PolicyLevels},
-        {"policy-solid",PolicySolid}, {"policy-outline",PolicyOutline},
+        {"policy-mask",PolicyMask}, {"policy-outline",PolicyOutline},
         {"routes",Routes}, {"scope",Scope}, {"isolation",Isolation}, {"sources",Sources},
         {"leases",Leases}, {"failures",Failures}, {"diagnostics",Diagnostics}, {"buffered",Buffered},
     };

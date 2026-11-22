@@ -2606,23 +2606,27 @@ class DelphiPipelineContract(unittest.TestCase):
                           'DeleteObject(', 'CreateCompatibleDC('):
             self.assertNotIn(forbidden, code)
 
-    def test_restorator_image_policy_is_a_module_local_matte_removal_over_the_shared_opaque_copy(self):
+    def test_restorator_image_policy_is_a_module_local_brightness_mask_over_the_shared_opaque_copy(self):
         code = read('GlassCore/src/Hooks/delphi/RestoratorImages.cpp')
-        for marker in ('constexpr unsigned kBackground = 16;', 'constexpr unsigned kInk = 32;',
-                       'constexpr unsigned kSolidSide = 5;', 'constexpr std::uint64_t kMaxPixels = 1u << 22;'):
+        for marker in ('constexpr unsigned kBackground = 16;', 'constexpr std::uint64_t kMaxPixels = 1u << 22;',
+                       'return (std::max)({pixel & 0xFFu, (pixel >> 8) & 0xFFu, (pixel >> 16) & 0xFFu});'):
             self.assertIn(marker, code)
-        policy = code.split('bool CutBlackBackground(DWORD* pixels, size_t width, size_t height)', 1)[1].split('struct Blit', 1)[0]
+        policy = code.split('bool CutBlackBackground(DWORD* pixels, size_t width, size_t height) noexcept', 1)[1].split('struct Blit', 1)[0]
         for marker in ('if (Level(pixels[y * width + x]) <= kBackground) ++dark;',
                        'if (dark * 4 < outline * 3) return false;',
-                       'mark[i] = level > kInk ? Ink : level > kBackground ? Weak : BYTE{};',
-                       'if (m != Weak) continue;', 'if (rows == kSolidSide) m |= Corner;',
-                       'if (down < kSolidSide) m |= Solid;', 'if (m & (Solid | Open)) return;',
-                       'if (!(mark[i] & Open)) continue;',
-                       'pixels[i] = (mark[i] & Ink) ? (pixels[i] & 0x00FFFFFFu) | (Level(pixels[i]) << 24) : 0u;'):
+                       'const DWORD mask = Level(pixels[i]);',
+                       'pixels[i] = (pixels[i] & 0x00FFFFFFu) | (mask << 24);'):
             self.assertIn(marker, policy)
-        # The outline test comes before any allocation or pixel write.
-        self.assertLess(policy.index('return false;'), policy.index('std::vector<BYTE> mark(count);'))
+        # The outline test comes before the only pixel write.
+        self.assertLess(policy.index('return false;'), policy.index('pixels[i] ='))
         self.assertEqual(policy.count('pixels[i] ='), 1)
+        # The mask is per pixel: no thresholds on content, no neighbourhoods, no regions,
+        # nothing forced opaque or keyed out, and therefore nothing to allocate.
+        for forbidden in ('std::vector', 'pending', '0xFF000000', ': 0u', 'x + 1', 'i - 1', 'i + width'):
+            self.assertNotIn(forbidden, policy)
+        self.assertEqual(policy.count('kBackground'), 1)
+        for forbidden in ('kInk', 'kSolidSide', 'Solid', 'Weak', 'Corner', 'std::uint32_t'):
+            self.assertNotIn(forbidden, code)
         bitmap = code.split('LPCWSTR RejectBitmap(HDC source, BITMAP& info) noexcept', 1)[1].split('LPCWSTR Reject(const Blit& blit', 1)[0]
         for marker in ('GetObjectW(bitmap, sizeof(dib), &dib)', 'size != sizeof(dib) && size != sizeof(BITMAP)',
                        'info.bmWidth <= 0 || info.bmHeight <= 0', '> kMaxPixels', 'return L"size";',
@@ -2633,8 +2637,9 @@ class DelphiPipelineContract(unittest.TestCase):
         copy = code.split('bool CutSelectedCopy(HDC source, const BITMAP& original) noexcept', 1)[1].split('HWND SessionWindow(', 1)[0]
         for marker in ('GetObjectW(copy, sizeof(dib), &dib) != sizeof(dib)', 'info.bmBitsPixel != 32',
                        'info.bmWidth != original.bmWidth || info.bmHeight != original.bmHeight',
-                       'try', 'catch (...) { return false; }'):
+                       'return CutBlackBackground(static_cast<DWORD*>(info.bmBits),'):
             self.assertIn(marker, copy)
+        self.assertNotIn('catch', copy)
         for forbidden in ('ApplyBlackKeyAlpha', 'ApplyIconBackgroundAlpha', 'SpriteEffect', 'Promise32BPP',
                           'HasAlphaChannel(', 'PrepareBitmapForAlphaBlend', 'QueryIconBackgroundColorRemoval',
                           'Gdip', 'TreeViewControl::', 'DelphiPanel::', 'ToolbarControl::', 'ListViewControl::'):
@@ -2671,7 +2676,7 @@ class DelphiPipelineContract(unittest.TestCase):
                      'GlassCore/src/Hooks/delphi/RestoratorImages.cpp'):
             self.assertEqual(test.count('#include "../../' + item + '"'), 1)
         # Only the Detours wrapper is renamed for the production unit; nothing else is redefined around it.
-        unit = test.split('#include "../../GlassCore/src/Subsystems/OpaqueBitmapSource.cpp"\n', 1)[1].split('#include <cstdlib>', 1)[0]
+        unit = test.split('#include "../../GlassCore/src/Subsystems/OpaqueBitmapSource.cpp"\n', 1)[1].split('#include <thread>', 1)[0]
         self.assertEqual(unit, '#define Detours RestoratorDetours\n'
                                '#include "../../GlassCore/src/Hooks/delphi/RestoratorImages.cpp"\n'
                                '#undef Detours\n')
@@ -2682,9 +2687,12 @@ class DelphiPipelineContract(unittest.TestCase):
             self.assertIn(marker, shim)
         # The expected bytes are stated by the tests; the algorithm is not copied into them.
         for text in (test, shim):
-            for forbidden in ('bool CutBlackBackground', 'kSolidSide', 'kBackground', 'kInk', 'Ri::Level',
-                              'Ri::CutBlackBackground'):
+            for forbidden in ('bool CutBlackBackground', 'kBackground', 'Ri::Level', 'Ri::CutBlackBackground',
+                              'std::max', 'operator new'):
                 self.assertNotIn(forbidden, text)
+        # Every painted pixel states its alpha, and nothing dark may come out opaque.
+        self.assertIn('void Put(int x, int y, BYTE r, BYTE g, BYTE b, BYTE expected)', test)
+        self.assertIn('const bool bright=out[3]!=255 || out[0]==255 || out[1]==255 || out[2]==255;', test)
         runner = read('WndCompat/tests/restorator_images_rendering_test.py')
         for marker in ("'Release'", "'Debug'", "'-D_DEBUG'", "'-DGLASS_DELPHI_DRAW_PROBE'", "'-Werror'",
                        "'-std=c++20'"):

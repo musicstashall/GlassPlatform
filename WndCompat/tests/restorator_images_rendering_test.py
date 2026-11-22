@@ -61,14 +61,14 @@ class RestoratorImagesRenderingTest(unittest.TestCase):
                 result = subprocess.run([str(binary), name], capture_output=True, text=True, timeout=120)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_placeholder_blocks_are_opaque_text_follows_brightness_and_black_is_cut(self):
+    def test_placeholder_alpha_is_the_brightness_of_every_pixel_and_nothing_dark_stays_opaque(self):
         self.run_case('policy-placeholder')
 
-    def test_background_noise_and_content_levels_with_eight_neighbour_chaining(self):
+    def test_every_level_and_channel_maps_to_its_own_alpha_whatever_the_neighbours(self):
         self.run_case('policy-levels')
 
-    def test_only_blocks_five_thick_enclose_dark_details(self):
-        self.run_case('policy-solid')
+    def test_thick_dark_blocks_and_enclosed_black_are_masked_like_any_other_pixel(self):
+        self.run_case('policy-mask')
 
     def test_pictures_without_a_three_quarter_black_outline_are_not_touched(self):
         self.run_case('policy-outline')
@@ -82,7 +82,7 @@ class RestoratorImagesRenderingTest(unittest.TestCase):
     def test_other_dc_rop_caller_thread_session_and_reentry_are_native(self):
         self.run_case('isolation')
 
-    def test_depths_existing_alpha_size_gdi_failures_and_out_of_memory(self):
+    def test_depths_existing_alpha_size_and_gdi_failures(self):
         self.run_case('sources')
 
     def test_two_detours_are_leased_in_one_transaction_and_survive_failures(self):
