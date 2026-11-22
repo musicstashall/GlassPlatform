@@ -315,30 +315,69 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn("for debug in (False, True)", runner)
         self.assertIn('GlassCore/src/Hooks/delphi/TInputIcons.cpp', runner)
 
-    def test_vcl_input_icon_fill_probe_observes_original_arguments_without_a_background_policy(self):
+    def test_vcl_input_button_background_uses_proven_direct_child_bounds_and_client_dc(self):
         code = read('GlassCore/src/Hooks/delphi/TInputIcons.cpp')
-        guard = '#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)'
-        probe = code.split(guard, 1)[1].split('#endif', 1)[0]
-        self.assertIn('HookDispatcher<1, 3> g_fillProbeDispatcher', probe)
-        self.assertIn('"FillRect", reinterpret_cast<void*>(ProbeFill)', probe)
-        fill = probe.split('int WINAPI ProbeFill(HDC dc, const RECT* rect, HBRUSH brush)', 1)[1].split('void ProbePixels(', 1)[0]
-        for marker in ('g_fillProbeDispatcher.GetOrg<0, decltype(&::FillRect)>()',
-                       'IconOwner(dc, &target)', 'g_inFillProbe', 'TakeProbe(true)',
-                       'const RECT r = *rect', 'GetClipBox(dc, &clip)',
+        plan = code.split('BackgroundPatches PlanButtonBackground(', 1)[1].split('int WINAPI Fill(HDC,', 1)[0]
+        child = code.split('bool ButtonRect(', 1)[1].split('BackgroundPatches PlanButtonBackground(', 1)[0]
+        for marker in ('HasClass(owner, L"TButtonedEdit")', 'WindowFromDC(dc) != target',
+                       'GetGraphicsMode(dc) != GM_COMPATIBLE', 'GetLayout(dc) != 0',
+                       'ReadSolidBrush(brush, color)', 'GetSysColor(COLOR_WINDOW)',
+                       'GetClientRect(target, &client)', '!EqualRect(rect, &client)',
+                       'ClientToScreen(target, &origin)', 'GetDCOrgEx(dc, &dcOrigin)',
+                       'origin.x != dcOrigin.x', 'origin.y != dcOrigin.y',
+                       'GetViewportOrgEx(dc, &viewport)', 'GetWindowOrgEx(dc, &windowOrigin)',
+                       'viewport.x || viewport.y || windowOrigin.x || windowOrigin.y',
+                       'GetClientRect(owner, &parentClient)', 'ClientToScreen(owner, &parentOrigin)',
+                       'patches.rects[0] = client', 'GetWindow(owner, GW_CHILD)',
+                       'GetWindow(child, GW_HWNDNEXT)', '++visited > 64',
+                       'HasClass(child, L"TEditButton.TGlyph")', 'HasClass(child, L"TGlyph")',
+                       'patches.count == patches.rects.size()', 'patches.rects[patches.count++] = button'):
+            self.assertIn(marker, plan)
+        for marker in ('GetParent(child) != owner', 'GlassIsBackdropAllowedForHwnd(child)',
+                       'GetWindowRect(child, &screen)', 'GetClientRect(child, &client)',
+                       'ClientToScreen(child, &origin)', 'origin.x != screen.left',
+                       'client.right > 1024 || client.bottom > 1024',
+                       'static_cast<long long>(screen.left) - parentOrigin.x',
+                       'left < parentClient.left', 'bottom > parentClient.bottom',
+                       '!EqualRect(&result, &parentClient)'):
+            self.assertIn(marker, child)
+        # Geometry comes from a current immediate child, including hidden ones.
+        # No guessed edge width, descendants, cached RECT or post-BeginPaint gate.
+        geometry = re.sub(r'//[^\n]*|/\*.*?\*/', '', plan + child, flags=re.S)
+        for forbidden in ('IsWindowVisible', 'EnumChildWindows', 'GetAncestor',
+                          'GetPaintSession', 'IsTopWindowDrawingSession', 'AfterPaint',
+                          'MapWindowPoints', 'SelectClipRgn', 'IntersectClipRect'):
+            self.assertNotIn(forbidden, geometry)
+        brush = code.split('bool ReadSolidBrush(', 1)[1].split('bool ButtonRect(', 1)[0]
+        for marker in ('COLOR_MENUBAR + 1u', 'GetSysColor(', 'GetObjectW(brush, sizeof(lb), &lb)',
+                       'lb.lbStyle != BS_SOLID'):
+            self.assertIn(marker, brush)
+
+    def test_vcl_input_button_fill_preserves_effective_original_result_error_and_clip(self):
+        code = read('GlassCore/src/Hooks/delphi/TInputIcons.cpp')
+        fill = code.split('int WINAPI Fill(HDC dc, const RECT* rect, HBRUSH brush)', 1)[1].split('void ProbePixels(', 1)[0]
+        for marker in ('g_fillDispatcher.GetOrg<0, decltype(&::FillRect)>()',
+                       'IconOwner(dc, &target)', 'g_inFillHook', 'TakeProbe(true)',
+                       'PlanButtonBackground(owner, target, dc, rect, brush)',
+                       'const RECT r = rect ? *rect : RECT{}', 'GetClipBox(dc, &clip)',
                        'GetClientRect(target, &client)', 'GetWindowRect(target, &window)',
                        'GetDCOrgEx(dc, &dcOrg)', 'ClientToScreen(target, &clientOrg)',
                        'GetViewportOrgEx(dc, &viewport)', 'GetWindowOrgEx(dc, &windowOrg)',
                        'const int result = orig(dc, rect, brush)', 'SetLastError(entryError)',
                        'const DWORD error = GetLastError()', 'SetLastError(error)',
+                       'if (result)', 'i < patches.count',
+                       'PatBlt(dc, p.left, p.top, p.right - p.left, p.bottom - p.top, BLACKNESS)',
                        'brushValid && lb.lbStyle == BS_SOLID', 'stage=fill',
-                       'brushRGBValid=', 'brushRGB=', 'clipKind=', 'result='):
+                       'brushRGBValid=', 'brushRGB=', 'clipKind=', 'result=', 'patched=%u'):
             self.assertIn(marker, fill)
-        for forbidden in ('PatBlt', 'BitBlt', 'AlphaBlend', 'BeginBufferedPaint',
+        for forbidden in ('BitBlt', 'AlphaBlend', 'BeginBufferedPaint',
                           'CreateSolidBrush', 'DeleteObject', 'SelectObject',
-                          'SelectClipRgn', 'IntersectClipRect', 'BufferedPaintSetAlpha'):
+                          'SelectClipRgn', 'IntersectClipRect', 'BufferedPaintSetAlpha',
+                          'BeginPaint(', 'RegisterPaintProvider'):
             self.assertNotIn(forbidden, fill)
         self.assertLess(fill.index('GetClipBox(dc, &clip)'), fill.index('const int result = orig'))
-        self.assertLess(fill.index('const int result = orig'), fill.index('stage=fill'))
+        self.assertLess(fill.index('const int result = orig'), fill.index('if (PatBlt'))
+        self.assertLess(fill.index('if (PatBlt'), fill.index('stage=fill'))
 
     def test_vcl_input_icon_pixel_probe_is_read_only_before_commit_and_fallback(self):
         code = read('GlassCore/src/Hooks/delphi/TInputIcons.cpp')
@@ -362,17 +401,19 @@ class DelphiPipelineContract(unittest.TestCase):
         for api in ('ImageList_Draw', 'ImageList_DrawEx', 'ImageList_DrawIndirect'):
             self.assertIn('L"' + api + '", ' + ('params->i' if api.endswith('Indirect') else 'index'), code)
 
-    def test_vcl_input_icon_probe_has_its_own_bounded_opt_in_lifecycle_and_behavioral_fixtures(self):
+    def test_vcl_input_button_fill_is_production_but_probe_lifecycle_stays_opt_in(self):
         code = read('GlassCore/src/Hooks/delphi/TInputIcons.cpp')
         guard = '#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)'
         startup = code.split('void Startup()', 1)[1].split('void Shutdown()', 1)[0]
         shutdown = code.split('void Shutdown()', 1)[1]
-        for body, operation in ((startup, 'g_fillProbeDispatcher.EnableHook(0, true)'),
-                                (shutdown, 'g_fillProbeDispatcher.DisableAllHooks()')):
-            self.assertIn(operation, body.split(guard, 1)[1].split('#endif', 1)[0])
+        self.assertIn('HookDispatcher<1, 3> g_fillDispatcher', code.split(guard, 1)[0])
+        self.assertIn('"FillRect", reinterpret_cast<void*>(Fill)', code)
+        self.assertIn('g_fillDispatcher.EnableHook(0, true)', startup.split(guard, 1)[0])
+        self.assertIn('g_fillDispatcher.DisableAllHooks()', shutdown)
+        self.assertNotIn(guard, shutdown)
         self.assertIn('if (!g_shutdown.load(std::memory_order_acquire)) return', startup)
         self.assertIn('g_entryPointModule', startup)
-        for marker in ('stage=arm', 'g_fillProbeDispatcher.GetRef(0)', 'imageRefs=[%d,%d,%d]'):
+        for marker in ('stage=arm', 'g_fillDispatcher.GetRef(0)', 'imageRefs=[%d,%d,%d]'):
             self.assertIn(marker, startup)
         self.assertIn('static thread_local Budget budgets[2]', code)
         self.assertIn('budgets[fill ? 0 : 1]', code)
@@ -388,7 +429,12 @@ class DelphiPipelineContract(unittest.TestCase):
                        'test_fill_probe_records_original_arguments_geometry_results_and_error_without_drawing',
                        'test_pixel_probe_counts_full_buffer_without_padding_and_distinguishes_unavailable_bits',
                        'test_probe_budgets_are_separate_bounded_and_thread_local',
-                       'test_fill_probe_calls_and_restores_supplied_effective_original_even_for_foreign_windows'):
+                       'test_fill_probe_calls_and_restores_supplied_effective_original_even_for_foreign_windows',
+                       'test_button_background_blackens_only_the_full_direct_glyph_client',
+                       'test_parent_full_and_partial_fill_restore_both_visible_and_hidden_button_regions',
+                       'test_button_background_keeps_partial_complex_clip_and_untouched_pixels',
+                       'test_button_background_rejects_foreign_colored_unproven_or_transformed_calls',
+                       'test_button_background_native_failures_shutdown_missing_slot_and_reentry'):
             self.assertIn(marker, runner)
 
     def test_runtime_core_lookups_have_unique_undecorated_named_exports(self):

@@ -4762,3 +4762,84 @@ A0 с реальной маской, чёрные/белые детали, пр�
 Release / Debug / Debug+probe — PASS**. Это проверка текущего поведения, включая
 native fallback при A0, а не исправление обнаруженных дефектов.
 Сейчас сохранены только выводы; MSVC/Windows visual acceptance отсутствует.
+
+## Тест 108: TButtonedEdit — подложка прямой кнопки и восстановление родителем
+
+Пользователь согласовал оба шага §107 командой «внедряй». Это **первый отдельный
+implementation-коммит: только фон**. RGB-only ImageList пока сохраняет прежний
+fallback; вторая правка будет отдельной. Изображение TSearchBox, общий текстовый
+конвейер, DoubleBuffered и принятые соседние контролы не изменены.
+
+### Узкая production-политика FillRect
+
+`TInputIcons.cpp` теперь держит EXE IAT FillRect не только в opt-in зондовой
+сборке, но и в Release/обычном Debug. Использован тот же HookDispatcher и его
+**effective original**; IATRegistry/порядок Engine не переделаны. Перехват не
+зависит от уже вернувшегося BeginPaint, paint-stack или нового subclass:
+поэтому охватывает наблюдавшуюся заливку **до возврата BeginPaint**, обычную
+отрисовку и частичный update с тем же full-client FillRect.
+
+Общие прежние ограничения Full/MM_TEXT/Edit/backdrop/shutdown/reentry остаются.
+Дополнительные условия именно для фоновой правки:
+
+- owner — exact TButtonedEdit, target — сам owner либо exact
+  TEditButton.TGlyph/TGlyph с его **непосредственным** parent;
+- фактический оконный client DC: `WindowFromDC == target`, `GM_COMPATIBLE`,
+  без RTL-layout и с нулевыми window/viewport origins; DC origin совпадает с
+  `ClientToScreen(target, {0,0})`. Неизвестные/зарегистрированные memory DC,
+  non-client DC, сдвинутые и преобразованные DC не угадываются;
+- исходный RECT равен всему непустому client target. Частичная перерисовка
+  поддержана **через сохранённый clip**, а не произвольный маленький белый RECT;
+- solid brush (включая Win32 pseudo-system brush) имеет текущий RGB
+  `COLOR_WINDOW`. Цветные/узорные/неизвестные кисти не меняются;
+- реальный прямой glyph-child доказывается текущими class/parent, backdrop,
+  GetWindowRect/GetClientRect/ClientToScreen. Допускается только borderless child
+  1…1024 × 1…1024, целиком внутри client родителя и **не равный всему полю**.
+  Для parent DC screen bounds переводятся проверенным wide-вычитанием client
+  origin родителя; для child DC используется его собственный client RECT.
+
+Родитель перебирает только прямые HWND siblings (`GW_CHILD/GW_HWNDNEXT`),
+**не фильтруя скрытые окна**. Нужны нынешние границы child, а не кэш последней
+видимой картинки и не предположение «16 пикселей справа». Поддержаны обе
+кнопки; больше двух подходящих glyph либо обход более 64 siblings отменяет
+план целиком. Неподтверждённая геометрия также оставляет native-путь.
+
+Original FillRect вызывается **ровно один раз**, с теми же HDC/RECT-pointer/brush
+и входным LastError. Только после его успешного результата `PatBlt(BLACKNESS)`
+очищает доказанные button-only области. Clip DC, в том числе сложный и его
+дырки, **не заменяется**; текстовая часть/рамка/пиксели вне clip не очищаются.
+Native return и LastError возвращаются без подмены. Ошибка original не запускает
+очистку; ошибка PatBlt оставляет native-заливку и не объявляется успехом renderer.
+Это не whole-Edit transparency, не blanket GDI hook и не изменение кисти caller.
+
+Opt-in `stage=fill` сохраняет прежние geometry/brush/result поля и добавляет
+`patched=N` — число успешных button-only PatBlt (это **не** проверка финального
+Windows framebuffer). Pixel probe остаётся read-only; бюджеты 24 fill / 12 pixel
+строк в секунду на поток независимы от production-очистки.
+
+### Проверки и границы
+
+- Перед production-изменением три новых фоновых сценария дали ожидаемый **RED
+  во всех трёх сборках**: старый код оставлял native белый фон.
+- Полный production `TInputIcons.cpp` с Win32/IAT doubles: **18/18 ×
+  Release / Debug / Debug+probe — PASS**, также ASan/UBSan.
+  Новые проверки исполняют оба glyph-алиаса, full/partial/complex clip,
+  visible/hidden child, левую и правую кнопки и update вне кнопок. Геометрия
+  `[519,503,535,519] − [399,502] = [120,1,136,17]` взята из §107.
+- Проверяются сохранение обычного поля и sentinel-пикселей, 29 вариантов
+  отказа по class/parent/DC/кисти/геометрии, native/PatBlt failure,
+  shutdown/отсутствующий импорт/reentry и переданный effective original,
+  включая его нестандартные return=13/LastError=67 при реальной очистке.
+- Source contracts: **100/100 — PASS**. Старый контракт «fill только наблюдает»
+  заменён проверкой новой production-политики; условность opt-in логов сохранена.
+- Семь полных production-мутантов **поведенчески отвергнуты в Release и
+  Debug+probe**: пропуск hidden-child, очистка всего Edit, неверные координаты,
+  недоказанный DC origin, обход effective original, потеря LastError и reentry.
+  Mutation scratch удалён; production-файлы для этих проверок не подменялись.
+- Контрольные runners: ListBox background **13**, VCL images **14**, ListView
+  images **13**, Panel **12**, ButtonGroups **9**, CoolBar **9**, BomeMemo **14** — PASS.
+
+Здесь нет MSVC/Windows GDI/DWM: doubles проверяют границы и вызовы, но не реальный
+PE/IAT concurrency или визуальную приёмку. На Windows остаётся проверить
+первое отображение → hide → show обеих кнопок и частичный repaint; сами RGB-only
+картинки до следующего implementation-коммита ещё идут через native fallback.

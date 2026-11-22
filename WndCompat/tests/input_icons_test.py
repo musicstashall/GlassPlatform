@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Compile complete TInputIcons.cpp against Win32/IAT environment doubles.
 
-Check native arguments, unchanged mock pixels, probe payloads and lifetimes in
-Release, Debug and Debug/probe. Not a Windows renderer, PE/IAT or MSVC test.
+Check bounded button backgrounds, native arguments/alpha pixels, probe payloads
+and lifetimes in Release, Debug and Debug/probe. Not a Windows renderer, PE/IAT or MSVC test.
 """
 from pathlib import Path
 import os
@@ -44,6 +44,8 @@ bool SUCCEEDED(HRESULT h){return h>=0;} bool FAILED(HRESULT h){return h<0;}
 constexpr UINT ILD_TRANSPARENT=1,ILD_MASK=0x10,ILD_ROP=0x40,ILD_PRESERVEALPHA=0x1000,ILD_DPISCALE=0x4000;
 constexpr int MM_TEXT=1,OBJ_MEMDC=10,OBJ_BITMAP=7,BPBF_TOPDOWNDIB=2,DBG_NORMAL=1;
 constexpr UINT BS_SOLID=0,BS_PATTERN=3;
+constexpr int GM_COMPATIBLE=1,GM_ADVANCED=2,GW_CHILD=5,GW_HWNDNEXT=2;
+constexpr DWORD BLACKNESS=0x42;
 constexpr DWORD GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS=4,GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT=2;
 constexpr BYTE AC_SRC_OVER=0,AC_SRC_ALPHA=1;
 struct RECT{LONG left{},top{},right{},bottom{};};
@@ -55,10 +57,13 @@ namespace GlassShared { enum class GlassControlKind{None,Edit}; }
 struct Window{
  const wchar_t* cls;Window* parent=nullptr;GlassShared::GlassControlKind kind=GlassShared::GlassControlKind::Edit;bool backdrop=true;
  RECT client{0,0,102,19},outer{100,200,230,223};POINT clientOrigin{102,202};
+ Window* firstChild=nullptr;Window* nextSibling=nullptr;bool visible=true;
 };using HWND=Window*;
 struct DC{
  HWND window=nullptr,registered=nullptr;bool top=true;int bpp=32,map=MM_TEXT;
  RECT clip{104,2,128,21};POINT origin{100,200},viewport{3,4},windowOrg{1,2};int clipKind=2;
+ int graphicsMode=GM_COMPATIBLE;DWORD layout=0;
+ int surfaceWidth=0,surfaceHeight=0;std::vector<DWORD> surface{};bool useHole=false;RECT hole{};
 };using HDC=DC*;
 struct BITMAP{int bmBitsPixel=32;};
 struct Images{int width=16,height=18;};using HIMAGELIST=Images*;using HPAINTBUFFER=void*;
@@ -72,7 +77,7 @@ constexpr bool ProbeBuild=false;
 #endif
 namespace Mock {
  bool full=true,failSize=false,failModule=false,failBegin=false,failMemory=false,failClear=false,failEnd=false,failNative=false,failBits=false,failFlush=false,noAlpha=false;
- bool failGeometry=false,failBrushInfo=false,failProbeRegistration=false;
+ bool failGeometry=false,failBrushInfo=false,failProbeRegistration=false,failPat=false;
  DWORD error=9;ULONGLONG tick=1;int calls=0,begins=0,ends=0,live=0,missing=-1;
  BOOL update=0;UINT flags=0;HDC target=nullptr;RECT bounds{};BLENDFUNCTION blend{};
  IMAGELISTDRAWPARAMS indirect{};int index=-1,x=0,y=0,width=0,height=0,tag=0;
@@ -82,6 +87,7 @@ namespace Mock {
  using Arg=std::variant<std::uint64_t,std::wstring>;
  struct Log{std::wstring format;std::vector<Arg> args;};std::vector<Log> logs;
  struct Fill{HDC dc;const RECT* pointer;RECT rect;HBRUSH brush;DWORD entryError;};std::vector<Fill> fills;
+ struct Pat{HDC dc;RECT rect;DWORD rop;};std::vector<Pat> pats;
  int fillResult=7;DWORD fillError=55;std::map<std::string,void*> hooks;
 }
 DWORD GetLastError(){return Mock::error;}void SetLastError(DWORD e){Mock::error=e;}
@@ -90,6 +96,12 @@ int GetMapMode(HDC dc){SetLastError(77);return dc->map;}
 int GetObjectType(HDC dc){SetLastError(77);return dc&&!dc->window?OBJ_MEMDC:3;}
 int GetClassNameW(HWND w,wchar_t* out,int size){SetLastError(77);if(!w||std::wcslen(w->cls)>=unsigned(size))return 0;std::wcscpy(out,w->cls);return std::wcslen(out);}
 HWND GetParent(HWND w){SetLastError(77);return w?w->parent:nullptr;}
+HWND GetWindow(HWND w,UINT cmd){SetLastError(77);return !w?nullptr:cmd==GW_CHILD?w->firstChild:w->nextSibling;}
+BOOL IsWindowVisible(HWND w){return w&&w->visible;}
+int GetGraphicsMode(HDC dc){SetLastError(77);return dc->graphicsMode;}
+DWORD GetLayout(HDC dc){SetLastError(77);return dc->layout;}
+BOOL EqualRect(const RECT* a,const RECT* b){return a->left==b->left&&a->top==b->top&&a->right==b->right&&a->bottom==b->bottom;}
+BOOL IsRectEmpty(const RECT* r){return r->right<=r->left||r->bottom<=r->top;}
 HGDIOBJ GetCurrentObject(HDC dc,int){return dc;}
 int GetObjectW(HGDIOBJ object,int size,void* out){
  SetLastError(77);if(!object)return 0;
@@ -123,8 +135,19 @@ BOOL Record(int tag,int index,HDC dc,int x,int y,int w,int h,COLORREF bg,COLORRE
 BOOL ImageList_Draw(HIMAGELIST,int index,HDC dc,int x,int y,UINT flags){return Record(0,index,dc,x,y,0,0,0,0,flags);}
 BOOL ImageList_DrawEx(HIMAGELIST,int index,HDC dc,int x,int y,int w,int h,COLORREF bg,COLORREF fg,UINT flags){return Record(1,index,dc,x,y,w,h,bg,fg,flags);}
 BOOL ImageList_DrawIndirect(IMAGELISTDRAWPARAMS* p){if(!p)return FALSE;Mock::indirect=*p;return Record(2,p->i,p->hdcDst,p->x,p->y,p->cx,p->cy,p->rgbBk,p->rgbFg,p->fStyle);}
+bool Contains(const RECT& r,int x,int y){return x>=r.left&&x<r.right&&y>=r.top&&y<r.bottom;}
+void PaintSurface(HDC dc,const RECT* rect,DWORD pixel){
+ if(!dc||!rect)return;
+ for(int y=0;y<dc->surfaceHeight;++y)for(int x=0;x<dc->surfaceWidth;++x)
+  if(Contains(*rect,x,y)&&Contains(dc->clip,x,y)&&(!dc->useHole||!Contains(dc->hole,x,y)))dc->surface[y*dc->surfaceWidth+x]=pixel;
+}
+BOOL PatBlt(HDC dc,int x,int y,int w,int h,DWORD rop){
+ Mock::pats.push_back({dc,{x,y,x+w,y+h},rop});CHECK(rop==BLACKNESS);
+ if(!Mock::failPat)PaintSurface(dc,&Mock::pats.back().rect,0);SetLastError(66);return !Mock::failPat;
+}
 int FillRect(HDC dc,const RECT* rect,HBRUSH brush){
  Mock::fills.push_back({dc,rect,rect?*rect:RECT{},brush,GetLastError()});
+ if(Mock::fillResult&&brush){const auto value=reinterpret_cast<ULONG_PTR>(brush);PaintSurface(dc,rect,value<=COLOR_MENUBAR+1u?0xffffff:brush->lbColor);}
  if(Mock::duringFill&&!Mock::fillReentered){Mock::fillReentered=true;Mock::duringFill();Mock::fillReentered=false;}
  SetLastError(Mock::fillError);return Mock::fillResult;
 }
@@ -205,7 +228,7 @@ struct Fixture {
  Fixture(){
   Shutdown();CHECK(Mock::hooks.empty());Mock::full=true;glyph.kind=GlassShared::GlassControlKind::None;
   Mock::failSize=Mock::failModule=Mock::failBegin=Mock::failMemory=Mock::failClear=Mock::failEnd=Mock::failNative=Mock::failBits=Mock::failFlush=Mock::noAlpha=false;
-  Mock::failGeometry=Mock::failBrushInfo=Mock::failProbeRegistration=false;
+  Mock::failGeometry=Mock::failBrushInfo=Mock::failProbeRegistration=Mock::failPat=false;Mock::pats.clear();
   Mock::calls=Mock::begins=Mock::ends=Mock::live=0;Mock::duringNative={};Mock::duringFill={};Mock::memory={};Mock::missing=-1;
   Mock::padding=0;Mock::reportedStride=-1;Mock::drawPixels.clear();Mock::committedPixels.clear();Mock::logs.clear();Mock::fills.clear();
   Mock::fillResult=7;Mock::fillError=55;Mock::tick+=2000;Startup();
@@ -261,7 +284,7 @@ void Failures(){
  {Fixture f;Mock::failNative=true;CHECK(!f.Ex());CHECK(Mock::calls==1&&Mock::live==0&&!Mock::update&&!g_inside&&GetLastError()==123);}
 }
 void Reentry(){Fixture f;Mock::duringNative=[&]{CHECK(Draw(&f.images,2,&f.dc,4,5,0));CHECK(Mock::begins==1);};CHECK(f.Ex());CHECK(Mock::calls==2&&Mock::begins==1&&Mock::ends==1&&!g_inside);}
-void Lifecycle(){Fixture f;Startup();for(auto r:g_dispatcher.refs)CHECK(r==1);CHECK(Mock::hooks.count("FillRect")==size_t(ProbeBuild));Shutdown();for(auto r:g_dispatcher.refs)CHECK(r==0);CHECK(f.Ex());CHECK(Mock::begins==0);Mock::missing=0;Startup();CHECK(g_dispatcher.refs[0]==0&&g_dispatcher.refs[1]==1);CHECK(f.Ex());f.Alpha();}
+void Lifecycle(){Fixture f;Startup();for(auto r:g_dispatcher.refs)CHECK(r==1);CHECK(Mock::hooks.count("FillRect")==1);Shutdown();for(auto r:g_dispatcher.refs)CHECK(r==0);CHECK(f.Ex());CHECK(Mock::begins==0);Mock::missing=0;Startup();CHECK(g_dispatcher.refs[0]==0&&g_dispatcher.refs[1]==1);CHECK(f.Ex());f.Alpha();}
 void SetMixed(Fixture& f){
  f.images.width=3;f.images.height=2;Mock::padding=2;
  Mock::drawPixels={{0,0,0,0},{255,255,255,255},{0,0,0,255},{10,20,30,100},{250,251,252,200},{255,255,255,0}};
@@ -365,26 +388,102 @@ void ProbeLifecycle(){
   CHECK(Mock::fills.size()==1&&LogCount(L"stage=fill")==0&&GetLastError()==55);
  }
 }
+void ButtonGeometry(Fixture& f,bool child){
+ f.edit.client={0,0,136,19};f.edit.outer={397,500,537,523};f.edit.clientOrigin={399,502};f.edit.firstChild=&f.glyph;
+ f.glyph.client={0,0,16,16};f.glyph.outer={519,503,535,519};f.glyph.clientOrigin={519,503};
+ f.dc.window=child?&f.glyph:&f.edit;f.dc.origin=child?f.glyph.clientOrigin:f.edit.clientOrigin;
+ f.dc.viewport=f.dc.windowOrg={0,0};f.dc.clip=child?f.glyph.client:f.edit.client;
+ f.dc.surfaceWidth=child?16:136;f.dc.surfaceHeight=child?16:19;f.dc.surface.assign(f.dc.surfaceWidth*f.dc.surfaceHeight,0x7f123456);
+}
+DWORD At(const DC& dc,int x,int y){return dc.surface[y*dc.surfaceWidth+x];}
+void BackgroundChild(){
+ for(LPCWSTR name:{L"TEditButton.TGlyph",L"TGlyph"}){
+  Fixture f;ButtonGeometry(f,true);f.glyph.cls=name;LOGBRUSH b{BS_SOLID,0xffffff};const auto r=f.glyph.client;SetLastError(19);
+  CHECK(FillImport(&f.dc,&r,&b)==7&&GetLastError()==55);CHECK(Mock::fills.size()==1&&Mock::fills[0].pointer==&r&&Mock::fills[0].entryError==19);
+  CHECK(Mock::pats.size()==1&&Mock::pats[0].dc==&f.dc&&EqualRect(&Mock::pats[0].rect,&r));
+  for(auto pixel:f.dc.surface)CHECK(pixel==0);CHECK(b.lbColor==0xffffff&&Mock::begins==0);
+ }
+}
+void BackgroundParent(){
+ for(bool visible:{false,true})for(int clipCase=0;clipCase<4;++clipCase){
+  Fixture f;ButtonGeometry(f,false);f.glyph.visible=visible;
+  const RECT button{120,1,136,17};if(clipCase==1)f.dc.clip=button;else if(clipCase==2)f.dc.clip={0,1,16,17};else if(clipCase==3)f.dc.clip={30,2,90,18};
+  Window left{L"TGlyph",&f.edit};left.kind=GlassShared::GlassControlKind::None;
+  left.client={0,0,16,16};left.outer={399,503,415,519};left.clientOrigin={399,503};f.glyph.nextSibling=&left;
+  const RECT r=f.edit.client;LOGBRUSH b{BS_SOLID,0xffffff};SetLastError(19);const auto clip=f.dc.clip;
+  CHECK(FillImport(&f.dc,&r,&b)==7&&GetLastError()==55);CHECK(Mock::fills.size()==1&&Mock::fills[0].pointer==&r);
+  CHECK(Mock::pats.size()==2&&EqualRect(&f.dc.clip,&clip));
+  for(int y=0;y<19;++y)for(int x=0;x<136;++x){
+   const bool inClip=Contains(clip,x,y),inButton=Contains(button,x,y)||(x<16&&y>=1&&y<17);
+   CHECK(At(f.dc,x,y)==(inClip?(inButton?0u:0xffffffu):0x7f123456u));
+  }
+ }
+}
+void BackgroundClip(){
+ Fixture f;ButtonGeometry(f,false);const RECT r=f.edit.client;LOGBRUSH b{BS_SOLID,0xffffff};
+ f.dc.clip={123,4,133,13};f.dc.clipKind=3;f.dc.useHole=true;f.dc.hole={126,6,129,11};
+ CHECK(FillImport(&f.dc,&r,&b)==7);CHECK(Mock::pats.size()==1);
+ for(int y=0;y<19;++y)for(int x=0;x<136;++x)CHECK(At(f.dc,x,y)==(Contains(f.dc.clip,x,y)&&!Contains(f.dc.hole,x,y)?0u:0x7f123456u));
+ CHECK(f.dc.useHole&&f.dc.clipKind==3&&f.dc.hole.left==126);
+}
+void BackgroundIsolation(){
+ for(int which=0;which<29;++which){
+  Fixture f;ButtonGeometry(f,false);Window middle{L"TPanel",&f.edit};LOGBRUSH b{BS_SOLID,0xffffff};RECT r=f.edit.client;
+  switch(which){
+   case 0:f.dc.window=&f.search;break;case 1:f.dc.window=&f.other;break;case 2:f.edit.firstChild=nullptr;break;
+   case 3:f.glyph.cls=L"TEditButton.TGlyphExtra";break;case 4:f.glyph.parent=&middle;break;
+   case 5:Mock::full=false;break;case 6:f.edit.backdrop=false;break;case 7:f.glyph.backdrop=false;break;
+   case 8:f.edit.kind=GlassShared::GlassControlKind::None;break;case 9:f.dc.map=2;break;
+   case 10:f.dc.viewport={1,0};break;case 11:f.dc.windowOrg={0,1};break;case 12:f.dc.origin={397,500};break;
+   case 13:f.dc.graphicsMode=GM_ADVANCED;break;case 14:f.dc.layout=1;break;
+   case 15:b.lbColor=0x123456;break;case 16:b.lbStyle=BS_PATTERN;break;case 17:r={120,1,136,17};break;
+   case 18:f.dc.window=nullptr;f.dc.registered=&f.edit;break;case 19:Mock::failGeometry=true;break;case 20:g_inside=true;break;
+   case 21:Mock::failBrushInfo=true;break;case 22:f.glyph.outer.right++;break;
+   case 23:f.glyph.outer={539,503,555,519};f.glyph.clientOrigin={539,503};break;
+   case 24:f.glyph.outer={399,502,535,521};f.glyph.client={0,0,136,19};f.glyph.clientOrigin=f.edit.clientOrigin;break;
+   case 25:f.glyph.client.right=0;break;case 26:f.glyph.client.right=1025;break;
+   case 27:f.glyph.clientOrigin.x++;break;case 28:f.glyph.client.left=1;break;
+  }
+  SetLastError(19);CHECK(FillImport(&f.dc,&r,&b)==7&&GetLastError()==55);g_inside=false;
+  CHECK(Mock::pats.empty()&&Mock::fills.size()==1&&Mock::fills[0].pointer==&r&&Mock::fills[0].entryError==19);
+ }
+}
+void BackgroundFailures(){
+ for(int which=0;which<4;++which){
+  Fixture f;ButtonGeometry(f,true);const RECT r=f.glyph.client;LOGBRUSH b{BS_SOLID,0xffffff};
+  if(which==0)Mock::fillResult=0;else if(which==1)Mock::failPat=true;else if(which==2)Shutdown();else{Shutdown();Mock::failProbeRegistration=true;Startup();}
+  SetLastError(19);CHECK(FillImport(&f.dc,&r,&b)==Mock::fillResult&&GetLastError()==55);
+  CHECK(Mock::fills.size()==1&&Mock::pats.size()==size_t(which==1));
+  for(auto pixel:f.dc.surface)CHECK(pixel==(which==0?0x7f123456u:0xffffffu));
+ }
+ {Fixture f;ButtonGeometry(f,true);const RECT r=f.glyph.client;LOGBRUSH b{BS_SOLID,0xffffff};
+  Mock::duringFill=[&]{CHECK(FillImport(&f.dc,&r,&b)==7);};CHECK(FillImport(&f.dc,&r,&b)==7);
+  CHECK(Mock::fills.size()==2&&Mock::pats.size()==1&&GetLastError()==55);}
+}
 int PriorFill(HDC dc,const RECT* r,HBRUSH b){
  CHECK(GetLastError()==19);CHECK(FillRect(dc,r,b)==7);SetLastError(67);return 13;
 }
 void ProbeOriginal(){
- Fixture f;Shutdown();Mock::hooks["FillRect"]=reinterpret_cast<void*>(&PriorFill);Startup();
+ Fixture f;auto cleanup=wil::scope_exit([]{Shutdown();Mock::hooks.clear();});
+ Shutdown();Mock::hooks["FillRect"]=reinterpret_cast<void*>(&PriorFill);Startup();
  const RECT r{104,2,128,21};LOGBRUSH b{BS_SOLID,0xffffff};
  for(int foreign=0;foreign<2;++foreign){
   f.dc.window=foreign?&f.other:&f.search;SetLastError(19);
   CHECK(FillImport(&f.dc,&r,&b)==13&&GetLastError()==67);
   CHECK(Mock::fills.size()==size_t(foreign+1)&&Mock::fills.back().brush==&b&&Mock::fills.back().pointer==&r);
  }
- CHECK(LogCount(L"stage=fill")==size_t(ProbeBuild));
- if(ProbeBuild)CHECK(Number(LastLog(L"stage=fill"),L"result")==13);
+ ButtonGeometry(f,true);const auto client=f.glyph.client;SetLastError(19);
+ CHECK(FillImport(&f.dc,&client,&b)==13&&GetLastError()==67);
+ CHECK(Mock::fills.size()==3&&Mock::pats.size()==1&&Mock::fills.back().pointer==&client);
+ CHECK(LogCount(L"stage=fill")==size_t(ProbeBuild?2:0));
+ if(ProbeBuild)CHECK(Number(LastLog(L"stage=fill"),L"result")==13&&Number(LastLog(L"stage=fill"),L"patched")==1);
  Shutdown();CHECK(Mock::hooks.at("FillRect")==reinterpret_cast<void*>(&PriorFill));Mock::hooks.clear();
 }
 int main(int argc,char** argv){try{
  CHECK(argc==2);std::string c=argv[1];
  if(c=="targets")Targets();else if(c=="qualified")Qualified();else if(c=="isolation")Isolation();else if(c=="params")Params();
  else if(c=="failures")Failures();else if(c=="reentry")Reentry();else if(c=="lifecycle")Lifecycle();else if(c=="mixed")Mixed();
- else if(c=="probe-fill")ProbeFill();else if(c=="probe-pixels")ProbePixels();else if(c=="probe-budget")ProbeBudget();else if(c=="probe-lifecycle")ProbeLifecycle();else if(c=="probe-original")ProbeOriginal();else return 2;
+ else if(c=="probe-fill")ProbeFill();else if(c=="probe-pixels")ProbePixels();else if(c=="probe-budget")ProbeBudget();else if(c=="probe-lifecycle")ProbeLifecycle();else if(c=="probe-original")ProbeOriginal();else if(c=="bg-child")BackgroundChild();else if(c=="bg-parent")BackgroundParent();else if(c=="bg-clip")BackgroundClip();else if(c=="bg-isolation")BackgroundIsolation();else if(c=="bg-failures")BackgroundFailures();else return 2;
  std::cout<<"PASS "<<c<<'\n';return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
 '''
@@ -444,6 +543,11 @@ class InputIconsTest(unittest.TestCase):
     def test_probe_budgets_are_separate_bounded_and_thread_local(self): self.run_case('probe-budget')
     def test_probe_reentry_missing_import_shutdown_and_captured_original_are_native(self): self.run_case('probe-lifecycle')
     def test_fill_probe_calls_and_restores_supplied_effective_original_even_for_foreign_windows(self): self.run_case('probe-original')
+    def test_button_background_blackens_only_the_full_direct_glyph_client(self): self.run_case('bg-child')
+    def test_parent_full_and_partial_fill_restore_both_visible_and_hidden_button_regions(self): self.run_case('bg-parent')
+    def test_button_background_keeps_partial_complex_clip_and_untouched_pixels(self): self.run_case('bg-clip')
+    def test_button_background_rejects_foreign_colored_unproven_or_transformed_calls(self): self.run_case('bg-isolation')
+    def test_button_background_native_failures_shutdown_missing_slot_and_reentry(self): self.run_case('bg-failures')
 
 
 if __name__ == '__main__':
