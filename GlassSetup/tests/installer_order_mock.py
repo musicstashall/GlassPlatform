@@ -28,7 +28,7 @@ def function(token):
 
 worker = section("DWORD WINAPI InstallEngine::RunGlassWorker(", "bool InstallEngine::Start(")
 stages = ["CapturePriorHostState()", "ExtractPayload(", "CreateRollbackSnapshot()", "BuildExecutionPlan()",
-          "CloseSelectedSettingsProcesses(", "StopRunningHosts()", "InstallGlassSettingsEarly()",
+          "WaitForSelectedSettings()", "StopRunningHosts()", "InstallGlassSettingsEarly()",
           "ReleaseLockedModules()", "PurgeRemnants()", "RunMsiSequence()", "RegisterSelectedProducts()",
           "LaunchSelectedProducts()"]
 positions = [worker.index(stage) for stage in stages]

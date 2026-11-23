@@ -11,32 +11,38 @@ const binary=binaryModule.default||binaryModule;
   await page.goto('file://'+path.resolve(__dirname,'../res/slideshow.html'));
   const send=state=>page.evaluate(state=>window.receiveHost({data:{type:'state',...state}}),state);
   const state=()=>page.evaluate(()=>{
-   const panel=document.getElementById('unlock-holders'),shade=document.getElementById('unlock-holder-shade');
+   const panel=document.getElementById('unlock-holders');
    const list=document.getElementById('unlock-holder-list'),report=panel.getBoundingClientRect();
    const copy=document.querySelector('#unlock-panel .unlock-copy').getBoundingClientRect();
-   return {hidden:panel.hidden,shadeHidden:shade.hidden,animation:getComputedStyle(document.querySelector('.unlock-orbit')).animationName,
+   const filter=getComputedStyle(panel).backdropFilter||getComputedStyle(panel).webkitBackdropFilter||'';
+   const animation=getComputedStyle(document.querySelector('.unlock-orbit')).animationName;
+   return {hidden:panel.hidden,shade:!!document.getElementById('unlock-holder-shade'),filter,animation,
     left:report.left,right:report.right,top:report.top,bottom:report.bottom,copyRight:copy.right,scroll:list.scrollHeight>list.clientHeight,
-    shadeColor:getComputedStyle(shade).backgroundColor,rows:list.children.length};
+    rows:list.children.length,title:document.getElementById('unlock-title').textContent};
   });
   for(const locale of ['ru','en'])for(const mode of ['unlock-modules','unlock-processes']){
    const holdReport=Array.from({length:18},(_,i)=>`process${i}.exe (86) (PID ${1000+i}): GlassCompat.dll, GlassCore.dll, WndCompat.dll`).join('\n');
    await send({locale,page:mode,unlockActive:false,holdReport});
    const waiting=await state();
-   assert.equal(waiting.hidden,false);assert.equal(waiting.shadeHidden,false);assert.equal(waiting.animation,'none');
+   assert.equal(waiting.hidden,false);assert.equal(waiting.shade,false);assert.equal(waiting.animation,'none');
+   assert.match(waiting.filter,/blur/i);
    assert.ok(waiting.left>waiting.copyRight,JSON.stringify(waiting));
    assert.ok(waiting.top>=0&&waiting.bottom<=540&&waiting.right<=1000);assert.ok(waiting.scroll);assert.equal(waiting.rows,18);
-   assert.notEqual(waiting.shadeColor,'rgba(0, 0, 0, 0)');
    // Stale report remains in the host state during retry: never display it over activity.
    await send({unlockActive:true});
-   const active=await state();assert.equal(active.hidden,true);assert.equal(active.shadeHidden,true);assert.notEqual(active.animation,'none');
+   const active=await state();assert.equal(active.hidden,true);assert.equal(active.shade,false);assert.notEqual(active.animation,'none');
    await send({unlockActive:false});
-   assert.equal((await state()).hidden,false);assert.equal((await state()).shadeHidden,false);
-   await send({holdReport:''});assert.equal((await state()).hidden,true);assert.equal((await state()).shadeHidden,true);
-   await send({page:'welcome',holdReport});assert.equal((await state()).hidden,true);assert.equal((await state()).shadeHidden,true);
+   assert.equal((await state()).hidden,false);
+   await send({holdReport:''});assert.equal((await state()).hidden,true);
+   await send({page:'welcome',holdReport});assert.equal((await state()).hidden,true);
   }
+  await send({locale:'ru',page:'settings-close',unlockActive:false,holdReport:'GlassSettings.exe (PID 4120): окно не закрылось'});
+  const settings=await state();
+  assert.equal(settings.hidden,false);assert.equal(settings.shade,false);assert.match(settings.filter,/blur/i);
+  assert.equal(settings.title,'Закройте GlassSettings');assert.equal(settings.rows,1);
   await page.emulateMedia({reducedMotion:'reduce'});
   await send({page:'unlock-modules',unlockActive:true});
   assert.equal((await state()).hidden,true);
-  console.log('PASS: Chromium RU/EN holder plan panel: scroll, bounds, shade, idle/retry/residual/clear/navigation and reduced motion');
+  console.log('PASS: Chromium RU/EN holder plan panel: scroll, bounds, acrylic, idle/retry/residual/clear/navigation and reduced motion');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exit(1);});

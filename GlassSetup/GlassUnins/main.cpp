@@ -10,7 +10,8 @@
 #include "InstallSupport/GlassInstallUtil.h"
 #include "InstallSupport/GlassInstallWatch.h"
 #include "WizardTheme.h"
-#include "WizardAssets.h"
+#include "WizardUi/WebHost.h"
+#include "WizardUi/Window.h"
 #include "GlassProducts.h"
 #include "GlassProductPlan.h"
 #include "GlassProductUiPolicy.h"
@@ -26,7 +27,6 @@
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shlwapi.h>
-#include <wrl.h>
 #include <WebView2.h>
 #include "GlassMaintenanceExecutor.h"
 #include "InstallSupport/GlassMaintenanceCache.h"
@@ -40,8 +40,6 @@
 #include <thread>
 #include <vector>
 
-using Microsoft::WRL::ComPtr;
-using Microsoft::WRL::Callback;
 namespace GP = GlassShared::GlassPlatformTask;
 namespace Msi = GlassInstallMsi;
 
@@ -71,14 +69,6 @@ void LogLine(const std::wstring& line) noexcept {
     CloseHandle(file);
 }
 
-struct ResourceData { const BYTE* data=nullptr; DWORD size=0; };
-ResourceData Resource(UINT id) noexcept {
-    const HRSRC r=FindResourceExW(gInstance,RT_RCDATA,MAKEINTRESOURCEW(id),MAKELANGID(LANG_NEUTRAL,SUBLANG_NEUTRAL));
-    if (!r) return {};
-    HGLOBAL h=LoadResource(gInstance,r);
-    return {static_cast<const BYTE*>(LockResource(h)),SizeofResource(gInstance,r)};
-}
-
 bool SameCode(const std::wstring& code,const wchar_t* expected) noexcept {
     return expected && _wcsicmp(code.c_str(),expected)==0;
 }
@@ -93,7 +83,6 @@ struct Arguments {
     bool fromTemp=false;
     bool removeController=false;
     bool silent=false;
-    bool acceptSettingsRemovalRisk=false;
     bool acceptModuleMonitorRisk=false;
     int launchError=0;
     std::wstring originalDir;
@@ -110,7 +99,6 @@ Arguments ParseArguments() {
         else if (_wcsicmp(args[i],L"--remove-controller")==0) a.removeController=true;
         else if (_wcsicmp(args[i],L"--silent")==0) a.silent=true;
         else if (_wcsicmp(args[i],L"--accept-module-monitor-risk")==0) a.acceptModuleMonitorRisk=true;
-        else if (_wcsicmp(args[i],L"--accept-settings-removal-risk")==0) a.acceptSettingsRemovalRisk=true;
     }
     LocalFree(args);
     return a;
@@ -230,7 +218,6 @@ int RelaunchFromPrivateTemp(const Arguments& a) noexcept {
     if (!product.empty()) command+=L" --product \""+product+L"\"";
     if (a.silent) command+=L" --silent";
     if (a.acceptModuleMonitorRisk) command+=L" --accept-module-monitor-risk";
-    if (a.acceptSettingsRemovalRisk) command+=L" --accept-settings-removal-risk";
     STARTUPINFOW si{}; si.cb=sizeof(si);
     PROCESS_INFORMATION pi{};
     if (!CreateProcessW(dest.c_str(),command.data(),nullptr,nullptr,FALSE,0,nullptr,temp.c_str(),&si,&pi)) {
@@ -265,7 +252,7 @@ struct Selection {
     bool settings64=false, settings32=false;
     bool Any() const noexcept { return x64 || x86 || settings || openGlass || secureUxTheme; }
 };
-enum class Page { Select, Cleanup, SettingsRisk, Stopping, UnlockModules, UnlockProcesses, Removing, Cancelled, Complete, Error };
+enum class Page { Select, Cleanup, Stopping, UnlockModules, UnlockProcesses, Removing, Cancelled, Complete, Error };
 enum class Action { None, Retry, Unlock, ContinueRisk, Cancel };
 enum class OperationState { BeforeRemoval, CancelRequested, Removing, Finished };
 
@@ -337,23 +324,20 @@ public:
 private:
     Arguments args_;
     std::atomic_bool monitorUnknown_{false};
-    unsigned confirmedSettingsRisk_=0, pendingSettingsRisk_=0;
     bool cleanupReviewed_=false;
     Selection installed_{}, selected_{};
     GlassInstallUtil::SecureUxThemeState secureUxThemeState_=GlassInstallUtil::SecureUxThemeState::Unavailable;
     Page page_=Page::Select;
     UINT dpi_=96;
     bool registered_=false, alreadyRunning_=false, closing_=false;
-    bool webReady_=false, bridgeReady_=false, initSent_=false, webFailed_=false;
+    bool webReady_=false, bridgeReady_=false, webFailed_=false;
     HWND back_=nullptr,next_=nullptr,cancel_=nullptr,webHost_=nullptr;
     std::array<HWND,7> check_{};
     HFONT font_=nullptr, heading_=nullptr;
     HBRUSH brush_=nullptr,buttonBrush_=nullptr;
-    ComPtr<ICoreWebView2Environment> environment_;
-    ComPtr<ICoreWebView2Controller> controller_;
-    ComPtr<ICoreWebView2> web_;
-    EventRegistrationToken requestToken_{}, navToken_{}, completedToken_{}, messageToken_{}, popupToken_{}, permissionToken_{};
-    std::wstring webState_;
+    WizardUi::WebHost web_;
+    WizardUi::ErrorDetails errorDetails_;
+    WizardUi::WebState webState_;
     std::wstring x64Dir_,x86Dir_,openGlassDir_;
     bool rootsKnown_=false;
     GlassOpenGlassInstall::Record officialOpenGlass_;
@@ -367,11 +351,9 @@ private:
     std::atomic<OperationState> operationState_{OperationState::BeforeRemoval};
     std::atomic<Action> action_{Action::None};
 
-    int Scale(int n) const noexcept { return MulDiv(n,static_cast<int>(dpi_),96); }
-    RECT Box(int x,int y,int w,int h) const noexcept { return {Scale(x),Scale(y),Scale(x+w),Scale(y+h)}; }
-    void Move(HWND h,int x,int y,int w,int hgt) {
-        if (h) SetWindowPos(h,nullptr,Scale(x),Scale(y),Scale(w),Scale(hgt),SWP_NOZORDER|SWP_NOACTIVATE);
-    }
+    int Scale(int n) const noexcept { return WizardUi::Scale(dpi_,n); }
+    RECT Box(int x,int y,int w,int h) const noexcept { return WizardUi::Box(dpi_,x,y,w,h); }
+    void Move(HWND h,int x,int y,int w,int hgt) noexcept { WizardUi::Move(window,h,Box(x,y,w,hgt),true); }
     HWND Button(const wchar_t* text,int id,DWORD style=BS_PUSHBUTTON) {
         return CreateWindowExW(0,L"BUTTON",text,WS_CHILD|WS_TABSTOP|style,0,0,0,0,window,
             reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),gInstance,nullptr);
@@ -382,7 +364,7 @@ private:
             OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");
         heading_=CreateFontW(-Scale(30),0,0,0,FW_LIGHT,FALSE,FALSE,FALSE,DEFAULT_CHARSET,
             OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");
-        for (HWND h:{back_,next_,cancel_,check_[0],check_[1],check_[2],check_[3],check_[4],check_[5],check_[6]})
+        for (HWND h:{back_,next_,cancel_,check_[0],check_[1],check_[2],check_[3],check_[4],check_[5],check_[6],errorDetails_.Get()})
             if (h) SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(font_),FALSE);
     }
     void DetectInstalled() noexcept {
@@ -504,6 +486,7 @@ private:
         check_[5]=Button(L"SecureUxTheme",IDC_UNINS_SECUREUXTHEME,BS_AUTOCHECKBOX);
         webHost_=CreateWindowExW(WS_EX_CONTROLPARENT,L"STATIC",L"",WS_CHILD|WS_CLIPCHILDREN|WS_CLIPSIBLINGS,
             0,0,0,0,window,reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_WEBHOST)),gInstance,nullptr);
+        errorDetails_.Create(window,gInstance,IsRu());
         CreateFonts();
         SetTimer(window,kTimer,40,nullptr);
         for (HWND h:{back_,next_,cancel_}) WizardTheme::AttachButtonScope(h);
@@ -529,18 +512,18 @@ private:
         ReleaseDC(window,dc);
     }
     void Layout() {
-        Move(webHost_,0,0,kWidth,kHtmlHeight);
-        Move(back_,page_==Page::UnlockModules?510:644,kContentHeight+12,page_==Page::UnlockModules?230:160,32);
-        Move(next_,page_==Page::Select?814:750,kContentHeight+12,page_==Page::Select?130:104,32);
-        Move(cancel_,864,kContentHeight+12,104,32);
-        if (page_==Page::SettingsRisk) Move(next_,600,kContentHeight+12,248,32);
-        if (page_==Page::Select || page_==Page::Cleanup) { Move(next_,750,kContentHeight+12,104,32); Move(back_,574,kContentHeight+12,160,32); }
-        if (page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error) Move(next_,864,kContentHeight+12,104,32);
+        WizardUi::LayoutWebSurface(window,webHost_,web_,Box(0,0,kWidth,kHtmlHeight),true);
+        const bool selecting=page_==Page::Select || page_==Page::Cleanup;
+        const bool modules=page_==Page::UnlockModules;
+        const bool terminal=page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error;
+        WizardUi::LayoutFooter(window,dpi_,kContentHeight,
+            {back_,modules?510:selecting?574:644,modules?230:160},
+            {next_,750,104},cancel_,terminal,true);
         Move(check_[0],60,203,390,32); Move(check_[1],510,203,390,32);
         Move(check_[2],60,273,390,32); Move(check_[6],510,273,390,32);
         Move(check_[3],510,343,390,32);
         Move(check_[5],60,373,390,32); Move(check_[4],60,417,840,32);
-        if (controller_) { RECT bounds=Box(0,0,kWidth,kHtmlHeight); controller_->put_Bounds(bounds); }
+        Move(errorDetails_.Get(),48,190,880,220);
     }
     // R13: нативные чекбоксы — только резерв на случай, когда WebView2 недоступен.
     // Пока контент грузится, в тех же местах рисуется индикатор ожидания: раньше
@@ -560,7 +543,6 @@ private:
         switch (page_) {
         case Page::Select: return L"uninstall-select";
         case Page::Cleanup: return L"cleanup-review";
-        case Page::SettingsRisk: return L"settings-removal-risk";
         case Page::Stopping: case Page::Removing: return L"uninstalling";
         case Page::UnlockModules: return L"unlock-modules";
         case Page::UnlockProcesses: return L"unlock-processes";
@@ -618,9 +600,9 @@ private:
         };
         add(L"x64",L"Glass Platform x64",T(L"Оформление 64-битных приложений",L"Styling for 64-bit applications"),selected_.x64,installed_.x64,false);
         add(L"x86",L"Glass Platform x86",T(L"Оформление 32-битных приложений",L"Styling for 32-bit applications"),selected_.x86,installed_.x86,false);
-        add(L"settings64",L"GlassSettings x64",T(L"64-битная панель управления платформой",L"64-bit platform settings application"),selected_.settings64,installed_.settings64,false);
-        add(L"settings32",L"GlassSettings x86",T(L"32-битная панель управления платформой",L"32-bit platform settings application"),selected_.settings32,installed_.settings32,false);
-        add(L"openglass",L"OpenGlass",T(L"Оформление рамок окон",L"Glass window frame engine"),selected_.openGlass,installed_.openGlass,false);
+        add(L"settings64",L"GlassSettings x64",T(L"Программа настроек оформления, 64-битная версия",L"Styling settings app, 64-bit version"),selected_.settings64,installed_.settings64,false);
+        add(L"settings32",L"GlassSettings x86",T(L"Программа настроек оформления, 32-битная версия",L"Styling settings app, 32-bit version"),selected_.settings32,installed_.settings32,false);
+        add(L"openglass",L"OpenGlass",T(L"Классические стеклянные рамки окон в стиле Aero Glass",L"Classic Aero Glass–style glass window frames"),selected_.openGlass,installed_.openGlass,false);
         if(installed_.secureUxTheme){
             const bool active=SecureUxThemeManaged();
             const bool pending=secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::ActivationPending||secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::DeactivationPending;
@@ -629,15 +611,15 @@ private:
             const bool checked=selected_.secureUxTheme||dependent;
             const bool disabled=external||secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Conflict;
             const std::wstring badge=external?T(L"ВНЕШНЯЯ УСТАНОВКА",L"EXTERNAL INSTALL"):pending?T(L"ПЕРЕЗАПУСК",L"RESTART PENDING"):active?T(L"АКТИВЕН",L"ACTIVE"):T(L"УСТАНОВЛЕН",L"INSTALLED");
-            const std::wstring state=external?T(L"Управляется внешней установкой",L"Managed by an external installation"):
-                pending?T(L"Состояние изменится после перезапуска",L"State change takes effect after restart"):
-                checked?T(L"Пакет SecureUxTheme будет удалён",L"SecureUxTheme package will be removed"):
+            const std::wstring state=external?T(L"Установлен не через GlassPlatform — здесь удалить нельзя",L"Not installed by GlassPlatform — can't be removed here"):
+                pending?T(L"Изменения вступят в силу после перезагрузки",L"Changes take effect after a restart"):
+                checked?T(L"Будет удалён",L"Will be removed"):
                 active?T(L"Останется без изменений",L"Will remain unchanged"):
-                T(L"Установлен, интеграция выключена",L"Installed, integration is off");
+                T(L"Установлен, сейчас не используется",L"Installed, not in use right now");
             const std::wstring reason=dependent?T(L"удалится вместе с GlassSettings",L"removed with GlassSettings"):
                 T(L"можно удалить отдельно",L"can be removed separately");
             json+=L",{\"id\":\"secureUxTheme\",\"title\":\"SecureUxTheme\",\"warning\":"+Q(GlassProductUiPolicy::WarningText(preview.rows[4].warnings,IsRu(),GlassInstallUtil::IsOs64Bit()))+L",\"description\":"+
-                Q(T(L"Средство для использования неподписанных визуальных стилей. Установка в System32.",L"A tool for using unsigned visual styles. Installs in System32."))+
+                Q(T(L"Позволяет Windows использовать сторонние темы оформления. Установлен в системную папку Windows.",L"Lets Windows use third-party visual styles. Installed in the Windows system folder."))+
                 L",\"badge\":"+Q(badge)+L",\"badgeTone\":"+Q(external?L"repair":pending?L"update":L"keep")+
                 L",\"state\":"+Q(state)+L",\"reasons\":"+(reason.empty()?L"[]":L"["+Q(reason)+L"]")+
                 L",\"installed\":true,\"installedPackageVersion\":"+Q(InstalledMsiVersion(L"secureUxTheme"))+
@@ -648,8 +630,8 @@ private:
         // Cleanup is offered only on the separate full-removal review page.
         if (page_==Page::Cleanup && RemovesAllInstalled(selected_)) {
         json+=L",{\"id\":\"cleanup\",\"slim\":true,\"title\":"+Q(T(L"Удалить настройки и пользовательские данные",L"Remove settings and user data"))+
-            L",\"description\":"+Q(T(L"Пользовательские папки AppData\\Local\\GlassPlatform в доступных профилях, параметры Glass в реестре и сохранённые .theme с разделами Glass в пользовательском каталоге тем. Активные темы переключаются на стандартную; при неудаче меняется реестр. По умолчанию данные сохраняются.",
-                L"AppData\\Local\\GlassPlatform user data in accessible profiles, Glass registry settings and saved .theme files with Glass sections in the user themes folder. Active themes switch to stock, with a registry fallback if needed. Data is kept by default."))+
+            L",\"description\":"+Q(T(L"Стирает настройки GlassPlatform и сохранённые темы с её оформлением у всех пользователей этого компьютера. Если такая тема сейчас включена, её заменит стандартная тема Windows — у некоторых пользователей после следующего входа в систему. Без этой отметки настройки сохраняются.",
+                L"Erases GlassPlatform settings and saved themes that use its styling for every user on this computer. If such a theme is on, the standard Windows theme replaces it — for some users after their next sign-in. Without this option, settings are kept."))+
             L",\"checked\":"+(selected_.cleanupSettings?L"true":L"false")+L",\"locked\":false,\"hidden\":false}";
         }
         return json+L"]";
@@ -666,8 +648,8 @@ private:
         return GlassProductUiPolicy::WarningText(SelectionPreview().warnings,IsRu(),GlassInstallUtil::IsOs64Bit());
     }
     void SyncWeb() {
-        if (!web_ || !webReady_ || !bridgeReady_) return;
-        if (!initSent_) {
+        if (!webReady_ || !bridgeReady_) return;
+        if (webState_.NeedsInit()) {
             const std::wstring ui=L"{\"brand\":\"GlassPlatform\",\"compTag\":"+Q(T(L"ВЫБОРОЧНОЕ УДАЛЕНИЕ",L"SELECTIVE UNINSTALL"))+
                 L",\"compTitle\":"+Q(T(L"Выберите продукты для удаления",L"Select products to remove"))+
                 L",\"compIntro\":"+Q(T(L"Будут удалены только отмеченные продукты.",L"Only selected products will be removed."))+
@@ -680,35 +662,33 @@ private:
                 L",\"doneBody\":"+Q(T(L"Выбранные продукты удалены.",L"The selected products have been removed."))+
                 L",\"doneWarnTag\":"+Q(T(L"УДАЛЕНИЕ С ПРИМЕЧАНИЕМ",L"REMOVAL WITH A NOTE"))+
                 L",\"doneWarnTitle\":"+Q(T(L"Продукты удалены",L"Products removed"))+
-                L",\"doneWarnBody\":"+Q(T(L"Очистка выполнена. Для оформления профилей использован резервный путь.",L"Cleanup completed using the fallback for profile appearance."))+
+                L",\"doneWarnBody\":"+Q(T(L"Данные стёрты. Стандартная тема у части пользователей включится только после следующего входа в систему.",L"Data erased. For some users, the standard theme turns on only after their next sign-in."))+
                 L",\"doneWarnLabel\":"+Q(T(L"СВЕДЕНИЯ ОБ ОЧИСТКЕ",L"CLEANUP DETAILS"))+
                 L",\"doneReady\":"+Q(T(L"ГОТОВО",L"DONE"))+
                 L",\"doneNote\":"+Q(T(L"Журнал: %WINDIR%\\Temp\\GlassUninsLogs-*\\GlassUnins.log",L"Log: %WINDIR%\\Temp\\GlassUninsLogs-*\\GlassUnins.log"))+
                 L",\"cancelledTag\":"+Q(T(L"УДАЛЕНИЕ ОТМЕНЕНО",L"UNINSTALL CANCELLED"))+
                 L",\"cancelledTitle\":"+Q(T(L"Удаление отменено",L"Uninstall cancelled"))+
-                L",\"cancelledBody\":"+Q(T(L"Пакеты не удалялись.",L"No packages were removed."))+
+                L",\"cancelledBody\":"+Q(T(L"Ничего не удалено.",L"Nothing was removed."))+
                 L",\"errorTag\":"+Q(T(L"ОШИБКА",L"ERROR"))+
                 L",\"errorTitle\":"+Q(T(L"Удаление не завершено",L"Uninstall did not finish"))+
                 L",\"errorBody\":"+Q(T(L"Подробности приведены ниже.",L"Details are shown below."))+
                 L",\"errorDetails\":"+Q(T(L"ДЕТАЛИ",L"DETAILS"))+
                 L",\"errorNote\":"+Q(T(L"Журнал: %WINDIR%\\Temp\\GlassUninsLogs-*\\GlassUnins.log",L"Log: %WINDIR%\\Temp\\GlassUninsLogs-*\\GlassUnins.log"))+L"}";
             const std::wstring init=L"{\"type\":\"init\",\"appMode\":\"unins\",\"locale\":"+Q(IsRu()?L"ru":L"en")+L",\"ui\":"+ui+L"}";
-            if (FAILED(web_->PostWebMessageAsJson(init.c_str()))) return;
-            initSent_=true;
+            if (!webState_.SendInit(web_,init)) return;
         }
         std::wstring status,error,report; int progress;bool themeFallback=false;
         { std::lock_guard<std::mutex> lock(dataMutex_); status=status_; error=error_; report=holdReport_; progress=progress_; themeFallback=savedThemeFallbackWarning_; }
-        const std::wstring finishWarnings=themeFallback?L"[{\"title\":"+Q(T(L"Стандартная тема записана в реестр",L"Standard theme configured in the registry"))+
-            L",\"detail\":"+Q(T(L"В отдельных профилях оформление обновится при следующем входе. Немедленное переключение работающего сеанса не подтверждено.",L"Some profiles will apply it at next sign-in. An immediate switch in a running session was not confirmed."))+L"}]":L"[]";
-        const std::wstring json=L"{\"type\":\"state\",\"page\":"+Q(WebPage())+
+        const std::wstring finishWarnings=themeFallback?L"[{\"title\":"+Q(T(L"Стандартная тема включится позже",L"The standard theme will turn on later"))+
+            L",\"detail\":"+Q(T(L"У некоторых пользователей стандартная тема Windows включится после следующего входа в систему. Если окна выглядят неправильно уже сейчас, выйдите из системы и войдите снова.",L"For some users, the standard Windows theme turns on after their next sign-in. If windows look wrong right now, sign out and sign back in."))+L"}]":L"[]";
+        std::wstring json=L"{\"type\":\"state\",\"page\":"+Q(WebPage())+
             L",\"finishWarnings\":"+finishWarnings+L",\"components\":"+ComponentsJson()+L",\"componentsWarning\":"+Q(Warning())+
             L",\"status\":"+Q(status)+L",\"errorReason\":"+Q(error)+L",\"holdReport\":"+Q(report)+
             L",\"monitorRisk\":"+(monitorUnknown_.load()?L"true":L"false")+
-            L",\"monitorRiskTitle\":"+Q(T(L"Выгрузка модулей не подтверждена",L"Module unloading is not verified"))+
+            L",\"monitorRiskTitle\":"+Q(T(L"Не удалось проверить, освобождены ли модули Glass",L"Couldn't confirm that Glass modules are released"))+
             L",\"monitorRiskBody\":"+Q(report)+
-            L",\"settingsRiskBody\":"+Q(SettingsRiskText())+L",\"unlockActive\":false,\"progress\":"+std::to_wstring(progress)+L"}";
-        if (json==webState_) return;
-        if (SUCCEEDED(web_->PostWebMessageAsJson(json.c_str()))) webState_=json;
+            L",\"unlockActive\":false,\"progress\":"+std::to_wstring(progress)+L"}";
+        webState_.SendState(web_,std::move(json));
     }
     void SetPage(Page page) {
         page_=page;
@@ -719,7 +699,7 @@ private:
         WizardTheme::ApplyDarkWindowChrome(window);
         WizardTheme::SetSystemCloseEnabled(window,!(page==Page::Removing));
         SetWindowTextW(back_,page==Page::UnlockModules?T(L"Продолжить на свой риск",L"Continue at risk"):page==Page::Cleanup?T(L"Назад",L"Back"):T(L"Выбрать всё",L"Select all"));
-        SetWindowTextW(next_,page==Page::SettingsRisk?T(L"Продолжить на свой риск",L"Continue at risk"):(select || page==Page::Cleanup)?T(L"Удалить",L"Remove"):
+        SetWindowTextW(next_,(select || page==Page::Cleanup)?T(L"Удалить",L"Remove"):
             page==Page::UnlockModules?T(L"Повторить",L"Retry"):
             page==Page::UnlockProcesses?T(L"Разблокировать",L"Unlock"):T(L"Закрыть",L"Close"));
         ShowWindow(back_,(page==Page::UnlockModules || page==Page::Cleanup || (select&&!webReady_))?SW_SHOWNA:SW_HIDE);
@@ -727,12 +707,10 @@ private:
         ShowWindow(cancel_,!terminal && page!=Page::Removing?SW_SHOWNA:SW_HIDE);
         EnableWindow(next_,!select || selected_.Any()||selected_.cleanupSettings);
         EnableWindow(cancel_,!cancelRequested_.load());
-        if (page==Page::SettingsRisk) {
-            SendMessageW(window,DM_SETDEFID,IDC_CANCEL,0);
-            SetFocus(cancel_);
-        } else if (hold) SendMessageW(window,DM_SETDEFID,IDC_NEXT,0);
+        if (hold) SendMessageW(window,DM_SETDEFID,IDC_NEXT,0);
         Layout(); ShowNativeChecks();
-        if (controller_) controller_->put_IsVisible(webReady_?TRUE:FALSE);
+        web_.SetVisible(webReady_);
+        UpdateErrorDetails();
         ShowWindow(webHost_,webReady_?SW_SHOWNA:SW_HIDE);
         SyncWeb(); InvalidateRect(window,nullptr,FALSE);
     }
@@ -767,54 +745,33 @@ private:
                 LogLine(L"Explicit CLI module-monitor risk accepted; unloading is not verified");return true;
             }
             const auto choice=AskUser(Page::UnlockModules,failed?T(
-                L"Доверенный совместимый Native недоступен или проверка модулей не удалась. Состояние модулей неизвестно. Установите подходящий GlassSettings и повторите проверку, явно продолжите на свой риск или отмените. Может потребоваться перезагрузка. Проверки MSI не отключены.",
-                L"Trusted compatible Native is unavailable or the module check failed. Module state is unknown. Install matching GlassSettings and retry, explicitly continue at risk, or cancel. A restart may be required. MSI checks remain enabled."):
+                L"Для этой проверки нужен GlassSettings подходящей разрядности, но он не установлен или проверка не удалась. Модули Glass могут оставаться загруженными в запущенные программы. Установите подходящий GlassSettings и повторите проверку — или продолжите на свой риск: может понадобиться перезагрузка, а запущенные программы могут работать со сбоями.",
+                L"This check needs GlassSettings of the matching bitness, but it isn't installed or the check failed. Glass modules may still be loaded in running applications. Install the matching GlassSettings and retry — or continue at your own risk: a restart may be needed, and running applications may malfunction."):
                 GlassInstallUnlock::FormatHolders(holders));
             if(choice==Action::Cancel){cancelRequested_.store(true);return false;}
             if(choice==Action::ContinueRisk){LogLine(L"Explicit GUI module-monitor risk accepted; unloading is not verified");return true;}
             // Retry never unloads modules or terminates their host processes.
         }
     }
-    unsigned SettingsRemovalRisk(const Selection& chosen) const noexcept {
-        return GlassProductPlan::SettingsRemovalRiskMask(chosen.settings64,chosen.settings32,
-            Msi::IsProductInstalled(Msi::kProductPlatformX64),Msi::IsProductInstalled(Msi::kProductPlatformX86),
-            chosen.x64,chosen.x86);
-    }
-    std::wstring SettingsRiskText() const {
-        std::wstring text=T(L"После удаления GlassSettings дальнейшая выгрузка соответствующей Platform останется без helper и контроля модулей. Это может привести к падению процессов.\n\n",
-            L"Removing GlassSettings leaves the matching Platform without its helper and module monitoring for subsequent unloading. Processes may crash.\n\n");
-        if (pendingSettingsRisk_&1u) text+=L"GlassSettings x64 ↔ Platform x64\n";
-        if (pendingSettingsRisk_&2u) text+=L"GlassSettings x86 ↔ Platform x86\n";
-        text+=T(L"\nДля удаления всего комплекта сначала удалите Platform, затем GlassSettings, либо отмените эту операцию и откройте «Изменить» для общего плана обслуживания.\n\nПродолжить удаление только выбранных продуктов на свой риск?",
-            L"\nTo remove the whole installation, remove Platform first, then GlassSettings; or cancel and use Modify for a shared maintenance plan.\n\nContinue removing only the selected products at your own risk?");
-        return text;
-    }
-    bool ConfirmSettingsRemovalRisk(const Selection& chosen) {
-        const unsigned risk=SettingsRemovalRisk(chosen);
-        if (!risk || args_.acceptSettingsRemovalRisk || !(risk & ~confirmedSettingsRisk_)) return true;
-        pendingSettingsRisk_=risk;
-        SetPage(Page::SettingsRisk);
-        return false;
-    }
     int RunOfficialOpenGlassRemoval(const Selection& chosen) {
         if(chosen.x64||chosen.x86||chosen.settings||chosen.settings64||chosen.settings32||
            chosen.secureUxTheme||chosen.cleanupSettings) {
-            SetError(T(L"Пока удаляйте OpenGlass отдельно от других продуктов, без очистки пользовательских данных. Продукты не изменены.",
-                L"For now, remove OpenGlass separately from other products, without user-data cleanup. Products were not changed."));
+            SetError(T(L"OpenGlass нужно удалять отдельно: не отмечайте вместе с ним другие продукты и очистку данных. Ничего не изменено.",
+                L"OpenGlass must be removed on its own: don't select other products or data cleanup together with it. Nothing was changed."));
             return ERROR_INSTALL_PACKAGE_REJECTED;
         }
         if(MsiQueryProductStateW(Msi::kProductOpenGlass)!=INSTALLSTATE_UNKNOWN||
            MsiQueryProductStateW(Msi::kLegacyOpenGlass)!=INSTALLSTATE_UNKNOWN||
            GlassOpenGlassFiles::HasReceipt(openGlassDir_)) {
-            SetError(T(L"Обнаружена старая тестовая установка OpenGlass. Удалите её прежним деинсталлятором перед проверкой нового маршрута; миграции не выполняются.",
-                L"A retired test OpenGlass installation was found. Remove it with its previous uninstaller before testing the new route; no migration is performed."));
+            SetError(T(L"Найдена устаревшая установка OpenGlass от предыдущих версий GlassPlatform. Удалите её деинсталлятором той версии, затем повторите. Ничего не изменено.",
+                L"An outdated OpenGlass installation from earlier GlassPlatform versions was found. Remove it with that version's uninstaller, then try again. Nothing was changed."));
             return ERROR_INSTALL_PACKAGE_REJECTED;
         }
         GlassOpenGlassInstall::Record current;std::wstring detail;
         if(!GlassOpenGlassInstall::Query(current,detail)||!current.installed||
            !GlassOpenGlassInstall::Same(officialOpenGlass_,current)||GlassOpenGlassFiles::HasReceipt(current.directory)) {
-            SetError(T(L"Штатная установка OpenGlass недоступна или изменилась. Удаление не начато. ",
-                L"The official OpenGlass installation is unavailable or changed. Removal was not started. ")+detail);
+            SetError(T(L"OpenGlass не найден или изменился после запуска деинсталлятора. Удаление не начато — запустите деинсталлятор заново. ",
+                L"OpenGlass was not found or changed after the uninstaller started. Removal was not started — run the uninstaller again. ")+detail);
             return ERROR_INSTALL_PACKAGE_REJECTED;
         }
         // Same atomic close/cancel boundary as the MSI route. The shared
@@ -825,37 +782,28 @@ private:
             return ERROR_INSTALL_USEREXIT;
         removalStarted_.store(true,std::memory_order_release);
         if(window)PostMessageW(window,kWorkerHold,static_cast<WPARAM>(Page::Removing),0);
-        SetStatus(T(L"OpenGlass: штатное удаление…",L"OpenGlass: official uninstall…"),1000);
+        SetStatus(T(L"Удаление OpenGlass…",L"Removing OpenGlass…"),1000);
         DWORD code=ERROR_INSTALL_FAILURE;
         const bool ran=GlassOpenGlassPackage::RunUninstaller(current,code,detail);
         GlassOpenGlassInstall::Record after;std::wstring inventoryError;
         const bool absent=GlassOpenGlassInstall::Query(after,inventoryError)&&!after.installed;
         if(!ran||(code!=ERROR_SUCCESS&&code!=ERROR_SUCCESS_REBOOT_REQUIRED)||!absent) {
-            SetError(T(L"Штатное удаление OpenGlass не подтверждено. Его состояние могло измениться; автоматический откат не выполнялся. ",
-                L"Official OpenGlass removal was not confirmed. Its state may have changed; no automatic rollback was performed. ")+detail+L" "+inventoryError);
+            SetError(T(L"Не удалось убедиться, что OpenGlass удалён: удаление могло пройти частично, и прежнее состояние не восстановлено. Перезагрузите компьютер и запустите деинсталлятор снова. ",
+                L"Couldn't confirm that OpenGlass was removed: removal may be partial, and the previous state was not restored. Restart the computer and run the uninstaller again. ")+detail+L" "+inventoryError);
             return code==ERROR_SUCCESS||code==ERROR_SUCCESS_REBOOT_REQUIRED?ERROR_INSTALL_FAILURE:static_cast<int>(code);
         }
         if(code==ERROR_SUCCESS_REBOOT_REQUIRED)(void)GlassMaintenanceReboot::Pinned(true);
         SetStatus(code==ERROR_SUCCESS_REBOOT_REQUIRED?
             T(L"OpenGlass удалён. Требуется перезагрузка Windows.",L"OpenGlass removed. Restart Windows to finish."):
-            T(L"OpenGlass удалён. Параметры реестра сохранены; пакеты пресетов удалены.",L"OpenGlass removed. Registry settings were preserved; preset packages were removed."),10000);
+            T(L"OpenGlass удалён. Его настройки сохранены на случай повторной установки.",L"OpenGlass removed. Its settings are kept in case you reinstall it."),10000);
         return static_cast<int>(code);
     }
     int RunOperation(Selection chosen) {
         if(chosen.openGlass)return RunOfficialOpenGlassRemoval(chosen);
         if (chosen.cleanupSettings && (args_.silent || !cleanupReviewed_ || !RemovesAllInstalled(chosen) || AnyRegisteredProduct(&chosen))) {
-            SetError(T(L"Очистка не разрешена: требуется явный выбор на странице полного удаления.",
-                L"Cleanup refused: an explicit choice on the full-removal page is required."));
+            SetError(T(L"Очистку данных можно включить только при удалении всех продуктов, отметив её на отдельной странице. Ничего не изменено.",
+                L"Data cleanup can be turned on only when removing all products, by selecting it on its own page. Nothing was changed."));
             return ERROR_INSTALL_PACKAGE_REJECTED;
-        }
-        // Re-read presence at the execution boundary: a Platform registered after
-        // the dialog must not inherit consent for a different architecture.
-        const unsigned risk=SettingsRemovalRisk(chosen);
-        if (!args_.acceptSettingsRemovalRisk && (risk & ~confirmedSettingsRisk_)) {
-            LogLine(L"GlassSettings removal refused: matching Platform retained; explicit risk consent required. CLI: --accept-settings-removal-risk");
-            SetError(T(L"Удаление GlassSettings не начато: соответствующая Platform останется без helper. Используйте «Изменить» или явно подтвердите риск.",
-                L"GlassSettings removal did not start: the matching Platform would lose its helper. Use Modify or explicitly accept the risk."));
-            return ERROR_INSTALL_USEREXIT;
         }
         GlassInstallUtil::InstallRoots current;
         const bool rootsNow=GlassInstallUtil::ResolveInstallRoots(current);
@@ -866,8 +814,8 @@ private:
         if (!rootsKnown_ || !rootsNow || !same64 || !sameOg ||
             !GlassInstallUtil::SameInstallPath(current.x86,x86Dir_)) {
             LogLine(L"Installation roots unavailable or changed; removal stopped");
-            SetError(T(L"Не удалось определить неизменившиеся пути установки. Пакеты не удалены; сохраните журнал.",
-                L"Could not resolve unchanged installation paths. No packages were removed; save the log."));
+            SetError(T(L"Папки установленных продуктов изменились или не найдены. Ничего не удалено — запустите деинсталлятор заново.",
+                L"Folders of installed products changed or were not found. Nothing was removed — run the uninstaller again."));
             return 9;
         }
         // MsiConfigureProductEx uninstalls the MSI's registered file paths,
@@ -878,14 +826,14 @@ private:
         if(chosen.secureUxTheme && installed_.settings) {
             std::wstring detail;
             if(!cleanupProfiles.PreflightStyles(detail)) {
-                SetError(T(L"SecureUxTheme сохранён: подготовка визуальных стилей всех профилей не подтверждена. ",L"SecureUxTheme retained: visual-style preparation for every profile is unverified. ")+detail);
+                SetError(T(L"SecureUxTheme не удалён: не удалось подготовить возврат стандартной темы у всех пользователей. ",L"SecureUxTheme was not removed: couldn't prepare switching every user back to the standard theme. ")+detail);
                 return ERROR_INSTALL_FAILURE;
             }
         }
         if(chosen.cleanupSettings) {
             std::wstring detail;
             if(!cleanupProfiles.PreflightCleanup(detail)) {
-                SetError(T(L"Очистка всех профилей недоступна. Закройте другие сеансы и повторите: ",L"All-profile cleanup is unavailable. Close other sessions and retry: ")+detail);
+                SetError(T(L"Не удалось получить доступ к данным всех пользователей. Попросите других пользователей выйти из системы и повторите. Подробности: ",L"Couldn't access every user's data. Ask other users to sign out and try again. Details: ")+detail);
                 return ERROR_ACCESS_DENIED;
             }
         }
@@ -930,16 +878,16 @@ private:
         if (chosen.openGlass&&!fileOpenGlass) probes.push_back({Msi::kProductOpenGlass,openGlassDir_,{}});
         SetStatus(T(L"Проверка путей установленных продуктов…",L"Checking installed product paths…"),100);
         if (!GlassInstallUtil::CreateSecureTempDirectory(L"GlassUninsCheck",workspace.directory)) {
-            SetError(T(L"Не удалось подготовить проверку MSI. Пакеты не удалены.",L"Could not prepare the MSI check. No packages were removed."));
+            SetError(T(L"Не удалось подготовить проверку установленных продуктов. Ничего не удалено.",L"Could not prepare the check of installed products. Nothing was removed."));
             return 9;
         }
         const auto refuse=[&](const Probe& p,const std::wstring& detail,bool beforeChanges=true) {
             LogLine(std::wstring(L"Refusing MSI removal: ")+p.code+L" "+detail);
             std::wstring message=beforeChanges
-                ? T(L"Путь или контекст ранее установленного MSI нельзя безопасно проверить. Удаление остановлено до изменений. Сохраните журнал и обратитесь за помощью; не удаляйте файлы вручную.",
-                    L"The installed MSI path or context cannot be verified safely. Removal stopped before making changes. Save the log and ask for help; do not delete files manually.")
-                : T(L"Регистрация MSI изменилась во время удаления; некоторые продукты могли уже быть удалены. Сохраните журнал и обратитесь за помощью; не удаляйте файлы вручную.",
-                    L"An MSI registration changed during removal; some products may already have been removed. Save the log and ask for help; do not delete files manually.");
+                ? T(L"Не удалось убедиться, что установленный продукт находится там, где ожидается. Удаление остановлено, ничего не изменено. Сохраните журнал и обратитесь за помощью; не удаляйте файлы вручную.",
+                    L"Couldn't confirm that an installed product is where it is expected to be. Removal stopped; nothing was changed. Save the log and ask for help; do not delete files manually.")
+                : T(L"Сведения об установленном продукте изменились во время удаления; часть продуктов могла уже быть удалена. Сохраните журнал и обратитесь за помощью; не удаляйте файлы вручную.",
+                    L"Information about an installed product changed during removal; some products may already have been removed. Save the log and ask for help; do not delete files manually.");
             message+=L"\r\n";message+=p.code;if (!detail.empty()) message+=L"\r\n"+detail;
             SetError(message);
             return false;
@@ -1032,8 +980,8 @@ private:
             std::wstring detail;
             if(!GlassInstallRemoval::PrepareSettingsShortcutRetarget(settingsShortcut,keptSettingsProbe->root,
                 x64Dir_,x86Dir_,workspace.directory,IsRu(),detail)) {
-                SetError(T(L"Не удалось безопасно подготовить ярлык оставшегося Settings. Пакеты не удалены. ",
-                    L"Could not safely prepare the retained Settings shortcut. No packages were removed. ")+detail);
+                SetError(T(L"Не удалось безопасно подготовить ярлык оставшегося Settings. Ничего не удалено. ",
+                    L"Could not safely prepare the retained Settings shortcut. Nothing was removed. ")+detail);
                 return ERROR_INSTALL_PACKAGE_REJECTED;
             }
         }
@@ -1064,8 +1012,8 @@ private:
             }
             if (!helperReady) {
                 LogLine(L"Shell helper for the selected root is missing or incompatible; no packages removed");
-                SetError(T(L"Не удалось подготовить компонент регистрации оболочки для выбранного пути. Пакеты не удалены.",
-                    L"Could not prepare the shell registration component for the selected path. No packages were removed."));
+                SetError(T(L"Не удалось подготовить компонент регистрации оболочки для выбранного пути. Ничего не удалено.",
+                    L"Could not prepare the shell registration component for the selected path. Nothing was removed."));
                 return 9;
             }
         }
@@ -1075,8 +1023,8 @@ private:
         if ((stop64&&!GlassInstallHost::QueryGlassPlatformRunning(GP::PlatformArch::X64,prior64)) ||
             (stop32&&!GlassInstallHost::QueryGlassPlatformRunning(GP::PlatformArch::X86,prior86))) {
             LogLine(L"Could not inspect platform mutex state before removal");
-            SetError(T(L"Не удалось проверить состояние платформы. Пакеты не удалены.",
-                L"Could not inspect the platform state. No packages were removed."));
+            SetError(T(L"Не удалось проверить состояние платформы. Ничего не удалено.",
+                L"Could not inspect the platform state. Nothing was removed."));
             return 10;
         }
         const bool enabled64=stop64 && GP::QueryGlassAutorunUiState(GP::PlatformArch::X64)!=GP::AutorunUiState::Disabled;
@@ -1101,8 +1049,8 @@ private:
         if (stopOg && (!GlassInstallHost::QueryOpenGlassServiceStartType(ogServiceExisted,ogStartType) ||
             !GlassInstallUtil::QueryOpenGlassTasks(ogTasks) ||
             !GlassInstallUtil::QueryOpenGlassRunning(priorOg,&ogTasks))) {
-            SetError(T(L"Не удалось проверить состояние OpenGlass. Пакеты не удалены.",
-                L"Could not inspect OpenGlass. No packages were removed."));
+            SetError(T(L"Не удалось проверить состояние OpenGlass. Ничего не удалено.",
+                L"Could not inspect OpenGlass. Nothing was removed."));
             return 10;
         }
         if (stopOg && (ogServiceExisted || ogTasks.found)) {
@@ -1183,8 +1131,8 @@ private:
         };
         auto cancelledResult=[&]() -> int {
             if (restoreRemaining()) return ERROR_INSTALL_USEREXIT;
-            SetError(T(L"Пакеты не удалены, но не удалось перезапустить прежние компоненты.",
-                L"No packages were removed, but previously running components could not be restarted."));
+            SetError(T(L"Ничего не удалено, но остановленные модули Glass не удалось запустить снова. Перезагрузите компьютер.",
+                L"Nothing was removed, but the stopped Glass modules could not be started again. Restart the computer."));
             return 17;
         };
         // Only an explicit SecureUxTheme removal prepares styles/deactivates the
@@ -1195,11 +1143,11 @@ private:
                 &cancelRequested_,&stopAttempted64,&stopAttempted86,&prior64,&prior86,chosen.cleanupSettings?36u:((chosen.settings64?4u:0u)|(chosen.settings32?32u:0u)))) {
             if (cancelRequested_.load()) return cancelledResult();
             if (!restoreRemaining()) {
-                SetError(T(L"Не удалось остановить компоненты или восстановить их прежнее состояние. Пакеты не удалены.",
-                    L"Could not stop components or restore their previous state. No packages were removed."));
+                SetError(T(L"Не удалось остановить компоненты или восстановить их прежнее состояние. Ничего не удалено.",
+                    L"Could not stop components or restore their previous state. Nothing was removed."));
                 return 17;
             }
-            SetError(T(L"Не удалось остановить компоненты. Пакеты не удалены.",L"Could not stop components. No packages were removed."));
+            SetError(T(L"Не удалось остановить компоненты. Ничего не удалено.",L"Could not stop components. Nothing was removed."));
             return 10;
         }
         if (cancelRequested_.load()) return cancelledResult();
@@ -1220,15 +1168,15 @@ private:
         if(keptSettingsProbe) {
             std::wstring detail;
             if(!recheckKeptSettings(detail,nullptr)) {
-                SetError(T(L"Состояние сохраняемого Settings изменилось. Пакеты не удалены. ",
-                    L"The retained Settings state changed. No packages were removed. ")+detail);
+                SetError(T(L"Состояние сохраняемого Settings изменилось. Ничего не удалено. ",
+                    L"The retained Settings state changed. Nothing was removed. ")+detail);
                 (void)restoreRemaining();return ERROR_INSTALL_PACKAGE_REJECTED;
             }
             if(keptSettingsProbe->installed) {
                 workspace.preserve=true;
                 if(!GlassInstallRemoval::Commit(settingsShortcut,IsRu(),detail)) {
-                    SetError(T(L"Не удалось переназначить ярлык Settings. Пакеты не удалены. ",
-                        L"Could not retarget the Settings shortcut. No packages were removed. ")+detail);
+                    SetError(T(L"Не удалось переназначить ярлык Settings. Ничего не удалено. ",
+                        L"Could not retarget the Settings shortcut. Nothing was removed. ")+detail);
                     (void)restoreRemaining();return ERROR_INSTALL_FAILURE;
                 }
                 shortcutCommitted=true;
@@ -1245,8 +1193,8 @@ private:
             std::wstring sutError;
             if (!GlassInstallUtil::InvokeSecureUxThemeDeactivate(x64Dir_,x86Dir_,&sutRun,&sutError)) {
                 LogLine(L"SecureUxTheme deactivation failed: "+sutError);
-                SetError(T(L"Не удалось отключить SecureUxTheme. Пакеты не удалены.",
-                    L"Could not deactivate SecureUxTheme. No packages were removed."));
+                SetError(T(L"Не удалось отключить SecureUxTheme. Ничего не удалено.",
+                    L"Could not deactivate SecureUxTheme. Nothing was removed."));
                 (void)restoreRemaining();return 18;
             } else if (sutRun.ran) {
                 secureUxThemeReboot=sutRun.rebootRequired;
@@ -1383,8 +1331,8 @@ private:
             });
         if(!result.ok)return static_cast<int>(result.error);
         if(!arpRefresh.Refresh()) {
-            SetError(T(L"Выбранные MSI обработаны, но не все записи обслуживания оставшихся продуктов удалось обновить. Подробности в журнале.",
-                L"Selected MSI operations completed, but some remaining maintenance entries could not be refreshed. See the log."));
+            SetError(T(L"Выбранные продукты удалены, но не удалось обновить сведения об оставшихся продуктах в списке «Установленные приложения» Windows. Подробности — в журнале.",
+                L"The selected products were removed, but the entries of the remaining products in Windows \"Installed apps\" could not be updated. See the log for details."));
             (void)restoreRemaining();return ERROR_INSTALL_FAILURE;
         }
         if (chosen.settings && !Msi::IsProductInstalled(Msi::kProductSettingsX64) &&
@@ -1441,16 +1389,16 @@ private:
         std::wstring complete=T(L"Удаление завершено.",L"Uninstall complete.");
         if (cleanupProfiles.SavedThemeRegistryFallback()) {
             {std::lock_guard<std::mutex> lock(dataMutex_);savedThemeFallbackWarning_=true;}
-            complete+=T(L" Для сохранённых тем стандартная тема записана в реестр профилей. В отдельных сеансах оформление обновится при следующем входе; немедленное переключение не подтверждено.",
-                L" Saved-theme links were reset to the standard theme in profile registries. Some sessions will apply it at next sign-in; an immediate live switch was not confirmed.");
+            complete+=T(L" У некоторых пользователей стандартная тема Windows включится после следующего входа в систему.",
+                L" For some users, the standard Windows theme turns on after their next sign-in.");
             LogLine(L"Saved theme cleanup: registry fallback used; live session appearance not claimed as reset");
         }
         if (secureUxThemeReboot)
-            complete+=T(L" Требуется перезагрузка, чтобы завершить очистку SecureUxTheme.",
-                L" Restart Windows to finish the SecureUxTheme cleanup.");
+            complete+=T(L" Перезагрузите компьютер, чтобы завершить удаление SecureUxTheme.",
+                L" Restart the computer to finish removing SecureUxTheme.");
         if (secureUxThemeThemeNote)
-            complete+=T(L" Пользовательский визуальный стиль не восстановлен: после перезагрузки Windows применит стандартный.",
-                L" The custom visual style was not restored: Windows will use the standard one after restart.");
+            complete+=T(L" Сторонняя тема оформления отключена: после перезагрузки будет использоваться стандартная тема Windows.",
+                L" The third-party visual style was turned off: the standard Windows theme will be used after a restart.");
         SetStatus(complete,10000);
         return (secureUxThemeReboot || msiRebootRequired) ? ERROR_SUCCESS_REBOOT_REQUIRED : ERROR_SUCCESS;
         };
@@ -1494,7 +1442,6 @@ private:
             SetPage(Page::Cleanup);
             return;
         }
-        if (!ConfirmSettingsRemovalRisk(chosen)) return;
         SetPage(Page::Stopping);
         try {
             worker_=std::thread([this,chosen]() {
@@ -1525,8 +1472,8 @@ private:
             EnableWindow(cancel_,FALSE);
             return;
         }
-        if (page_==Page::Cleanup || page_==Page::SettingsRisk) {
-            cleanupReviewed_=false; selected_.cleanupSettings=false; pendingSettingsRisk_=0;
+        if (page_==Page::Cleanup) {
+            cleanupReviewed_=false; selected_.cleanupSettings=false;
             SetPage(Page::Select); return;
         }
         DestroyWindow(window);
@@ -1550,15 +1497,8 @@ private:
 
         NormalizeSelection(); EnableWindow(next_,selected_.Any()||selected_.cleanupSettings); ShowNativeChecks(); SyncWeb(); InvalidateRect(window,nullptr,FALSE);
     }
-    HRESULT HandleWebMessage(ICoreWebView2WebMessageReceivedEventArgs* args) {
-        if (closing_ || !args) return S_OK;
-        LPWSTR rawSource=nullptr;
-        if (FAILED(args->get_Source(&rawSource))) return S_OK;
-        const std::wstring source=rawSource?rawSource:L""; CoTaskMemFree(rawSource);
-        if (source!=std::wstring(WizardAssets::kDocumentUrl)+L"?lang=ru-RU" && source!=std::wstring(WizardAssets::kDocumentUrl)+L"?lang=en-US") return S_OK;
-        LPWSTR raw=nullptr;
-        if (FAILED(args->TryGetWebMessageAsString(&raw)) || !raw) { CoTaskMemFree(raw); return S_OK; }
-        const std::wstring message(raw); CoTaskMemFree(raw);
+    HRESULT HandleWebMessage(const std::wstring& message) {
+        if (closing_) return S_OK;
         if (message==L"cancel") { RequestClose(); return S_OK; }
         if (message==L"ready") { bridgeReady_=true; SyncWeb(); return S_OK; }
         if(message==L"components:select-all" && page_==Page::Select) {
@@ -1575,9 +1515,10 @@ private:
         return S_OK;
     }
     void WebFailure() {
-        webReady_=false; bridgeReady_=false; initSent_=false; webState_.clear(); webFailed_=true;
+        webReady_=false; bridgeReady_=false; webState_.Reset(); webFailed_=true;
         if (window) KillTimer(window,kTimer);
-        if (controller_) controller_->put_IsVisible(FALSE);
+        web_.SetVisible(false);
+        UpdateErrorDetails();
         ShowWindow(webHost_,SW_HIDE);
         ShowWindow(back_,(page_==Page::Select || page_==Page::Cleanup)?SW_SHOWNA:SW_HIDE);
         ShowNativeChecks(); InvalidateRect(window,nullptr,FALSE);
@@ -1587,104 +1528,28 @@ private:
         const bool available=SUCCEEDED(GetAvailableCoreWebView2BrowserVersionString(nullptr,&version)) && version && *version;
         CoTaskMemFree(version);
         if (!available) { WebFailure(); return; }
-        PWSTR local=nullptr;
-        if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData,0,nullptr,&local)) || !local) { WebFailure(); return; }
-        const std::wstring folder=std::wstring(local)+L"\\GlassPlatform\\UninstallerWebView2";
-        CoTaskMemFree(local);
-        const int result=SHCreateDirectoryExW(window,folder.c_str(),nullptr);
-        if (result!=ERROR_SUCCESS && result!=ERROR_ALREADY_EXISTS && result!=ERROR_FILE_EXISTS) { WebFailure(); return; }
-        const HRESULT hr=CreateCoreWebView2EnvironmentWithOptions(nullptr,folder.c_str(),nullptr,
-            Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
-            [this](HRESULT result,ICoreWebView2Environment* env) -> HRESULT {
-                if (closing_ || !IsWindow(window)) return S_OK;
-                if (FAILED(result) || !env) { WebFailure(); return S_OK; }
-                environment_=env;
-                const HRESULT create=environment_->CreateCoreWebView2Controller(webHost_,
-                    Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
-                    [this](HRESULT result2,ICoreWebView2Controller* ctrl) -> HRESULT {
-                        if (closing_ || !IsWindow(window)) { if (ctrl) ctrl->Close(); return S_OK; }
-                        if (FAILED(result2) || !ctrl) { WebFailure(); return S_OK; }
-                        controller_=ctrl;
-                        if (FAILED(ctrl->get_CoreWebView2(web_.ReleaseAndGetAddressOf())) || !web_) { WebFailure(); return S_OK; }
-                        ConfigureWebView(); return S_OK;
-                    }).Get());
-                if (FAILED(create)) WebFailure();
-                return S_OK;
-            }).Get());
-        if (FAILED(hr)) WebFailure();
+        web_.Start(window,webHost_,gInstance,IsRu(),L"UninstallerWebView2",false,{
+            this,
+            [](void* context) { static_cast<Uninstaller*>(context)->OnWebReady(); },
+            [](void* context,HRESULT) { static_cast<Uninstaller*>(context)->WebFailure(); },
+            [](void* context,const std::wstring& message) { static_cast<Uninstaller*>(context)->HandleWebMessage(message); }
+        });
     }
-    void ConfigureWebView() {
-        controller_->put_IsVisible(FALSE);
-        ComPtr<ICoreWebView2Controller2> colored;
-        if (SUCCEEDED(controller_.As(&colored))) { COREWEBVIEW2_COLOR c{255,16,18,37}; colored->put_DefaultBackgroundColor(c); }
-        Layout();
-        ComPtr<ICoreWebView2Settings> settings;
-        if (SUCCEEDED(web_->get_Settings(&settings))) {
-            settings->put_AreDevToolsEnabled(FALSE); settings->put_AreDefaultContextMenusEnabled(FALSE);
-            settings->put_IsStatusBarEnabled(FALSE); settings->put_IsZoomControlEnabled(FALSE);
-            settings->put_AreDefaultScriptDialogsEnabled(FALSE);
-        }
-        if (FAILED(web_->AddWebResourceRequestedFilter(L"*",COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL))) { WebFailure(); return; }
-        if (FAILED(web_->add_WebResourceRequested(Callback<ICoreWebView2WebResourceRequestedEventHandler>(
-            [this](ICoreWebView2*,ICoreWebView2WebResourceRequestedEventArgs* args) -> HRESULT {
-                if (closing_) return S_OK;
-                ComPtr<ICoreWebView2WebResourceRequest> req;
-                if (FAILED(args->get_Request(&req))) return E_FAIL;
-                LPWSTR raw=nullptr; req->get_Uri(&raw); const std::wstring url=raw?raw:L""; CoTaskMemFree(raw);
-                const auto asset=WizardAssets::Resolve(url); const bool allowed=asset.id!=0;
-                ComPtr<IStream> stream;
-                if (allowed) { const auto data=Resource(asset.id); if (!data.data || !data.size) return E_FAIL; stream.Attach(SHCreateMemStream(data.data,data.size)); }
-                if (allowed && !stream) return E_OUTOFMEMORY;
-                std::wstring headers=L"Content-Type: "; headers+=allowed?asset.contentType:L"text/plain";
-                headers+=L"\r\nCache-Control: no-store\r\n";
-                if (asset.document) headers+=L"Content-Security-Policy: default-src 'none'; img-src https://glassplatform.invalid data:; font-src https://glassplatform.invalid; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'\r\n";
-                ComPtr<ICoreWebView2WebResourceResponse> response;
-                const HRESULT hr=environment_->CreateWebResourceResponse(stream.Get(),allowed?200:403,allowed?L"OK":L"Forbidden",headers.c_str(),&response);
-                return FAILED(hr)?hr:args->put_Response(response.Get());
-            }).Get(),&requestToken_))) { WebFailure(); return; }
-        web_->add_NavigationStarting(Callback<ICoreWebView2NavigationStartingEventHandler>(
-            [](ICoreWebView2*,ICoreWebView2NavigationStartingEventArgs* args) -> HRESULT {
-                LPWSTR raw=nullptr; args->get_Uri(&raw); const std::wstring url=raw?raw:L""; CoTaskMemFree(raw);
-                if (url!=std::wstring(WizardAssets::kDocumentUrl)+L"?lang=ru-RU" && url!=std::wstring(WizardAssets::kDocumentUrl)+L"?lang=en-US") args->put_Cancel(TRUE);
-                return S_OK;
-            }).Get(),&navToken_);
-        web_->add_NewWindowRequested(Callback<ICoreWebView2NewWindowRequestedEventHandler>(
-            [](ICoreWebView2*,ICoreWebView2NewWindowRequestedEventArgs* args) -> HRESULT { return args->put_Handled(TRUE); }).Get(),&popupToken_);
-        web_->add_PermissionRequested(Callback<ICoreWebView2PermissionRequestedEventHandler>(
-            [](ICoreWebView2*,ICoreWebView2PermissionRequestedEventArgs* args) -> HRESULT { return args->put_State(COREWEBVIEW2_PERMISSION_STATE_DENY); }).Get(),&permissionToken_);
-        if (FAILED(web_->add_WebMessageReceived(Callback<ICoreWebView2WebMessageReceivedEventHandler>(
-            [this](ICoreWebView2*,ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT { return HandleWebMessage(args); }).Get(),&messageToken_))) { WebFailure(); return; }
-        web_->add_NavigationCompleted(Callback<ICoreWebView2NavigationCompletedEventHandler>(
-            [this](ICoreWebView2*,ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT {
-                if (closing_) return S_OK;
-                BOOL success=FALSE; args->get_IsSuccess(&success);
-                if (!success) { WebFailure(); return S_OK; }
-                webReady_=true; ShowNativeChecks(); KillTimer(window,kTimer);
-                ShowWindow(back_,SW_HIDE);
-                controller_->put_IsVisible(TRUE); ShowWindow(webHost_,SW_SHOWNA); SyncWeb();
-                return S_OK;
-            }).Get(),&completedToken_);
-        const std::wstring url=std::wstring(WizardAssets::kDocumentUrl)+(IsRu()?L"?lang=ru-RU":L"?lang=en-US");
-        if (FAILED(web_->Navigate(url.c_str()))) WebFailure();
+    void OnWebReady() {
+        webReady_=true; ShowNativeChecks(); KillTimer(window,kTimer);
+        ShowWindow(back_,SW_HIDE);
+        web_.SetVisible(true); ShowWindow(webHost_,SW_SHOWNA); SyncWeb();
+    }
+    void UpdateErrorDetails() {
+        if (page_!=Page::Error || !webFailed_) { errorDetails_.Update(false,{}); return; }
+        std::wstring error;
+        { std::lock_guard<std::mutex> lock(dataMutex_); error=error_; }
+        errorDetails_.Update(true,error);
     }
     void DrawTextBlock(HDC dc,const std::wstring& text,RECT r,HFONT font,COLORREF color) {
         HGDIOBJ old=SelectObject(dc,font); SetBkMode(dc,TRANSPARENT); SetTextColor(dc,color);
         DrawTextW(dc,text.c_str(),static_cast<int>(text.size()),&r,DT_LEFT|DT_WORDBREAK|DT_NOPREFIX);
         SelectObject(dc,old);
-    }
-    void DrawLoadingSpinner(HDC dc) {
-        const double phase=static_cast<double>(GetTickCount64()%1200)/1200.0;
-        const Gdiplus::REAL x=static_cast<Gdiplus::REAL>(Scale(473));
-        const Gdiplus::REAL y=static_cast<Gdiplus::REAL>(Scale(243));
-        const Gdiplus::REAL diameter=static_cast<Gdiplus::REAL>(Scale(54));
-        Gdiplus::Graphics g(dc);
-        g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
-        Gdiplus::Pen track(Gdiplus::Color(140,77,79,111),static_cast<Gdiplus::REAL>(Scale(3)));
-        Gdiplus::Pen arc(Gdiplus::Color(255,193,180,255),static_cast<Gdiplus::REAL>(Scale(3)));
-        arc.SetStartCap(Gdiplus::LineCapRound); arc.SetEndCap(Gdiplus::LineCapRound);
-        g.DrawEllipse(&track,x,y,diameter,diameter);
-        g.DrawArc(&arc,x,y,diameter,diameter,
-            static_cast<Gdiplus::REAL>(-90.0+phase*360.0),static_cast<Gdiplus::REAL>(268.0));
     }
     void Paint() {
         PAINTSTRUCT ps{}; HDC dc=BeginPaint(window,&ps);
@@ -1698,24 +1563,24 @@ private:
         if (!webReady_ && !webFailed_) {
             // Загрузка HTML-контента: тот же индикатор, что и в установщике.
             DrawTextBlock(dc,L"GlassPlatform",Box(48,32,400,28),font_,RGB(245,244,252));
-            DrawLoadingSpinner(dc);
+            WizardUi::DrawLoadingSpinner(dc,dpi_,true);
             EndPaint(window,&ps);
             return;
         }
         if (!webReady_) {
             DrawTextBlock(dc,L"GlassPlatform",Box(48,32,400,28),font_,RGB(245,244,252));
-            const wchar_t* title=page_==Page::Cleanup?T(L"Добровольная очистка данных",L"Optional data cleanup"):page_==Page::SettingsRisk?T(L"GlassSettings: риск для Platform",L"GlassSettings: Platform risk"):page_==Page::Select?T(L"Выберите продукты для удаления",L"Select products to remove"):
-                page_==Page::UnlockModules?T(L"Модули заняты процессами",L"Processes are holding modules"):
+            const wchar_t* title=page_==Page::Cleanup?T(L"Очистка данных (по желанию)",L"Optional data cleanup"):page_==Page::Select?T(L"Выберите продукты для удаления",L"Select products to remove"):
+                page_==Page::UnlockModules?T(L"Модули Glass заняты программами",L"Glass modules are in use by applications"):
                 page_==Page::UnlockProcesses?T(L"Процессы удерживают модули",L"Processes are holding modules"):
                 page_==Page::Cancelled?T(L"Удаление отменено",L"Uninstall cancelled"):
                 page_==Page::Complete?T(L"Удаление завершено",L"Uninstall complete"):
                 page_==Page::Error?T(L"Удаление не завершено",L"Uninstall did not finish"):
                 T(L"Удаление компонентов…",L"Removing components…");
             DrawTextBlock(dc,title,Box(48,94,890,55),heading_,RGB(245,244,252));
-            const std::wstring body=page_==Page::Cleanup?T(L"Будут удалены все выбранные продукты. По умолчанию пользовательские данные сохраняются. Очистка всех локальных профилей и принадлежащих продуктам общих параметров начнётся только после успешного удаления продуктов. Доступ профилей проверяется до любых изменений.",L"All selected products will be removed. User data is kept by default. Cleanup of all local profiles and product-owned shared settings runs only after successful product removal. Profile access is checked before any changes."):page_==Page::SettingsRisk?SettingsRiskText():page_==Page::Select?Warning():
+            const std::wstring body=page_==Page::Cleanup?T(L"Все выбранные продукты будут удалены. Ваши настройки по умолчанию сохраняются. Если включить очистку, то после удаления продуктов будут стёрты и настройки GlassPlatform во всех профилях этого компьютера.",L"All selected products will be removed. Your settings are kept by default. If you turn on cleanup, GlassPlatform settings will also be erased from every profile on this computer after the products are removed."):page_==Page::Select?Warning():
                 page_==Page::UnlockModules || page_==Page::UnlockProcesses?report:
                 page_==Page::Error?error:status;
-            DrawTextBlock(dc,body,Box(48,page_==Page::Select?390:190,880,page_==Page::SettingsRisk?300:220),font_,RGB(196,198,219));
+            if (page_!=Page::Error || !errorDetails_.Get()) DrawTextBlock(dc,body,Box(48,page_==Page::Select?390:190,880,220),font_,RGB(196,198,219));
         }
         if (page_==Page::Stopping || page_==Page::Removing) {
             RECT track=Box(0,kHtmlHeight,kWidth,4); HBRUSH b=CreateSolidBrush(RGB(42,45,67)); FillRect(dc,&track,b); DeleteObject(b);
@@ -1728,8 +1593,7 @@ private:
     void Cleanup() {
         closing_=true;
         if (worker_.joinable()) { cancelRequested_.store(true); if (gate_) SetEvent(gate_); worker_.join(); }
-        if (controller_) controller_->Close();
-        web_.Reset(); controller_.Reset(); environment_.Reset();
+        web_.Close();
         for (HWND h:{back_,next_,cancel_}) WizardTheme::DetachButtonScope(h);
         WizardTheme::ResetButtonCache();
         if (font_) DeleteObject(font_); if (heading_) DeleteObject(heading_);
@@ -1744,7 +1608,7 @@ private:
         case kWorkerHold: if (!closing_) SetPage(static_cast<Page>(w)); return 0;
         case kWorkerFinished: FinishRemoval(); return 0;
         case WM_SIZE: Layout(); return 0;
-        case WM_MOVE: if (controller_) controller_->NotifyParentWindowPositionChanged(); return 0;
+        case WM_MOVE: web_.NotifyParentMoved(); return 0;
         case WM_DPICHANGED: {
             dpi_=HIWORD(w); const RECT* suggested=reinterpret_cast<const RECT*>(l);
             RECT r{0,0,Scale(kWidth),Scale(kHeight)};
@@ -1761,6 +1625,13 @@ private:
             }
             break;
         case WM_PAINT: Paint(); return 0;
+        case WM_CTLCOLORSTATIC:
+            if (reinterpret_cast<HWND>(l)==errorDetails_.Get()) {
+                HDC dc=reinterpret_cast<HDC>(w);
+                SetBkColor(dc,kDark); SetTextColor(dc,RGB(196,198,219));
+                return reinterpret_cast<LRESULT>(brush_);
+            }
+            break;
         case WM_CTLCOLORBTN: {
             HDC dc=reinterpret_cast<HDC>(w); HWND h=reinterpret_cast<HWND>(l);
             const bool footer=h==back_ || h==next_ || h==cancel_;
@@ -1795,11 +1666,6 @@ private:
             if (id==IDC_NEXT || id==IDOK) {
                 if (page_==Page::Cleanup) {
                     cleanupReviewed_=true;
-                    StartRemoval();
-                }
-                else if (page_==Page::SettingsRisk) {
-                    confirmedSettingsRisk_|=pendingSettingsRisk_;
-                    pendingSettingsRisk_=0;
                     StartRemoval();
                 }
                 else if (page_==Page::Select) StartRemoval();

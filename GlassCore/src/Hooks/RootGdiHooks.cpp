@@ -21,12 +21,17 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #include "CorePch.h"
+#include <Hooks/delphi/TPanelDraw.h>
+#include <Hooks/delphi/TButtonGroupsDraw.h>
+#include <Hooks/delphi/BomeMemoDraw.h>
+#include <GlassDelphiButtonGroups.h>
 #include <Hooks/RootGdiHooks.h>
 #include <Hooks/RootWindowHooks.h>
 #include <Core/Intercept/HookDispatcher.h>
 #include <Core/Intercept/IATRegistry.h>
 #include <Module/ModuleHandler.h>
 #include <Subsystems/RenderText.h>
+#include <Helpers/ThemeHelper.h>
 #include <Subsystems/PaintDispatcher.h>
 #include <GlassControlKind.h>
 #include <Subsystems/RootSwcaGradient.h>
@@ -36,6 +41,7 @@
 #include <DebugLog.h>
 
 
+#include <iterator>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -502,6 +508,45 @@ namespace GlassCore::Root
         BOOL WINAPI Root_MyGradientFill(HDC, PTRIVERTEX, ULONG, PVOID, ULONG, ULONG);
         BOOL WINAPI Root_MyTextOutW(HDC, int, int, LPCWSTR, int);
         int WINAPI Root_MyFillRect(HDC, const RECT*, HBRUSH);
+        HRESULT WINAPI Root_MyDelphiDrawThemeTextEx(HTHEME, HDC, int, int, LPCWSTR, int, DWORD, LPRECT, const DTTOPTS*);
+
+        BOOL WINAPI Root_MyDelphiGridText(HDC, int, int, UINT, const RECT*, LPCWSTR, UINT, const INT*);
+        int WINAPI Root_MyDelphiGridFill(HDC, const RECT*, HBRUSH);
+        HRESULT WINAPI Root_MyDelphiGridTheme(HTHEME, HDC, int, int, LPCRECT, LPCRECT);
+        DWORD WINAPI Root_MyGetSysColor(int);
+        int WINAPI Root_MyDelphiGroupText(HDC, LPWSTR, int, LPRECT, UINT, LPDRAWTEXTPARAMS);
+        int WINAPI Root_MyDelphiGroupFill(HDC, const RECT*, HBRUSH);
+        template <size_t slot> BOOL WINAPI Root_MyDelphiGroupGradient(HDC, PTRIVERTEX, ULONG, PVOID, ULONG, ULONG);
+        int WINAPI Root_MyBomeMemoText(HDC, LPCSTR, int, LPRECT, UINT);
+        HBRUSH WINAPI Root_MyBomeMemoBrush(const LOGBRUSH*);
+        DWORD WINAPI Root_MyBomeMemoColor(int);
+        int WINAPI Root_MyBomeMemoFill(HDC, const RECT*, HBRUSH);
+
+#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
+        int WINAPI VclProbeFill(HDC, const RECT*, HBRUSH);
+        BOOL WINAPI VclProbePatBlt(HDC, int, int, int, int, DWORD);
+        BOOL WINAPI VclProbeRect(HDC, int, int, int, int);
+        BOOL WINAPI VclProbeRoundRect(HDC, int, int, int, int, int, int);
+        BOOL WINAPI VclProbeBitBlt(HDC, int, int, int, int, HDC, int, int, DWORD);
+        BOOL WINAPI VclProbeText(HDC, int, int, UINT, const RECT*, LPCWSTR, UINT, const INT*);
+        int WINAPI VclProbeDrawText(HDC, LPCWSTR, int, LPRECT, UINT);
+        HRESULT WINAPI VclProbeTheme(HTHEME, HDC, int, int, LPCRECT, LPCRECT);
+        HBRUSH WINAPI VclProbeCreateBrush(COLORREF);
+        HGDIOBJ WINAPI VclProbeSelect(HDC, HGDIOBJ);
+        BOOL WINAPI VclProbeEllipse(HDC, int, int, int, int);
+        int WINAPI VclProbeDrawTextEx(HDC, LPWSTR, int, LPRECT, UINT, LPDRAWTEXTPARAMS);
+        HBRUSH WINAPI VclProbeCreateBrushIndirect(const LOGBRUSH*);
+        HRESULT WINAPI VclProbeThemeTextEx(HTHEME, HDC, int, int, LPCWSTR, int, DWORD, LPRECT, const DTTOPTS*);
+        BOOL WINAPI VclProbeStretchBlt(HDC, int, int, int, int, HDC, int, int, int, int, DWORD);
+        int WINAPI VclProbeDrawTextA(HDC, LPCSTR, int, LPRECT, UINT);
+        int WINAPI VclProbeDrawTextExA(HDC, LPSTR, int, LPRECT, UINT, LPDRAWTEXTPARAMS);
+        BOOL WINAPI VclProbeTextA(HDC, int, int, UINT, const RECT*, LPCSTR, UINT, const INT*);
+        BOOL WINAPI VclProbeTextOutA(HDC, int, int, LPCSTR, int);
+        BOOL WINAPI VclProbeTextOutW(HDC, int, int, LPCWSTR, int);
+        LONG WINAPI VclProbeTabbedTextOutA(HDC, int, int, LPCSTR, int, int, const INT*, int);
+        LONG WINAPI VclProbeTabbedTextOutW(HDC, int, int, LPCWSTR, int, int, const INT*, int);
+        BOOL WINAPI VclProbeFocusRect(HDC, const RECT*);
+#endif
 
         inline const HookDispatcherDependency<OHK_COUNT, 3> g_rootHookDep
         { {
@@ -539,6 +584,58 @@ namespace GlassCore::Root
                 "TextOutW", reinterpret_cast<PVOID>(Root_MyTextOutW) },
             std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv },
                 "FillRect", reinterpret_cast<PVOID>(Root_MyFillRect) },
+            std::tuple{ std::array{ "uxtheme.dll"sv, "ext-ms-win-uxtheme-themes-l1-1-0.dll"sv, ""sv },
+                "DrawThemeTextEx", reinterpret_cast<PVOID>(Root_MyDelphiDrawThemeTextEx) },
+            std::tuple{ std::array{ "gdi32.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv, ""sv },
+                "ExtTextOutW", reinterpret_cast<PVOID>(Root_MyDelphiGridText) },
+            std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv },
+                "FillRect", reinterpret_cast<PVOID>(Root_MyDelphiGridFill) },
+            std::tuple{ std::array{ "uxtheme.dll"sv, "ext-ms-win-uxtheme-themes-l1-1-0.dll"sv, ""sv },
+                "DrawThemeBackground", reinterpret_cast<PVOID>(Root_MyDelphiGridTheme) },
+            std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv },
+                "GetSysColor", reinterpret_cast<PVOID>(Root_MyGetSysColor) },
+            std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv },
+                "DrawTextExW", reinterpret_cast<PVOID>(Root_MyDelphiGroupText) },
+            std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv },
+                "FillRect", reinterpret_cast<PVOID>(Root_MyDelphiGroupFill) },
+            std::tuple{ std::array{ "msimg32.dll"sv, ""sv, ""sv },
+                "GradientFill", reinterpret_cast<PVOID>(Root_MyDelphiGroupGradient<OHK_DELPHI_GROUP_GRADIENT>) },
+            std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv },
+                "GdiGradientFill", reinterpret_cast<PVOID>(Root_MyDelphiGroupGradient<OHK_DELPHI_GROUP_GDIGRADIENT>) },
+            // Bome memo route: keep order in sync with its readiness bits.
+            std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv },
+                "DrawTextA", reinterpret_cast<PVOID>(Root_MyBomeMemoText) },
+            std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv },
+                "CreateBrushIndirect", reinterpret_cast<PVOID>(Root_MyBomeMemoBrush) },
+            std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv },
+                "GetSysColor", reinterpret_cast<PVOID>(Root_MyBomeMemoColor) },
+            std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv },
+                "FillRect", reinterpret_cast<PVOID>(Root_MyBomeMemoFill) },
+#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
+            std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv }, "FillRect", reinterpret_cast<PVOID>(VclProbeFill) },
+            std::tuple{ std::array{ "gdi32.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv, ""sv }, "PatBlt", reinterpret_cast<PVOID>(VclProbePatBlt) },
+            std::tuple{ std::array{ "gdi32.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv, ""sv }, "Rectangle", reinterpret_cast<PVOID>(VclProbeRect) },
+            std::tuple{ std::array{ "gdi32.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv, ""sv }, "RoundRect", reinterpret_cast<PVOID>(VclProbeRoundRect) },
+            std::tuple{ std::array{ "gdi32.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv, ""sv }, "BitBlt", reinterpret_cast<PVOID>(VclProbeBitBlt) },
+            std::tuple{ std::array{ "gdi32.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv, ""sv }, "ExtTextOutW", reinterpret_cast<PVOID>(VclProbeText) },
+            std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv }, "DrawTextW", reinterpret_cast<PVOID>(VclProbeDrawText) },
+            std::tuple{ std::array{ "uxtheme.dll"sv, "ext-ms-win-uxtheme-themes-l1-1-0.dll"sv, ""sv }, "DrawThemeBackground", reinterpret_cast<PVOID>(VclProbeTheme) },
+            std::tuple{ std::array{ "gdi32.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv, ""sv }, "CreateSolidBrush", reinterpret_cast<PVOID>(VclProbeCreateBrush) },
+            std::tuple{ std::array{ "gdi32.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv, ""sv }, "SelectObject", reinterpret_cast<PVOID>(VclProbeSelect) },
+            std::tuple{ std::array{ "gdi32.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv, ""sv }, "Ellipse", reinterpret_cast<PVOID>(VclProbeEllipse) },
+            std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv }, "DrawTextExW", reinterpret_cast<PVOID>(VclProbeDrawTextEx) },
+            std::tuple{ std::array{ "gdi32.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv, ""sv }, "CreateBrushIndirect", reinterpret_cast<PVOID>(VclProbeCreateBrushIndirect) },
+            std::tuple{ std::array{ "uxtheme.dll"sv, "ext-ms-win-uxtheme-themes-l1-1-0.dll"sv, ""sv }, "DrawThemeTextEx", reinterpret_cast<PVOID>(VclProbeThemeTextEx) },
+            std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv }, "StretchBlt", reinterpret_cast<PVOID>(VclProbeStretchBlt) },
+            std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv }, "DrawTextA", reinterpret_cast<PVOID>(VclProbeDrawTextA) },
+            std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv }, "DrawTextExA", reinterpret_cast<PVOID>(VclProbeDrawTextExA) },
+            std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv }, "ExtTextOutA", reinterpret_cast<PVOID>(VclProbeTextA) },
+            std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv }, "TextOutA", reinterpret_cast<PVOID>(VclProbeTextOutA) },
+            std::tuple{ std::array{ "gdi32.dll"sv, "gdi32full.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv }, "TextOutW", reinterpret_cast<PVOID>(VclProbeTextOutW) },
+            std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv }, "TabbedTextOutA", reinterpret_cast<PVOID>(VclProbeTabbedTextOutA) },
+            std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv }, "TabbedTextOutW", reinterpret_cast<PVOID>(VclProbeTabbedTextOutW) },
+            std::tuple{ std::array{ "user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv }, "DrawFocusRect", reinterpret_cast<PVOID>(VclProbeFocusRect) },
+#endif
         } };
 
         using RootDispatcher = HookDispatcher<OHK_COUNT, 3>;
@@ -555,6 +652,295 @@ namespace GlassCore::Root
                 return it->second.template GetOrg<idx, T>();
             return nullptr;
         }
+
+#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
+        struct VclProbeSession
+        {
+            HWND hwnd;
+            bool paint;
+            HMODULE module;
+            std::array<bool, OHK_COUNT> acquired{};
+        };
+
+        // EnableHook возвращает false как при ошибке, так и при увеличении
+        // существующего refcount. Фиксируем реальное приращение под root lock.
+        static bool AcquireVclProbeHook(HMODULE module, size_t index) noexcept
+        {
+            auto lock = g_rootLock.lock_exclusive();
+            auto it = g_rootMap.find(module);
+            if (it == g_rootMap.end())
+            {
+                auto [ins, inserted] = g_rootMap.emplace(
+                    std::piecewise_construct, std::forward_as_tuple(module),
+                    std::forward_as_tuple(g_rootHookDep, module));
+                it = ins;
+                it->second.CacheHookData();
+            }
+            const int before = it->second.GetRef(index);
+            it->second.EnableHook(index, true);
+            return it->second.GetRef(index) > before;
+        }
+        static thread_local std::vector<VclProbeSession> g_vclProbeStack;
+
+        // Эти passthrough IAT-детуры включаются только на EXE, пока активен
+        // BeginPaint/GetDC точного класса; стек — контекст, НЕ доказательство
+        // принадлежности произвольного memory DC. Текст не записываем.
+        void BeginVclDrawProbe(HWND hwnd, bool paint) noexcept
+        {
+            const DWORD error = GetLastError();
+            auto restoreError = wil::scope_exit([error]() noexcept { SetLastError(error); });
+            if (g_shutdown.load(std::memory_order_acquire) || !hwnd) return;
+            WCHAR cls[64]{};
+            if (!GetClassNameW(hwnd, cls, _countof(cls))
+                || (_wcsicmp(cls, L"TBitBtn") != 0 && _wcsicmp(cls, L"TToggleSwitch") != 0
+                    && _wcsicmp(cls, L"TListBox") != 0 && _wcsicmp(cls, L"TCheckListBox") != 0
+                    && _wcsicmp(cls, L"TColorListBox") != 0 && _wcsicmp(cls, L"TNumberBox") != 0
+                    && _wcsicmp(cls, L"THotKey") != 0 && _wcsicmp(cls, L"TRichEdit") != 0
+                    && _wcsicmp(cls, L"TPage") != 0 && _wcsicmp(cls, L"TResVersionEditor") != 0))
+                return;
+            HMODULE ep = GlassCore::ModuleHandler::g_entryPointModule;
+            if (!ep) return;
+            VclProbeSession session{ hwnd, paint, ep };
+            unsigned armed = 0;
+            for (size_t i = OHK_VCLPROBE_FILL; i <= OHK_VCLPROBE_FOCUSRECT; ++i)
+            {
+                session.acquired[i] = AcquireVclProbeHook(ep, i);
+                if (session.acquired[i]) ++armed;
+            }
+            g_vclProbeStack.push_back(session);
+            DebugLog(DBG_NORMAL, L"[GlassCore][DelphiDrawProbe] Begin hwnd=0x%p class=%s channel=%s exe=0x%p acquired=%u depth=%zu",
+                hwnd, cls, paint ? L"paint" : L"getdc", ep, armed, g_vclProbeStack.size());
+        }
+
+        void EndVclDrawProbe(HWND hwnd, bool paint) noexcept
+        {
+            const DWORD error = GetLastError();
+            auto restoreError = wil::scope_exit([error]() noexcept { SetLastError(error); });
+            for (auto it = g_vclProbeStack.rbegin(); it != g_vclProbeStack.rend(); ++it)
+            {
+                if (it->hwnd != hwnd || it->paint != paint) continue;
+                const VclProbeSession session = *it;
+                g_vclProbeStack.erase((it + 1).base());
+                for (size_t i = OHK_VCLPROBE_FILL; i <= OHK_VCLPROBE_FOCUSRECT; ++i)
+                    if (session.acquired[i]) EnableRootHook(session.module, i, false);
+                DebugLog(DBG_NORMAL, L"[GlassCore][DelphiDrawProbe] End hwnd=0x%p channel=%s depth=%zu",
+                    hwnd, paint ? L"paint" : L"getdc", g_vclProbeStack.size());
+                return;
+            }
+        }
+
+        void ClearVclDrawProbe() noexcept { g_vclProbeStack.clear(); }
+
+        // Diagnostic lookups/logging must not change either the original API's
+        // entry LastError or its result (some GDI functions leave it untouched).
+        template<size_t index, typename Fn>
+        static Fn VclProbeOriginal() noexcept
+        {
+            const DWORD error = GetLastError();
+            const auto orig = GetRootOrg<index, Fn>(GlassCore::ModuleHandler::g_entryPointModule);
+            SetLastError(error);
+            return orig;
+        }
+
+        static void LogVclProbe(const wchar_t* api, HDC dc, const RECT* rect,
+            HGDIOBJ object, HDC src, DWORD flags,
+            long long a = 0, long long b = 0, long long c = 0, long long d = 0) noexcept
+        {
+            const DWORD error = GetLastError();
+            auto restoreError = wil::scope_exit([error]() noexcept { SetLastError(error); });
+            if (g_shutdown.load(std::memory_order_acquire) || g_vclProbeStack.empty()) return;
+            static thread_local ULONGLONG epoch = 0;
+            static thread_local unsigned budget = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (!epoch || now - epoch >= 1000) { epoch = now; budget = 160; }
+            if (!budget) return;
+            --budget;
+            const auto& session = g_vclProbeStack.back();
+            WCHAR cls[64]{};
+            GetClassNameW(session.hwnd, cls, _countof(cls));
+            const RECT r = rect ? *rect : RECT{};
+            RECT clip{};
+            const int clipKind = dc ? GetClipBox(dc, &clip) : 0;
+            HGDIOBJ brush = object;
+            if (!brush && dc) brush = GetCurrentObject(dc, OBJ_BRUSH);
+            LOGBRUSH lb{};
+            const bool brushValid = brush && GetObjectType(brush) == OBJ_BRUSH
+                && GetObjectW(brush, sizeof(lb), &lb) == sizeof(lb);
+            BITMAP destBitmap{};
+            const HGDIOBJ destObject = dc ? GetCurrentObject(dc, OBJ_BITMAP) : nullptr;
+            const bool destBitmapValid = destObject && GetObjectW(destObject, sizeof(destBitmap), &destBitmap) == sizeof(destBitmap);
+            LOGPEN pen{};
+            const HGDIOBJ penObject = dc ? GetCurrentObject(dc, OBJ_PEN) : nullptr;
+            const bool penValid = penObject && GetObjectW(penObject, sizeof(pen), &pen) == sizeof(pen);
+            BITMAP sourceBitmap{};
+            const HGDIOBJ bitmap = src ? GetCurrentObject(src, OBJ_BITMAP) : nullptr;
+            const bool bitmapValid = bitmap && GetObjectW(bitmap, sizeof(sourceBitmap), &sourceBitmap) == sizeof(sourceBitmap);
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiDrawProbe] api=%s hwnd=0x%p class=%s channel=%s dc=0x%p dcWnd=0x%p dcType=%u textColor=0x%08X bkColor=0x%08X bkMode=%d destBitmap=0x%p destValid=%d destSize=%ldx%ld destBpp=%u pen=0x%p penValid=%d penStyle=%u penWidth=%ld penColor=0x%08X src=0x%p srcWnd=0x%p bitmap=0x%p bitmapValid=%d bitmapSize=%ldx%ld bpp=%u obj=0x%p objType=%u brush=0x%p brushValid=%d brushStyle=%u brushColor=0x%08X rect=[%ld,%ld,%ld,%ld] clipKind=%d clip=[%ld,%ld,%ld,%ld] flags=0x%08X a=%lld b=%lld c=%lld d=%lld",
+                api, session.hwnd, cls, session.paint ? L"paint" : L"getdc", dc,
+                dc ? WindowFromDC(dc) : nullptr, dc ? static_cast<unsigned>(GetObjectType(dc)) : 0,
+                dc ? static_cast<unsigned>(GetTextColor(dc)) : 0,
+                dc ? static_cast<unsigned>(GetBkColor(dc)) : 0, dc ? GetBkMode(dc) : 0,
+                destObject, destBitmapValid ? 1 : 0, destBitmap.bmWidth, destBitmap.bmHeight,
+                static_cast<unsigned>(destBitmap.bmBitsPixel), penObject, penValid ? 1 : 0,
+                static_cast<unsigned>(pen.lopnStyle), pen.lopnWidth.x, static_cast<unsigned>(pen.lopnColor),
+                src, src ? WindowFromDC(src) : nullptr, bitmap, bitmapValid ? 1 : 0,
+                sourceBitmap.bmWidth, sourceBitmap.bmHeight, static_cast<unsigned>(sourceBitmap.bmBitsPixel), object,
+                object ? static_cast<unsigned>(GetObjectType(object)) : 0,
+                brush, brushValid ? 1 : 0, static_cast<unsigned>(lb.lbStyle), static_cast<unsigned>(lb.lbColor),
+                r.left, r.top, r.right, r.bottom, clipKind, clip.left, clip.top, clip.right, clip.bottom,
+                static_cast<unsigned>(flags), a, b, c, d);
+        }
+
+        int WINAPI VclProbeFill(HDC dc, const RECT* r, HBRUSH brush)
+        {
+            auto orig = VclProbeOriginal<OHK_VCLPROBE_FILL, decltype(&FillRect)>();
+            LogVclProbe(L"FillRect", dc, r, brush, nullptr, 0);
+            return orig ? orig(dc, r, brush) : FillRect(dc, r, brush);
+        }
+        BOOL WINAPI VclProbePatBlt(HDC dc, int x, int y, int w, int h, DWORD rop)
+        {
+            auto orig = VclProbeOriginal<OHK_VCLPROBE_PATBLT, decltype(&PatBlt)>();
+            const RECT r{ x, y, x + w, y + h };
+            LogVclProbe(L"PatBlt", dc, &r, nullptr, nullptr, rop);
+            return orig ? orig(dc, x, y, w, h, rop) : PatBlt(dc, x, y, w, h, rop);
+        }
+        BOOL WINAPI VclProbeRect(HDC dc, int l, int t, int r, int b)
+        {
+            auto orig = VclProbeOriginal<OHK_VCLPROBE_RECT, decltype(&Rectangle)>();
+            const RECT rc{ l, t, r, b }; LogVclProbe(L"Rectangle", dc, &rc, nullptr, nullptr, 0);
+            return orig ? orig(dc, l, t, r, b) : Rectangle(dc, l, t, r, b);
+        }
+        BOOL WINAPI VclProbeRoundRect(HDC dc, int l, int t, int r, int b, int w, int h)
+        {
+            auto orig = VclProbeOriginal<OHK_VCLPROBE_ROUNDRECT, decltype(&RoundRect)>();
+            const RECT rc{ l, t, r, b }; LogVclProbe(L"RoundRect", dc, &rc, nullptr, nullptr, 0, w, h);
+            return orig ? orig(dc, l, t, r, b, w, h) : RoundRect(dc, l, t, r, b, w, h);
+        }
+        BOOL WINAPI VclProbeEllipse(HDC dc, int l, int t, int r, int b)
+        {
+            auto orig = VclProbeOriginal<OHK_VCLPROBE_ELLIPSE, decltype(&Ellipse)>();
+            const RECT rc{ l, t, r, b }; LogVclProbe(L"Ellipse", dc, &rc, nullptr, nullptr, 0);
+            return orig ? orig(dc, l, t, r, b) : Ellipse(dc, l, t, r, b);
+        }
+        BOOL WINAPI VclProbeBitBlt(HDC dc, int x, int y, int w, int h, HDC src, int sx, int sy, DWORD rop)
+        {
+            auto orig = VclProbeOriginal<OHK_VCLPROBE_BITBLT, decltype(&BitBlt)>();
+            const RECT r{ x, y, x + w, y + h }; LogVclProbe(L"BitBlt", dc, &r, nullptr, src, rop, sx, sy);
+            return orig ? orig(dc, x, y, w, h, src, sx, sy, rop) : BitBlt(dc, x, y, w, h, src, sx, sy, rop);
+        }
+        BOOL WINAPI VclProbeText(HDC dc, int x, int y, UINT options, const RECT* r, LPCWSTR text, UINT count, const INT* dx)
+        {
+            auto orig = VclProbeOriginal<OHK_VCLPROBE_TEXT, decltype(&ExtTextOutW)>();
+            LogVclProbe(L"ExtTextOutW", dc, r, nullptr, nullptr, options, x, y, count);
+            return orig ? orig(dc, x, y, options, r, text, count, dx) : ExtTextOutW(dc, x, y, options, r, text, count, dx);
+        }
+        int WINAPI VclProbeDrawText(HDC dc, LPCWSTR text, int count, LPRECT r, UINT flags)
+        {
+            auto orig = VclProbeOriginal<OHK_VCLPROBE_DRAWTEXT, decltype(&DrawTextW)>();
+            LogVclProbe(L"DrawTextW", dc, r, nullptr, nullptr, flags, count);
+            return orig ? orig(dc, text, count, r, flags) : DrawTextW(dc, text, count, r, flags);
+        }
+        int WINAPI VclProbeDrawTextEx(HDC dc, LPWSTR text, int count, LPRECT r, UINT flags, LPDRAWTEXTPARAMS params)
+        {
+            auto orig = VclProbeOriginal<OHK_VCLPROBE_DRAWTEXTEX, decltype(&DrawTextExW)>();
+            LogVclProbe(L"DrawTextExW", dc, r, nullptr, nullptr, flags, count);
+            return orig ? orig(dc, text, count, r, flags, params) : DrawTextExW(dc, text, count, r, flags, params);
+        }
+        // ANSI buffers/counts (including -1, embedded NUL and DT_MODIFYSTRING)
+        // go straight to the matching native API. No decoding or text capture.
+        int WINAPI VclProbeDrawTextA(HDC dc, LPCSTR text, int count, LPRECT r, UINT flags)
+        {
+            auto orig = VclProbeOriginal<OHK_VCLPROBE_DRAWTEXTA, decltype(&DrawTextA)>();
+            LogVclProbe(L"DrawTextA", dc, r, nullptr, nullptr, flags, count);
+            return orig ? orig(dc, text, count, r, flags) : DrawTextA(dc, text, count, r, flags);
+        }
+        int WINAPI VclProbeDrawTextExA(HDC dc, LPSTR text, int count, LPRECT r, UINT flags, LPDRAWTEXTPARAMS params)
+        {
+            auto orig = VclProbeOriginal<OHK_VCLPROBE_DRAWTEXTEXA, decltype(&DrawTextExA)>();
+            LogVclProbe(L"DrawTextExA", dc, r, nullptr, nullptr, flags, count);
+            return orig ? orig(dc, text, count, r, flags, params) : DrawTextExA(dc, text, count, r, flags, params);
+        }
+        BOOL WINAPI VclProbeTextA(HDC dc, int x, int y, UINT options, const RECT* r, LPCSTR text, UINT count, const INT* dx)
+        {
+            auto orig = VclProbeOriginal<OHK_VCLPROBE_TEXTA, decltype(&ExtTextOutA)>();
+            LogVclProbe(L"ExtTextOutA", dc, r, nullptr, nullptr, options, x, y, count);
+            return orig ? orig(dc, x, y, options, r, text, count, dx) : ExtTextOutA(dc, x, y, options, r, text, count, dx);
+        }
+        BOOL WINAPI VclProbeTextOutA(HDC dc, int x, int y, LPCSTR text, int count)
+        {
+            auto orig = VclProbeOriginal<OHK_VCLPROBE_TEXTOUTA, decltype(&TextOutA)>();
+            LogVclProbe(L"TextOutA", dc, nullptr, nullptr, nullptr, 0, x, y, count);
+            return orig ? orig(dc, x, y, text, count) : TextOutA(dc, x, y, text, count);
+        }
+        BOOL WINAPI VclProbeTextOutW(HDC dc, int x, int y, LPCWSTR text, int count)
+        {
+            auto orig = VclProbeOriginal<OHK_VCLPROBE_TEXTOUTW, decltype(&TextOutW)>();
+            LogVclProbe(L"TextOutW", dc, nullptr, nullptr, nullptr, 0, x, y, count);
+            return orig ? orig(dc, x, y, text, count) : TextOutW(dc, x, y, text, count);
+        }
+        LONG WINAPI VclProbeTabbedTextOutA(HDC dc, int x, int y, LPCSTR text, int count,
+            int tabs, const INT* stops, int origin)
+        {
+            auto orig = VclProbeOriginal<OHK_VCLPROBE_TABBEDTEXTOUTA, decltype(&TabbedTextOutA)>();
+            LogVclProbe(L"TabbedTextOutA", dc, nullptr, nullptr, nullptr, 0, x, y, count, tabs);
+            return orig ? orig(dc, x, y, text, count, tabs, stops, origin) : TabbedTextOutA(dc, x, y, text, count, tabs, stops, origin);
+        }
+        LONG WINAPI VclProbeTabbedTextOutW(HDC dc, int x, int y, LPCWSTR text, int count,
+            int tabs, const INT* stops, int origin)
+        {
+            auto orig = VclProbeOriginal<OHK_VCLPROBE_TABBEDTEXTOUTW, decltype(&TabbedTextOutW)>();
+            LogVclProbe(L"TabbedTextOutW", dc, nullptr, nullptr, nullptr, 0, x, y, count, tabs);
+            return orig ? orig(dc, x, y, text, count, tabs, stops, origin) : TabbedTextOutW(dc, x, y, text, count, tabs, stops, origin);
+        }
+        HRESULT WINAPI VclProbeTheme(HTHEME theme, HDC dc, int part, int state, LPCRECT r, LPCRECT clip)
+        {
+            auto orig = VclProbeOriginal<OHK_VCLPROBE_THEME, decltype(&DrawThemeBackground)>();
+            LogVclProbe(L"DrawThemeBackground", dc, r, nullptr, nullptr, 0, part, state);
+            return orig ? orig(theme, dc, part, state, r, clip) : DrawThemeBackground(theme, dc, part, state, r, clip);
+        }
+        HRESULT WINAPI VclProbeThemeTextEx(HTHEME theme, HDC dc, int part, int state, LPCWSTR text, int count, DWORD flags, LPRECT r, const DTTOPTS* options)
+        {
+            auto orig = VclProbeOriginal<OHK_VCLPROBE_THEMETEXTEX, decltype(&DrawThemeTextEx)>();
+            LogVclProbe(L"DrawThemeTextEx", dc, r, nullptr, nullptr, flags, part, state);
+            return orig ? orig(theme, dc, part, state, text, count, flags, r, options) : DrawThemeTextEx(theme, dc, part, state, text, count, flags, r, options);
+        }
+        HBRUSH WINAPI VclProbeCreateBrush(COLORREF color)
+        {
+            auto orig = VclProbeOriginal<OHK_VCLPROBE_CREATEBRUSH, decltype(&CreateSolidBrush)>();
+            HBRUSH result = orig ? orig(color) : CreateSolidBrush(color);
+            LogVclProbe(L"CreateSolidBrush", nullptr, nullptr, result, nullptr, static_cast<DWORD>(color));
+            return result;
+        }
+        HBRUSH WINAPI VclProbeCreateBrushIndirect(const LOGBRUSH* lb)
+        {
+            auto orig = VclProbeOriginal<OHK_VCLPROBE_CREATEBRUSHINDIRECT, decltype(&CreateBrushIndirect)>();
+            HBRUSH result = orig ? orig(lb) : CreateBrushIndirect(lb);
+            LogVclProbe(L"CreateBrushIndirect", nullptr, nullptr, result, nullptr, lb ? lb->lbStyle : 0);
+            return result;
+        }
+        HGDIOBJ WINAPI VclProbeSelect(HDC dc, HGDIOBJ obj)
+        {
+            auto orig = VclProbeOriginal<OHK_VCLPROBE_SELECT, decltype(&SelectObject)>();
+            LogVclProbe(L"SelectObject", dc, nullptr, obj, nullptr, 0);
+            return orig ? orig(dc, obj) : SelectObject(dc, obj);
+        }
+        BOOL WINAPI VclProbeStretchBlt(HDC dc, int x, int y, int w, int h,
+            HDC src, int sx, int sy, int sw, int sh, DWORD rop)
+        {
+            auto orig = VclProbeOriginal<OHK_VCLPROBE_STRETCHBLT, decltype(&StretchBlt)>();
+            const RECT r{ x, y, x + w, y + h };
+            LogVclProbe(L"StretchBlt", dc, &r, nullptr, src, rop, sx, sy, sw, sh);
+            return orig ? orig(dc, x, y, w, h, src, sx, sy, sw, sh, rop)
+                : StretchBlt(dc, x, y, w, h, src, sx, sy, sw, sh, rop);
+        }
+        BOOL WINAPI VclProbeFocusRect(HDC dc, const RECT* r)
+        {
+            auto orig = VclProbeOriginal<OHK_VCLPROBE_FOCUSRECT, decltype(&DrawFocusRect)>();
+            LogVclProbe(L"DrawFocusRect", dc, r, nullptr, nullptr, 0);
+            return orig ? orig(dc, r) : DrawFocusRect(dc, r);
+        }
+#endif
 
         // ── EnableRootHook / DisableAllRootHooks ─────────────────────────────
 
@@ -595,6 +981,47 @@ namespace GlassCore::Root
             }
         }
 
+        // Bome memo acquisition is deliberately separate from EnableSpecs:
+        // EnableHook(false) is not paired with a failed enable (nor is its return
+        // value an acquisition indicator when a nested ref already exists).
+        static constexpr size_t kBomeMemoSlots[] = {
+            OHK_BOME_MEMO_TEXT, OHK_BOME_MEMO_BRUSH,
+            OHK_BOME_MEMO_COLOR, OHK_BOME_MEMO_FILL };
+        unsigned AcquireBomeMemoHooks() noexcept
+        {
+            void* ep = GlassCore::ModuleHandler::g_entryPointModule;
+            if (!ep || g_shutdown.load(std::memory_order_acquire)) return 0;
+            auto lock = g_rootLock.lock_exclusive();
+            auto it = g_rootMap.find(ep);
+            if (it == g_rootMap.end())
+            {
+                auto [inserted, ok] = g_rootMap.emplace(std::piecewise_construct,
+                    std::forward_as_tuple(ep), std::forward_as_tuple(g_rootHookDep, ep));
+                it = inserted;
+                it->second.CacheHookData();
+            }
+            unsigned mask = 0;
+            for (size_t i = 0; i < std::size(kBomeMemoSlots); ++i)
+            {
+                const size_t slot = kBomeMemoSlots[i];
+                const int before = it->second.GetRef(slot);
+                it->second.EnableHook(slot, true);
+                if (it->second.GetRef(slot) > before) mask |= 1u << i;
+            }
+            if (mask != GlassCore::BomeMemo::kReadyMask)
+                for (size_t i = std::size(kBomeMemoSlots); i-- > 0;)
+                    if (mask & (1u << i)) it->second.EnableHook(kBomeMemoSlots[i], false);
+            return mask;
+        }
+        void ReleaseBomeMemoHooks() noexcept
+        {
+            auto lock = g_rootLock.lock_exclusive();
+            const auto it = g_rootMap.find(GlassCore::ModuleHandler::g_entryPointModule);
+            if (it == g_rootMap.end()) return;
+            for (size_t i = std::size(kBomeMemoSlots); i-- > 0;)
+                it->second.EnableHook(kBomeMemoSlots[i], false);
+        }
+
         void DisableAllRootHooks() noexcept
         {
             auto lock = g_rootLock.lock_exclusive();
@@ -609,6 +1036,562 @@ namespace GlassCore::Root
         }
 
         // ── Hook bodies: root GDI (упрощённые ветки BWM OverallHooks) ───────
+
+        // IAT является общим для процесса: не изменять чужой DC или memory DC,
+        // даже если они вызваны во время paint этой таблицы.
+        // VCL-таблицы рисуют себя сами из EXE (TCustomGrid.WMPaint → TCanvas):
+        // TShownValueList (msinfo), TStringGrid/TDrawGrid — одна и та же процедура.
+        // Низкая альфа для ячеек таблиц, цвет которых отличается от COLOR_WINDOW:
+        // цвет виден, но стекло просвечивает (тот же порядок, что у темы/комбо).
+        constexpr BYTE kDelphiGridCellAlpha = 100;
+
+        [[nodiscard]] static bool IsDelphiGridClass(const wchar_t* cls) noexcept
+        {
+            return StrEqI(cls, L"TShownValueList")
+                || StrEqI(cls, L"TStringGrid")
+                || StrEqI(cls, L"TDrawGrid")
+                || StrEqI(cls, L"TValueListEditor")
+                || StrEqI(cls, L"TControlList");
+        }
+
+        // Заливка прямоугольника цветом с истинной альфой: GDI не переносит
+        // альфу из pattern-кисти (FillRect с alpha-кистью даёт непрозрачный
+        // цвет — см. скриншот «альфа 12»). Поэтому 1x1 premultiplied DIB и
+        // GdiAlphaBlend с растяжением на весь прямоугольник.
+        static bool FillRectWithAlphaBlend(HDC dc, const RECT* rect,
+            COLORREF color, BYTE alpha) noexcept
+        {
+            if (!dc || !rect)
+                return false;
+            const int w = rect->right - rect->left;
+            const int h = rect->bottom - rect->top;
+            if (w <= 0 || h <= 0 || !alpha)
+                return false;
+
+            BITMAPINFO bi{};
+            bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+            bi.bmiHeader.biWidth = 1;
+            bi.bmiHeader.biHeight = -1;
+            bi.bmiHeader.biPlanes = 1;
+            bi.bmiHeader.biBitCount = 32;
+            bi.bmiHeader.biCompression = BI_RGB;
+
+            void* bits = nullptr;
+            HDC mem = CreateCompatibleDC(dc);
+            if (!mem)
+                return false;
+            HBITMAP bmp = CreateDIBSection(mem, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+            if (!bmp || !bits)
+            {
+                if (bmp) DeleteObject(bmp);
+                DeleteDC(mem);
+                return false;
+            }
+            const HGDIOBJ old = SelectObject(mem, bmp);
+            const auto premul = [alpha](BYTE c) noexcept
+            {
+                return static_cast<BYTE>((c * (alpha + 1)) >> 8);
+            };
+            auto* px = static_cast<BYTE*>(bits);
+            px[0] = premul(GetBValue(color));
+            px[1] = premul(GetGValue(color));
+            px[2] = premul(GetRValue(color));
+            px[3] = alpha;
+
+            const BLENDFUNCTION bf{ AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+            const BOOL ok = GdiAlphaBlend(dc, rect->left, rect->top, w, h, mem, 0, 0, 1, 1, bf);
+            SelectObject(mem, old);
+            DeleteObject(bmp);
+            DeleteDC(mem);
+            return ok != FALSE;
+        }
+
+        // Фон ячейки таблицы: сначала чёрная очистка (прозрачность), затем —
+        // если цвет не COLOR_WINDOW — цветная подложка с альфой.
+        static bool ApplyDelphiGridCellBackground(HDC dc, const RECT* rect, COLORREF color) noexcept
+        {
+            if (!dc || !rect || IsRectEmpty(rect))
+                return false;
+            if (!PatBlt(dc, rect->left, rect->top, rect->right - rect->left,
+                    rect->bottom - rect->top, BLACKNESS))
+                return false;
+            const COLORREF plain = color & 0xFFFFFF;
+            if (!plain || plain == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF))
+                return true;
+            return FillRectWithAlphaBlend(dc, rect, color, kDelphiGridCellAlpha);
+        }
+
+        static bool IsDelphiGridPaintDC(HDC dc) noexcept
+        {
+            if (!dc || GlassCore::PaintDispatcher::IsForeignPaintBarrierActive())
+                return false;
+            // VCL может рисовать таблицу в промежуточный bitmap (двойная
+            // буферизация): WindowFromDC == NULL. Тогда владельцем считаем
+            // окно активной paint-сессии, если это таблица. Оконный DC
+            // по-прежнему должен принадлежать именно ей.
+            const HWND host = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
+            if (!host)
+                return false;
+            const HWND dcWnd = WindowFromDC(dc);
+            if (dcWnd && dcWnd != host)
+                return false;
+            wchar_t cls[128]{};
+            return GetClassNameW(host, cls, _countof(cls)) && IsDelphiGridClass(cls);
+        }
+
+        // Заливка окна таблицы вне paint-сессии: BeginPaint сам посылает
+        // WM_ERASEBKGND до того, как PaintDispatcher положит окно в стек,
+        // поэтому GetPaintSessionHostHwnd() ещё не указывает на таблицу.
+        // Фон стирания (FixedColor) иначе остаётся непрозрачным.
+        static bool IsDelphiGridFillDC(HDC dc) noexcept
+        {
+            if (!dc || GlassCore::PaintDispatcher::IsForeignPaintBarrierActive())
+                return false;
+            if (IsDelphiGridPaintDC(dc))
+                return true;
+            const HWND w = WindowFromDC(dc);
+            if (!w)
+                return false;
+            wchar_t cls[128]{};
+            return GetClassNameW(w, cls, _countof(cls)) && IsDelphiGridClass(cls);
+        }
+
+        // ── Реконструкция фона фиксированной области таблицы ─────────────────
+        // Фон клиента (TCustomGrid.Paint: GetSysColor → CreateBrushIndirect →
+        // FillRect(ClientRect)) приходит мимо наших IAT-слотов: ни перехватить,
+        // ни перекрасить его нельзя. Поэтому после отрисовки чистим
+        // фиксированную строку/колонку чёрным и заново рисуем их текст —
+        // записи текста собраны в Root_MyDelphiGridText, границы области берём
+        // из первой перехваченной заливки ячейки (левый верхний угол данных).
+        struct GridTextRec
+        {
+            int      x{};
+            int      y{};
+            UINT     options{};
+            RECT     rect{};
+            std::wstring text;
+            COLORREF color{};
+            HFONT    font{};
+        };
+        struct GridPaintRec
+        {
+            HWND                    hwnd{};
+            HDC                     dc{};
+            bool                    haveDataOrigin{};
+            POINT                   dataOrigin{};
+            std::vector<GridTextRec> texts;
+        };
+        static thread_local std::vector<GridPaintRec> g_gridPaints;
+        // Левый верхний угол области данных, запомненный по прошлым отрисовкам:
+        // частичная перерисовка (клик, активация окна) может не содержать ни
+        // одной заливки ячейки, и тогда границы фиксированной области брать неоткуда.
+        // -1 = «неизвестно»; 0 значит «фиксированной полосы нет» (у
+        // TValueListEditor данные начинаются с x=0 — фиксированной колонки нет).
+        static thread_local std::unordered_map<HWND, POINT> g_gridDataOrigins;
+
+        static void RememberGridDataOrigin(HWND wnd, LONG x, LONG y) noexcept
+        {
+            if (!wnd || x < 0 || y < 0)
+                return;
+            if (g_gridDataOrigins.size() > 64)
+                g_gridDataOrigins.clear();
+            POINT& p = g_gridDataOrigins.try_emplace(wnd, POINT{ -1, -1 }).first->second;
+            if (p.x < 0 || x < p.x)
+                p.x = x;
+            if (p.y < 0 || y < p.y)
+                p.y = y;
+        }
+
+        static GridPaintRec* FindGridPaint(HDC dc, HWND wnd) noexcept
+        {
+            if (!wnd || g_gridPaints.empty())
+                return nullptr;
+            auto& rec = g_gridPaints.back();
+            if (rec.hwnd != wnd)
+                return nullptr;
+            if (!rec.dc)
+                rec.dc = dc;
+            return &rec;
+        }
+
+        static void ReplayGridFixedArea(const GridPaintRec& rec) noexcept
+        {
+            if (!rec.hwnd || !rec.dc || rec.texts.empty())
+                return;
+            RECT client{};
+            if (!GetClientRect(rec.hwnd, &client) || IsRectEmpty(&client))
+                return;
+            LONG x0 = rec.haveDataOrigin ? rec.dataOrigin.x : -1;
+            LONG y0 = rec.haveDataOrigin ? rec.dataOrigin.y : -1;
+            {
+                const auto it = g_gridDataOrigins.find(rec.hwnd);
+                if (it != g_gridDataOrigins.end())
+                {
+                    if (x0 < 0) x0 = it->second.x;
+                    if (y0 < 0) y0 = it->second.y;
+                }
+            }
+            // У TStringGrid/TDrawGrid есть и фиксированная строка, и колонка;
+            // у TValueListEditor — только строка (данные начинаются с x=0).
+            const bool haveRow = y0 > client.top && y0 < client.bottom;
+            const bool haveCol = x0 > client.left && x0 < client.right;
+            if (!haveRow && !haveCol)
+                return;
+            HDC dc = rec.dc;
+            const int saved = SaveDC(dc);
+            const RECT rowStrip{ client.left, client.top, client.right,
+                haveRow ? y0 : client.top };
+            const RECT colStrip{ client.left, client.top,
+                haveCol ? x0 : client.left, client.bottom };
+            if (haveRow)
+                PatBlt(dc, client.left, client.top, client.right - client.left,
+                    y0 - client.top, BLACKNESS);
+            if (haveCol)
+                PatBlt(dc, client.left, client.top, x0 - client.left,
+                    client.bottom - client.top, BLACKNESS);
+            size_t drawn = 0;
+            for (const auto& t : rec.texts)
+            {
+                RECT tmp{};
+                if ((!haveRow || !IntersectRect(&tmp, &t.rect, &rowStrip))
+                    && (!haveCol || !IntersectRect(&tmp, &t.rect, &colStrip)))
+                    continue;
+                const HGDIOBJ oldFont = t.font ? SelectObject(dc, t.font) : nullptr;
+                const COLORREF oldColor = SetTextColor(dc, t.color);
+                const int oldBk = SetBkMode(dc, TRANSPARENT);
+                // Тот же путь, что и при обычной отрисовке: чистый GDI-текст
+                // чёрным на прозрачном фоне уходит в color key и пропадает.
+                const UINT drawOpt = t.options & ~static_cast<UINT>(ETO_OPAQUE);
+                const HRESULT hr = GlassCore::Text::ExtTextOutWithAlpha(dc, t.x, t.y,
+                    drawOpt, &t.rect, t.text.c_str(), static_cast<UINT>(t.text.size()),
+                    nullptr, &::ExtTextOutW);
+                if (FAILED(hr))
+                    ExtTextOutW(dc, t.x, t.y, drawOpt, &t.rect, t.text.c_str(),
+                        static_cast<UINT>(t.text.size()), nullptr);
+                SetBkMode(dc, oldBk);
+                SetTextColor(dc, oldColor);
+                if (oldFont)
+                    SelectObject(dc, oldFont);
+                ++drawn;
+            }
+            if (saved)
+                RestoreDC(dc, saved);
+#if defined(_DEBUG)
+            if (drawn)
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiGrid] FixedReplay hwnd=0x%p row=%ld col=%ld texts=%zu",
+                    rec.hwnd, y0, x0, drawn);
+#endif
+        }
+
+        static void GridPaintBegin(HWND hWnd, HMODULE /*callerMod*/) noexcept
+        {
+            if (g_shutdown.load(std::memory_order_acquire) || !hWnd)
+                return;
+            wchar_t cls[128]{};
+            if (!GetClassNameW(hWnd, cls, _countof(cls)) || !IsDelphiGridClass(cls))
+                return;
+            // Повторный BeginPaint того же окна (EndPaint мог не дойти до нас)
+            // не плодит записи: реконструкция идёт по свежим данным.
+            if (!g_gridPaints.empty() && g_gridPaints.back().hwnd == hWnd)
+                g_gridPaints.back() = GridPaintRec{ hWnd };
+            else
+            {
+                while (g_gridPaints.size() >= 8)
+                    g_gridPaints.erase(g_gridPaints.begin());
+                g_gridPaints.push_back(GridPaintRec{ hWnd });
+            }
+            g_gridPaints.back().hwnd = hWnd;
+        }
+
+        static void GridPaintEnd(HWND hWnd, HMODULE /*callerMod*/) noexcept
+        {
+            for (auto it = g_gridPaints.rbegin(); it != g_gridPaints.rend(); ++it)
+            {
+                if (it->hwnd != hWnd)
+                    continue;
+                GridPaintRec rec = std::move(*it);
+                g_gridPaints.erase((it + 1).base());
+                if (!g_shutdown.load(std::memory_order_acquire))
+                    ReplayGridFixedArea(rec);
+                return;
+            }
+        }
+
+        // Окно текущей paint-сессии — таблица? (без DC: для GetSysColor его нет)
+        static bool IsDelphiGridPaintHost() noexcept
+        {
+            const HWND host = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
+            if (!host)
+                return false;
+            wchar_t cls[128]{};
+            return GetClassNameW(host, cls, _countof(cls)) && IsDelphiGridClass(cls);
+        }
+
+#if defined(_DEBUG)
+        static bool AllowDelphiGridLog(unsigned channel) noexcept
+        {
+            static thread_local ULONGLONG epoch[3]{};
+            static thread_local unsigned budget[3]{};
+            const ULONGLONG now = GetTickCount64();
+            if (!epoch[channel] || now - epoch[channel] >= 1000)
+            {
+                epoch[channel] = now;
+                budget[channel] = 16;
+            }
+            if (!budget[channel]) return false;
+            --budget[channel];
+            return true;
+        }
+#endif
+
+        BOOL WINAPI Root_MyDelphiGridText(HDC dc, int x, int y, UINT options,
+            const RECT* rect, LPCWSTR text, UINT count, const INT* dx)
+        {
+            auto orig = GetRootOrg<OHK_DELPHI_GRID_TEXT, decltype(&ExtTextOutW)>(GetCallerModule(_ReturnAddress()));
+            if (!orig) return ExtTextOutW(dc, x, y, options, rect, text, count, dx);
+            if (g_shutdown.load(std::memory_order_acquire) || !IsDelphiGridPaintDC(dc)
+                || (GetTextAlign(dc) & TA_UPDATECP) || (options & (ETO_GLYPH_INDEX | ETO_PDY))
+                || ((options & ETO_OPAQUE) && !rect))
+                return orig(dc, x, y, options, rect, text, count, dx);
+            // VCL рисует свои заголовки до текста; DrawThemeBackground может
+            // вызываться не через IAT EXE. В наблюдённом пути caption приходит
+            // с ETO_CLIPPED и прямоугольником первого ряда (top=0). Очистить
+            // только его до текста, не трогая data rows и произвольные окна.
+            if (rect && text && count)
+            {
+                if (auto* rec = FindGridPaint(dc, WindowFromDC(dc)))
+                {
+                    if (rec->texts.size() < 512)
+                    {
+                        GridTextRec recText{};
+                        recText.x = x;
+                        recText.y = y;
+                        recText.options = options;
+                        recText.rect = *rect;
+                        recText.text.assign(text, count);
+                        recText.color = GetTextColor(dc);
+                        recText.font = static_cast<HFONT>(GetCurrentObject(dc, OBJ_FONT));
+                        rec->texts.push_back(std::move(recText));
+                    }
+                }
+            }
+            if (options == ETO_CLIPPED && rect && rect->top == 0
+                && !IsRectEmpty(rect) && x >= rect->left && x < rect->right
+                && y >= rect->top && y < rect->bottom)
+            {
+                const BOOL cleared = PatBlt(dc, rect->left, rect->top,
+                    rect->right - rect->left, rect->bottom - rect->top, BLACKNESS);
+#if defined(_DEBUG)
+                if (AllowDelphiGridLog(2))
+                    DebugLog(DBG_NORMAL, L"[GlassCore][DelphiGrid] HeaderTextClear hwnd=0x%p rect=[%ld,%ld,%ld,%ld] ok=%d",
+                        WindowFromDC(dc), rect->left, rect->top, rect->right, rect->bottom, cleared);
+#endif
+                (void)cleared;
+            }
+            // ETO_OPAQUE заливает фон под текстом цветом текущего BkColor.
+            // Раньше здесь был только BLACKNESS — он стирал цветную подложку,
+            // нарисованную FillRect до текста (ячейки становились невидимыми).
+            if ((options & ETO_OPAQUE) && (!rect || IsRectEmpty(rect)
+                || !ApplyDelphiGridCellBackground(dc, rect, GetBkColor(dc))))
+                return orig(dc, x, y, options, rect, text, count, dx);
+            if (!count) return TRUE;
+            if (!text) return orig(dc, x, y, options, rect, text, count, dx);
+            const UINT drawOptions = options & ~static_cast<UINT>(ETO_OPAQUE);
+            const HRESULT hr = GlassCore::Text::ExtTextOutWithAlpha(dc, x, y, drawOptions,
+                rect, text, count, dx, orig);
+#if defined(_DEBUG)
+            if (AllowDelphiGridLog(0))
+                DebugLog(DBG_NORMAL, L"[GlassCore][DelphiGrid] Text hwnd=0x%p options=0x%X count=%u rect=[%ld,%ld,%ld,%ld] hr=0x%08lX",
+                    WindowFromDC(dc), options, count,
+                    rect ? rect->left : 0, rect ? rect->top : 0,
+                    rect ? rect->right : 0, rect ? rect->bottom : 0,
+                    static_cast<unsigned long>(hr));
+#endif
+            if (SUCCEEDED(hr)) return TRUE;
+            return orig(dc, x, y, drawOptions, rect, text, count, dx);
+        }
+
+        int WINAPI Root_MyDelphiGridFill(HDC dc, const RECT* rect, HBRUSH brush)
+        {
+            const HMODULE callerMod = GetCallerModule(_ReturnAddress());
+            auto orig = GetRootOrg<OHK_DELPHI_GRID_FILL, decltype(&FillRect)>(callerMod);
+#if defined(_DEBUG)
+            // Вход в детур виден всегда, в том числе когда orig для этого caller'а
+            // не найден (иначе такие вызовы уходили в FillRect молча — так
+            // пропадала заливка всего клиента таблицы).
+            if (AllowDelphiGridLog(0))
+            {
+                wchar_t dcCls[128]{};
+                const HWND dcWnd = WindowFromDC(dc);
+                if (dcWnd) GetClassNameW(dcWnd, dcCls, _countof(dcCls));
+                LOGBRUSH elb{};
+                const bool eok = brush && GetObjectW(brush, sizeof(elb), &elb) == sizeof(elb);
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiGrid] FillEnter dc=0x%p dcWnd=0x%p dcCls=\"%s\" rect=[%ld,%ld,%ld,%ld] style=%d color=0x%08X gate=%d orig=%d caller=%s",
+                    dc, dcWnd, dcCls,
+                    rect ? rect->left : 0, rect ? rect->top : 0, rect ? rect->right : 0, rect ? rect->bottom : 0,
+                    eok ? static_cast<int>(elb.lbStyle) : -1,
+                    eok ? static_cast<unsigned>(elb.lbColor) : 0u,
+                    IsDelphiGridFillDC(dc) ? 1 : 0, orig ? 1 : 0, CallerBaseName(callerMod).c_str());
+            }
+#endif
+            const auto passthrough = [&]() -> int
+            {
+                return orig ? orig(dc, rect, brush) : ::FillRect(dc, rect, brush);
+            };
+            if (g_shutdown.load(std::memory_order_acquire) || !IsDelphiGridFillDC(dc))
+                return passthrough();
+            LOGBRUSH lb{};
+            const bool haveBrush = brush
+                && GetObjectW(brush, sizeof(lb), &lb) == sizeof(lb);
+            // Стоковые кисти GetObject не отдают — определяем по хэндлу.
+            COLORREF fillColor = haveBrush ? (lb.lbColor & 0xFFFFFF) : 0;
+            bool solid = haveBrush && lb.lbStyle == BS_SOLID;
+            if (!haveBrush && brush)
+            {
+                if (brush == GetSysColorBrush(COLOR_WINDOW))
+                {
+                    solid = true;
+                    fillColor = GetSysColor(COLOR_WINDOW) & 0xFFFFFF;
+                }
+                else if (brush == GetSysColorBrush(COLOR_BTNFACE))
+                {
+                    solid = true;
+                    fillColor = GetSysColor(COLOR_BTNFACE) & 0xFFFFFF;
+                }
+            }
+
+            if (rect && !IsRectEmpty(rect) && solid
+                && ApplyDelphiGridCellBackground(dc, rect, fillColor))
+            {
+                const HWND fillWnd = WindowFromDC(dc);
+                RememberGridDataOrigin(fillWnd, rect->left, rect->top);
+                if (auto* rec = FindGridPaint(dc, fillWnd))
+                {
+                    if (!rec->haveDataOrigin)
+                    {
+                        rec->dataOrigin = POINT{ rect->left, rect->top };
+                        rec->haveDataOrigin = true;
+                    }
+                }
+#if defined(_DEBUG)
+                if (AllowDelphiGridLog(1))
+                {
+                    const COLORREF plain = fillColor & 0xFFFFFF;
+                    const bool tinted = plain && plain != (GetSysColor(COLOR_WINDOW) & 0xFFFFFF);
+                    if (tinted)
+                        DebugLog(DBG_NORMAL,
+                            L"[GlassCore][DelphiGrid] AlphaFill hwnd=0x%p dcWnd=0x%p rect=[%ld,%ld,%ld,%ld] color=0x%08X alpha=%u",
+                            WindowFromDC(dc), WindowFromDC(dc), rect->left, rect->top, rect->right, rect->bottom,
+                            static_cast<unsigned>(fillColor), static_cast<unsigned>(kDelphiGridCellAlpha));
+                    else
+                        DebugLog(DBG_NORMAL, L"[GlassCore][DelphiGrid] WhiteFill hwnd=0x%p dcWnd=0x%p rect=[%ld,%ld,%ld,%ld] color=0x%08X",
+                            WindowFromDC(dc), WindowFromDC(dc), rect->left, rect->top, rect->right, rect->bottom,
+                            static_cast<unsigned>(fillColor));
+                }
+#endif
+                return 1;
+            }
+#if defined(_DEBUG)
+            // Диагностика: чем именно закрашивается фон (например, заголовок
+            // TStringGrid), чтобы не гадать по скриншоту.
+            if (AllowDelphiGridLog(1))
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiGrid] Fill hwnd=0x%p dcWnd=0x%p rect=[%ld,%ld,%ld,%ld] color=0x%08X style=%u brush=%d",
+                    WindowFromDC(dc), WindowFromDC(dc), rect ? rect->left : 0, rect ? rect->top : 0,
+                    rect ? rect->right : 0, rect ? rect->bottom : 0,
+                    haveBrush ? static_cast<unsigned>(lb.lbColor) : 0u,
+                    haveBrush ? static_cast<unsigned>(lb.lbStyle) : 0u, haveBrush ? 1 : 0);
+#endif
+            return passthrough();
+        }
+
+        HRESULT WINAPI Root_MyDelphiGridTheme(HTHEME theme, HDC dc, int part, int state,
+            LPCRECT rect, LPCRECT clip)
+        {
+            auto orig = GetRootOrg<OHK_DELPHI_GRID_THEME, decltype(&DrawThemeBackground)>(GetCallerModule(_ReturnAddress()));
+            if (!orig) return DrawThemeBackground(theme, dc, part, state, rect, clip);
+            wchar_t cls[MAX_PATH + 1]{};
+#if defined(_DEBUG)
+            // Диагностика: какие элементы темы рисуются в DC таблицы. Фон
+            // фиксированных ячеек не приходит ни через FillRect/PatBlt/BitBlt,
+            // поэтому проверяем DrawThemeBackground (StyleServices.DrawElement).
+            if (!g_shutdown.load(std::memory_order_acquire) && IsDelphiGridPaintDC(dc)
+                && AllowDelphiGridLog(0))
+            {
+                wchar_t themeCls[MAX_PATH + 1]{};
+                (void)Shared::ThemeHelper::GetThemeClass(theme, themeCls, MAX_PATH);
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiGrid] Theme hwnd=0x%p part=%d state=%d rect=[%ld,%ld,%ld,%ld] theme=\"%s\"",
+                    WindowFromDC(dc), part, state,
+                    rect ? rect->left : 0, rect ? rect->top : 0,
+                    rect ? rect->right : 0, rect ? rect->bottom : 0, themeCls);
+            }
+#endif
+            // Header — фон фиксированной строки (TStringGrid/TValueListEditor),
+            // Toolbar part=1 — фон ячейки значения у TValueListEditor
+            // (StyleServices рисует его темой панели). Оба должны стать
+            // прозрачными, иначе ячейка/заголовок остаются непрозрачными.
+            const bool headerPart = (part == 0 || part == 1) && (state == 1 || state == 4);
+            const bool toolbarPart = part == 1 && (state == 1 || state == 2);
+            if (!g_shutdown.load(std::memory_order_acquire) && IsDelphiGridPaintDC(dc)
+                && rect && !IsRectEmpty(rect) && (headerPart || toolbarPart)
+                && SUCCEEDED(Shared::ThemeHelper::GetThemeClass(theme, cls, MAX_PATH))
+                && (StrEqI(cls, L"Header") || StrEqI(cls, L"Toolbar")))
+            {
+                RECT area = *rect;
+                if (clip && !IntersectRect(&area, &area, clip)) return S_OK;
+                if (PatBlt(dc, area.left, area.top, area.right - area.left,
+                    area.bottom - area.top, BLACKNESS))
+                {
+#if defined(_DEBUG)
+                    if (AllowDelphiGridLog(2))
+                        DebugLog(DBG_NORMAL, L"[GlassCore][DelphiGrid] Header hwnd=0x%p part=%d state=%d",
+                            WindowFromDC(dc), part, state);
+#endif
+                    return S_OK;
+                }
+            }
+            return orig(theme, dc, part, state, rect, clip);
+        }
+
+        // Фон клиента VCL-таблицы: TCustomGrid.Paint берёт цвет как
+        // GetSysColor(COLOR_WINDOW) → CreateBrushIndirect → FillRect(ClientRect).
+        // Этот FillRect приходит мимо нашего детура, поэтому гасим цвет в самой
+        // точке его получения: белый (COLOR_WINDOW) → чёрный = прозрачность.
+        DWORD WINAPI Root_MyGetSysColor(int nIndex)
+        {
+            const HMODULE callerMod = GetCallerModule(_ReturnAddress());
+            auto o = GetRootOrg<OHK_GETSYSCOLOR, decltype(&GetSysColor)>(callerMod);
+#if defined(_DEBUG)
+            // Вход виден всегда: иначе не отличить «детур не позвали» от
+            // «orig не найден» и «хост сессии не таблица».
+            if (nIndex == COLOR_WINDOW && AllowDelphiGridLog(2))
+            {
+                const HWND host = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
+                wchar_t hostCls[128]{};
+                if (host) GetClassNameW(host, hostCls, _countof(hostCls));
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiGrid] GetSysColorEnter nIndex=%d host=0x%p hostCls=\"%s\" gridHost=%d orig=%d caller=%s",
+                    nIndex, host, hostCls, IsDelphiGridPaintHost() ? 1 : 0, o ? 1 : 0,
+                    CallerBaseName(callerMod).c_str());
+            }
+#endif
+            if (!o)
+                return GetSysColor(nIndex);
+            if (!g_shutdown.load(std::memory_order_acquire) && nIndex == COLOR_WINDOW
+                && IsDelphiGridPaintHost())
+            {
+#if defined(_DEBUG)
+                if (AllowDelphiGridLog(2))
+                    DebugLog(DBG_NORMAL,
+                        L"[GlassCore][DelphiGrid] GetSysColor COLOR_WINDOW→0 (client fill)");
+#endif
+                return 0;
+            }
+            return o(nIndex);
+        }
 
         int WINAPI Root_MyDrawTextW(
             HDC hdc, LPCWSTR t, int c, LPRECT rc, UINT fmt)
@@ -628,6 +1611,11 @@ namespace GlassCore::Root
             if (!o)
                 return DrawTextW(hdc, t, c, rc, fmt);
             if (g_shutdown.load(std::memory_order_acquire))
+                return o(hdc, t, c, rc, fmt);
+            // An outer root can still own this generic import. Do not run half
+            // of another text path when the dedicated ANSI route is unarmed.
+            if (caller == GlassCore::ModuleHandler::g_entryPointModule
+                && GlassCore::BomeMemo::IsWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd()))
                 return o(hdc, t, c, rc, fmt);
             if ((fmt & DT_CALCRECT) != 0)
                 return o(hdc, t, c, rc, fmt);
@@ -652,6 +1640,89 @@ namespace GlassCore::Root
             if (!FAILED(GlassCore::Text::DrawTextWithAlpha(hdc, t, c, rc, fmt, r)))
                 return r;
             return o(hdc, t, c, rc, fmt, dtp);
+        }
+
+        HRESULT WINAPI Root_MyDelphiDrawThemeTextEx(
+            HTHEME theme, HDC dc, int part, int state, LPCWSTR text, int count,
+            DWORD flags, LPRECT rect, const DTTOPTS* options)
+        {
+            // This slot is installed only on the entry-point EXE. An IAT-chain
+            // trampoline may return into GlassCore, not into that EXE.
+            const auto orig = GetRootOrg<OHK_DELPHI_DRAWTHEMETEXTEX, decltype(&::DrawThemeTextEx)>(
+                GlassCore::ModuleHandler::g_entryPointModule);
+            if (!orig)
+                return ::DrawThemeTextEx(theme, dc, part, state, text, count, flags, rect, options);
+            if (g_shutdown.load(std::memory_order_acquire))
+                return orig(theme, dc, part, state, text, count, flags, rect, options);
+            return GlassCore::DelphiPanel::DrawContainerThemeTextEx(
+                orig, theme, dc, part, state, text, count, flags, rect, options);
+        }
+
+        // Bome memo EXE thunks: the import owner, not a possible chain
+        // trampoline's return address, selects the original. Helpers enforce TLS
+        // readiness and exact window/DC scope even while another thread holds IAT.
+        int WINAPI Root_MyBomeMemoText(HDC dc, LPCSTR text, int count, LPRECT rect, UINT flags)
+        {
+            const auto orig = GetRootOrg<OHK_BOME_MEMO_TEXT, decltype(&::DrawTextA)>(
+                GlassCore::ModuleHandler::g_entryPointModule);
+            if (!orig) return ::DrawTextA(dc, text, count, rect, flags);
+            if (g_shutdown.load(std::memory_order_acquire)) return orig(dc, text, count, rect, flags);
+            return GlassCore::BomeMemo::DrawAnsi(orig, dc, text, count, rect, flags);
+        }
+        HBRUSH WINAPI Root_MyBomeMemoBrush(const LOGBRUSH* brush)
+        {
+            const auto orig = GetRootOrg<OHK_BOME_MEMO_BRUSH, decltype(&::CreateBrushIndirect)>(
+                GlassCore::ModuleHandler::g_entryPointModule);
+            if (!orig) return ::CreateBrushIndirect(brush);
+            if (g_shutdown.load(std::memory_order_acquire)) return orig(brush);
+            return GlassCore::BomeMemo::CreateBrush(orig, brush);
+        }
+        DWORD WINAPI Root_MyBomeMemoColor(int index)
+        {
+            const auto orig = GetRootOrg<OHK_BOME_MEMO_COLOR, decltype(&::GetSysColor)>(
+                GlassCore::ModuleHandler::g_entryPointModule);
+            if (!orig) return ::GetSysColor(index);
+            if (g_shutdown.load(std::memory_order_acquire)) return orig(index);
+            return GlassCore::BomeMemo::SystemColor(orig, index);
+        }
+        int WINAPI Root_MyBomeMemoFill(HDC dc, const RECT* rect, HBRUSH brush)
+        {
+            const auto orig = GetRootOrg<OHK_BOME_MEMO_FILL, decltype(&::FillRect)>(
+                GlassCore::ModuleHandler::g_entryPointModule);
+            if (!orig) return ::FillRect(dc, rect, brush);
+            if (g_shutdown.load(std::memory_order_acquire)) return orig(dc, rect, brush);
+            return GlassCore::BomeMemo::Fill(orig, dc, rect, brush);
+        }
+
+        // Dedicated EXE slots: return addresses in IAT chains are not import owners.
+        int WINAPI Root_MyDelphiGroupText(HDC dc, LPWSTR text, int count,
+            LPRECT rect, UINT flags, LPDRAWTEXTPARAMS params)
+        {
+            const auto orig = GetRootOrg<OHK_DELPHI_GROUP_TEXT, decltype(&::DrawTextExW)>(
+                GlassCore::ModuleHandler::g_entryPointModule);
+            if (!orig) return ::DrawTextExW(dc, text, count, rect, flags, params);
+            if (g_shutdown.load(std::memory_order_acquire)) return orig(dc, text, count, rect, flags, params);
+            return GlassCore::DelphiButtonGroups::DrawCaptionText(orig, dc, text, count, rect, flags, params);
+        }
+        int WINAPI Root_MyDelphiGroupFill(HDC dc, const RECT* rect, HBRUSH brush)
+        {
+            const auto orig = GetRootOrg<OHK_DELPHI_GROUP_FILL, decltype(&::FillRect)>(
+                GlassCore::ModuleHandler::g_entryPointModule);
+            if (!orig) return ::FillRect(dc, rect, brush);
+            if (g_shutdown.load(std::memory_order_acquire)) return orig(dc, rect, brush);
+            return GlassCore::DelphiButtonGroups::Fill(orig, dc, rect, brush);
+        }
+        template <size_t slot>
+        BOOL WINAPI Root_MyDelphiGroupGradient(HDC dc, PTRIVERTEX vertices, ULONG vertexCount,
+            PVOID mesh, ULONG meshCount, ULONG mode)
+        {
+            const auto orig = GetRootOrg<slot, decltype(&::GdiGradientFill)>(
+                GlassCore::ModuleHandler::g_entryPointModule);
+            if (!orig) return ::GdiGradientFill(dc, vertices, vertexCount, mesh, meshCount, mode);
+            if (g_shutdown.load(std::memory_order_acquire))
+                return orig(dc, vertices, vertexCount, mesh, meshCount, mode);
+            return GlassCore::DelphiButtonGroups::Gradient(orig, dc, vertices, vertexCount, mesh, meshCount, mode,
+                slot == OHK_DELPHI_GROUP_GRADIENT ? L"GradientFill" : L"GdiGradientFill");
         }
 
         BOOL WINAPI Root_MyExtTextOutW(
@@ -736,6 +1807,12 @@ namespace GlassCore::Root
             wchar_t            cls[128]{};
             if (hFromDc)
                 GetClassNameW(hFromDc, cls, _countof(cls));
+            // An outer root paint may still hold this generic EXE hook while a
+            // group repaints. Preserve its operation RGB for the dedicated path.
+            if (caller == GlassCore::ModuleHandler::g_entryPointModule
+                && GlassShared::IsDelphiButtonGroupsClassName(cls)) return o(hdc, color);
+            if (caller == GlassCore::ModuleHandler::g_entryPointModule
+                && GlassCore::BomeMemo::IsWindow(hFromDc)) return o(hdc, color);
 
             if (!g_shutdown.load(std::memory_order_acquire)
                 && (0xFFFFFF & color) == GetSysColor(COLOR_WINDOW))
@@ -799,9 +1876,16 @@ namespace GlassCore::Root
 
         HBRUSH WINAPI Root_MyGetSysColorBrush(int nIndex)
         {
-            auto o = GetRootOrg<OHK_GETSYSCOLORBR, decltype(&GetSysColorBrush)>(GetCallerModule(_ReturnAddress()));
+            const auto caller = GetCallerModule(_ReturnAddress());
+            auto o = GetRootOrg<OHK_GETSYSCOLORBR, decltype(&GetSysColorBrush)>(caller);
             if (!o)
                 return GetSysColorBrush(nIndex);
+            if (caller == GlassCore::ModuleHandler::g_entryPointModule
+                && GlassShared::IsDelphiButtonGroupsWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd()))
+                return o(nIndex);
+            if (caller == GlassCore::ModuleHandler::g_entryPointModule
+                && GlassCore::BomeMemo::IsWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd()))
+                return o(nIndex);
             if (!g_shutdown.load(std::memory_order_acquire))
             {
                 // PopupOnly: вне активной paint-сессии (стеклянного popup'а) comctl32/user32/
@@ -809,6 +1893,19 @@ namespace GlassCore::Root
                 // получают чёрные кисти вместо системных. В Full — прежнее поведение.
                 if (IsFullInjectionMode() || GlassCore::PaintDispatcher::GetPaintSessionHostHwnd() != nullptr)
                 {
+                    if (const HWND host = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd())
+                    {
+                        wchar_t hostCls[64]{};
+                        if (GetClassNameW(host, hostCls, _countof(hostCls))
+                            && IsDelphiGridClass(hostCls))
+                        {
+                            // COLOR_WINDOW → прозрачный; цветные системные кисти
+                            // (COLOR_BTNFACE и т.п.) отдаём как есть: альфа
+                            // применяется в Root_MyDelphiGridFill.
+                            if (nIndex == COLOR_WINDOW)
+                                return CreateSolidBrush(0);
+                        }
+                    }
                     if (nIndex == COLOR_WINDOW || nIndex == COLOR_BTNFACE || nIndex == COLOR_MENU)
                     {
                         // Диагностика ограничена по числу срабатываний: видно, от каких модулей
@@ -843,6 +1940,12 @@ namespace GlassCore::Root
 
             if (g_shutdown.load(std::memory_order_acquire))
                 return o(color);
+            if (caller == GlassCore::ModuleHandler::g_entryPointModule
+                && GlassShared::IsDelphiButtonGroupsWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd()))
+                return o(color);
+            if (caller == GlassCore::ModuleHandler::g_entryPointModule
+                && GlassCore::BomeMemo::IsWindow(GlassCore::PaintDispatcher::GetPaintSessionHostHwnd()))
+                return o(color);
 
             // PopupOnly: без активной paint-сессии (стеклянного popup'а) comctl32
             // не трогаем — иначе неприаттаченные окна (файловые диалоги и т.п.)
@@ -860,6 +1963,23 @@ namespace GlassCore::Root
             wchar_t baseBuf[MAX_PATH]{};
             GetModuleFileNameW(caller, baseBuf, MAX_PATH);
             const std::wstring base = BasenamePtr(baseBuf);
+
+            // VCL-таблицы (TStringGrid/TDrawGrid/TShownValueList): COLOR_WINDOW →
+            // прозрачный фон, прочие цвета → низкая альфа (стекло просвечивает).
+            if (const HWND host = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd())
+            {
+                wchar_t hostCls[64]{};
+                if (GetClassNameW(host, hostCls, _countof(hostCls)) && IsDelphiGridClass(hostCls))
+                {
+                    // Фон таблиц: COLOR_WINDOW → прозрачный. Прочие цвета — обычная
+                    // кисть; альфа делается на этапе заливки (Root_MyDelphiGridFill),
+                    // потому что pattern-кисть через FillRect альфу не переносит.
+                    const COLORREF plainGrid = color & 0xFFFFFF;
+                    if (!plainGrid || plainGrid == (GetSysColor(COLOR_WINDOW) & 0xFFFFFF))
+                        return o(RGB(0, 0, 0));
+                    return o(color);
+                }
+            }
 
             // BWM: COMDLG32 — только alpha-обёртка.
             if (StrEqI(base.c_str(), L"COMDLG32.dll"))
@@ -1015,6 +2135,32 @@ namespace GlassCore::Root
             LOGBRUSH lbrush{};
             HGDIOBJ hbr = GetCurrentObject(hdc, OBJ_BRUSH);
             GetObject(hbr, sizeof(lbrush), &lbrush);
+
+#if defined(_DEBUG)
+            if (IsDelphiGridFillDC(hdc) && AllowDelphiGridLog(1))
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiGrid] PatBltAny hwnd=0x%p rop=0x%08X rect=[%ld,%ld,%ld,%ld] style=%u color=0x%08X",
+                    WindowFromDC(hdc), static_cast<unsigned>(rop), x, y, x + cx, y + cy,
+                    static_cast<unsigned>(lbrush.lbStyle), static_cast<unsigned>(lbrush.lbColor));
+#endif
+            // Фон VCL-таблицы стирается PatBlt-ом (в т.ч. WM_ERASEBKGND до
+            // начала paint-сессии): PATCOPY/WHITENESS → прозрачность + тинт.
+            if ((rop == PATCOPY || rop == WHITENESS) && IsDelphiGridFillDC(hdc))
+            {
+                const RECT gridRect{ x, y, x + cx, y + cy };
+                const COLORREF brushColor = (lbrush.lbStyle == BS_SOLID && lbrush.lbColor)
+                    ? lbrush.lbColor : GetBkColor(hdc);
+#if defined(_DEBUG)
+                if (AllowDelphiGridLog(1))
+                    DebugLog(DBG_NORMAL,
+                        L"[GlassCore][DelphiGrid] PatBlt hwnd=0x%p rop=0x%08X rect=[%ld,%ld,%ld,%ld] color=0x%08X",
+                        WindowFromDC(hdc), static_cast<unsigned>(rop),
+                        gridRect.left, gridRect.top, gridRect.right, gridRect.bottom,
+                        static_cast<unsigned>(brushColor));
+#endif
+                if (ApplyDelphiGridCellBackground(hdc, &gridRect, brushColor))
+                    return TRUE;
+            }
 
             const bool sysmon = CallerBaseIs(caller, L"sysmon.ocx") && StrEqI(cls, L"SysmonCtrl");
             const bool gdiplusCaller = CallerBaseIs(caller, L"gdiplus.dll");
@@ -1366,6 +2512,20 @@ namespace GlassCore::Root
             if (hWnd)
                 GetClassNameW(hWnd, cls, _countof(cls));
 
+#if defined(_DEBUG)
+            if (lprc && hbr && (StrEqI(cls, L"TStringGrid") || StrEqI(cls, L"TDrawGrid")
+                || StrEqI(cls, L"TShownValueList") || StrEqI(cls, L"TValueListEditor")
+                || StrEqI(cls, L"TControlList")))
+            {
+                LOGBRUSH glb{};
+                const bool gok = GetObject(hbr, sizeof(glb), &glb) != 0;
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiGrid] GenFill hwnd=0x%p rect=[%ld,%ld,%ld,%ld] style=%d color=0x%08X",
+                    hWnd, lprc->left, lprc->top, lprc->right, lprc->bottom,
+                    gok ? static_cast<int>(glb.lbStyle) : -1,
+                    gok ? static_cast<unsigned>(glb.lbColor) : 0u);
+            }
+#endif
             const bool isAfx = StrEqI(cls, L"AfxWnd42u");
             const bool isDmView = CallerBaseIs(caller, L"dmview.ocx");
             const bool isDmdskmgr = CallerBaseIs(caller, L"dmdskmgr.dll");
@@ -1448,6 +2608,22 @@ namespace GlassCore::Root
             wchar_t cls[256]{};
             if (hWnd)
                 GetClassNameW(hWnd, cls, _countof(cls));
+
+#if defined(_DEBUG)
+            // Диагностика таблиц: BitBlt в их DC (двойная буферизация) не виден
+            // другим хукам — пишем, чтобы найти источник непрозрачного фона.
+            if (IsDelphiGridFillDC(hdc) && AllowDelphiGridLog(2))
+            {
+                const HWND srcWnd = hdcSrc ? WindowFromDC(hdcSrc) : nullptr;
+                const HGDIOBJ srcBmp = hdcSrc ? GetCurrentObject(hdcSrc, OBJ_BITMAP) : nullptr;
+                BITMAP bm{};
+                const bool bmOk = srcBmp && GetObjectW(srcBmp, sizeof(bm), &bm) == sizeof(bm);
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiGrid] BitBlt hwnd=0x%p dst=(%d,%d) %dx%d srcWnd=0x%p srcBmp=0x%p %ldx%ld bpp=%u rop=0x%08X",
+                    hWnd, x, y, cx, cy, srcWnd, srcBmp, bm.bmWidth, bm.bmHeight,
+                    static_cast<unsigned>(bm.bmBitsPixel), static_cast<unsigned>(rop));
+            }
+#endif
 
             const bool afxToolbar = CallerBaseIs(caller, L"comctl32.dll")
                 && StrEqI(cls, L"AfxWnd42u")
@@ -1599,5 +2775,11 @@ namespace GlassCore::Root
                 return TRUE;
             return o(hdc, x, y, lpString, c);
         }
+
+    // Пара провайдеров для реконструкции фона фиксированной области таблиц.
+    void RegisterDelphiGridPaintProvider() noexcept
+    {
+        GlassCore::PaintDispatcher::RegisterPaintProvider({ GridPaintBegin, GridPaintEnd });
+    }
 
 } // namespace GlassCore::Root

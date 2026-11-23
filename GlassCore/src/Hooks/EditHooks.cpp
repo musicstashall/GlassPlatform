@@ -38,6 +38,8 @@
 #include <Subsystems/RenderText.h>
 #include <Subsystems/TextInkClientRegistry.h>
 #include <GlassControlKind.h>
+#include <GlassDelphiMemoBackground.h>
+#include <Hooks/delphi/TInputHooks.h>
 #include <WinApiUtils.h>
 #include <wil.h>
 
@@ -70,6 +72,11 @@ namespace GlassCore::EditControl
         HWND    hwnd;
         HMODULE mod;
         GlassShared::GlassControlKind kind;
+        // Заполняется после успешного оригинального BeginPaint, а не при
+        // onBegin (внутри BeginPaint может быть вложенный GetDCEx/WM_NCPAINT).
+        HDC paintDc = nullptr;
+        bool hotKeyFillHook = false;
+        bool numberBackgroundCleared = false;
     };
 
     thread_local std::vector<EditPaintSession> g_editSessionStack;  // BeginPaint/EndPaint
@@ -77,9 +84,40 @@ namespace GlassCore::EditControl
 
     static std::atomic<bool> g_shutdown{ false };
 
+    [[nodiscard]] static bool IsDelphiMemo(HWND hwnd) noexcept
+    {
+        WCHAR cls[64]{};
+        return hwnd && GetClassNameW(hwnd, cls, _countof(cls)) > 0
+            && _wcsicmp(cls, L"TMemo") == 0;
+    }
+
+    // Compatible bitmap оконного DC не гарантирует сохранение alpha при
+    // промежуточной композиции. Для VCL Memo используем явный 32bpp DIB.
+    [[nodiscard]] static HBITMAP CreateMemoComposeBitmap(HDC dc, int width, int height, void** outBits = nullptr) noexcept
+    {
+        BITMAPINFO bmi{};
+        bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bmi.bmiHeader.biWidth = width;
+        bmi.bmiHeader.biHeight = -height;
+        bmi.bmiHeader.biPlanes = 1;
+        bmi.bmiHeader.biBitCount = 32;
+        bmi.bmiHeader.biCompression = BI_RGB;
+        void* bits = nullptr;
+        HBITMAP bitmap = CreateDIBSection(dc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+        if (outBits) *outBits = bitmap ? bits : nullptr;
+        return bitmap;
+    }
+
     // =========================================================================
     //  EditBufferedSession — сессионный DIB для многострочного Edit
     // =========================================================================
+    struct MemoBackgroundOp
+    {
+        RECT rect;
+        COLORREF color;
+        bool fill;
+    };
+
     struct EditBufferedSession
     {
         HWND     hWnd = nullptr;
@@ -107,11 +145,89 @@ namespace GlassCore::EditControl
 
         // fromGetDC: сессия создана для GetDC-канала (не BeginPaint)
         bool fromGetDC = false;
+        bool delphiMemo = false;
+        COLORREF memoSolidBackground = CLR_INVALID;
+        // Только фон TMemo; текст в отдельном DIB, чтобы tblend не ослаблял заливку.
+        std::vector<MemoBackgroundOp> memoBackgrounds;
     };
 
     thread_local EditBufferedSession* g_activeEditBuffer = nullptr;
     thread_local bool                g_bypassEditBuffer = false;
     thread_local std::vector<RECT>   g_sessionBlacknessRects;
+
+#if defined(_DEBUG)
+    // Никакого текста пользователя; лимит отдельно для вызовов и flush.
+    [[nodiscard]] static bool AllowDelphiMemoLog(HWND hwnd, unsigned channel) noexcept
+    {
+        if (!IsDelphiMemo(hwnd))
+            return false;
+        static thread_local ULONGLONG epoch[3]{};
+        static thread_local unsigned budget[3]{};
+        const ULONGLONG now = GetTickCount64();
+        if (!epoch[channel] || now - epoch[channel] >= 1000)
+        {
+            epoch[channel] = now;
+            budget[channel] = 16;
+        }
+        if (!budget[channel]) return false;
+        --budget[channel];
+        return true;
+    }
+
+    [[nodiscard]] static bool AllowDelphiComboEditLog(HWND hwnd) noexcept
+    {
+        WCHAR cls[64]{}, parentClass[64]{};
+        const HWND parent = hwnd ? GetParent(hwnd) : nullptr;
+        if (!parent || !GetClassNameW(hwnd, cls, _countof(cls))
+            || _wcsicmp(cls, L"Edit") != 0
+            || !GetClassNameW(parent, parentClass, _countof(parentClass))
+            || _wcsicmp(parentClass, L"TComboBox") != 0)
+            return false;
+        static thread_local ULONGLONG epoch = 0;
+        static thread_local unsigned budget = 0;
+        const ULONGLONG now = GetTickCount64();
+        if (!epoch || now - epoch >= 1000) { epoch = now; budget = 16; }
+        if (!budget) return false;
+        --budget;
+        return true;
+    }
+
+    // Диагностика новых VCL Edit-классов в существующих хуках, без текста.
+    [[nodiscard]] static bool AllowDelphiInputLog(HWND hwnd, unsigned channel) noexcept
+    {
+        WCHAR cls[64]{};
+        if (!hwnd || !GetClassNameW(hwnd, cls, _countof(cls))) return false;
+        if (_wcsicmp(cls, L"TLabeledEdit") != 0 && _wcsicmp(cls, L"TButtonedEdit") != 0
+            && _wcsicmp(cls, L"TMaskEdit") != 0 && _wcsicmp(cls, L"TSearchBox") != 0
+            && _wcsicmp(cls, L"TNumberBox") != 0 && _wcsicmp(cls, L"TSpinEdit") != 0 && _wcsicmp(cls, L"THotKey") != 0
+            && _wcsicmp(cls, L"TRichEdit") != 0)
+            return false;
+        static thread_local ULONGLONG epoch[2]{};
+        static thread_local unsigned budget[2]{};
+        const ULONGLONG now = GetTickCount64();
+        if (!epoch[channel] || now - epoch[channel] >= 1000) { epoch[channel] = now; budget[channel] = 24; }
+        if (!budget[channel]) return false;
+        --budget[channel];
+        return true;
+    }
+
+    // Только суммарная alpha-статистика, не содержимое DIB. Ограничиваем работу.
+    static void MemoAlphaStats(const RGBQUAD* bits, int width, int height,
+        size_t& nonzero, unsigned& maximum) noexcept
+    {
+        nonzero = 0;
+        maximum = 0;
+        if (!bits || width <= 0 || height <= 0) return;
+        const size_t count = static_cast<size_t>(width) * static_cast<size_t>(height);
+        if (count > 4000000) return;
+        for (size_t i = 0; i < count; ++i)
+        {
+            const unsigned alpha = bits[i].rgbReserved;
+            if (alpha) ++nonzero;
+            if (alpha > maximum) maximum = alpha;
+        }
+    }
+#endif
 
     // RichEdit20: политика BWM на весь клиент
     thread_local HWND    g_re20FullClientBgPrimedHwnd = nullptr;
@@ -218,6 +334,9 @@ namespace GlassCore::EditControl
         buf->width = rc.right;
         buf->height = rc.bottom;
         buf->fromGetDC = fromGetDC;
+        buf->delphiMemo = IsDelphiMemo(hWnd);
+        if (buf->delphiMemo)
+            buf->memoSolidBackground = GlassShared::GetDelphiMemoBackground(hWnd);
 
         const DWORD style = static_cast<DWORD>(GetWindowLongW(hWnd, GWL_STYLE));
         buf->hasHScroll = (style & WS_HSCROLL) != 0;
@@ -234,7 +353,10 @@ namespace GlassCore::EditControl
             if (HDC base = GlassCore::PaintDispatcher::GetPaintSessionBaseWindowDc(hWnd))
                 bltSrc = base;
         }
-        HBITMAP snapBmp = CreateCompatibleBitmap(bltSrc, rc.right, rc.bottom);
+        HBITMAP snapBmp = buf->delphiMemo
+            ? CreateMemoComposeBitmap(bltSrc, rc.right, rc.bottom) : nullptr;
+        if (!snapBmp)
+            snapBmp = CreateCompatibleBitmap(bltSrc, rc.right, rc.bottom);
         if (snapBmp)
         {
             HDC snapDC = CreateCompatibleDC(bltSrc);
@@ -261,13 +383,61 @@ namespace GlassCore::EditControl
             static_cast<int>(buf->useDualPass),
             static_cast<int>(fromGetDC),
             buf->bgSnapshot ? 1 : 0);
+#if defined(_DEBUG)
+        if (buf->delphiMemo && AllowDelphiMemoLog(hWnd, 1))
+            DebugLog(DBG_NORMAL, L"[GlassCore][DelphiMemo] BufferTarget hwnd=0x%p screenDc=0x%p paintDc=0x%p memDc=0x%p",
+                hWnd, screenDC, g_editSessionStack.empty() ? nullptr : g_editSessionStack.back().paintDc, memDC);
+#endif
+    }
+
+    // Не используем устаревшую CTLCOLOR-property без подтверждения хотя бы
+    // одной текущей ETO_OPAQUE заливкой тем же цветом. Только буфер TMemo и
+    // клиентский BeginPaint: копирование на screenDC ограничено update clip.
+    [[nodiscard]] static bool HasConfirmedMemoSolidBackground(const EditBufferedSession& buf) noexcept
+    {
+        if (!buf.delphiMemo || buf.memoSolidBackground == CLR_INVALID) return false;
+        for (const auto& op : buf.memoBackgrounds)
+            if (op.fill && (op.color & 0xFFFFFFu) == buf.memoSolidBackground)
+                return true;
+        return false;
+    }
+
+    static bool PrimeMemoSolidBackground(HDC dc, const EditBufferedSession& buf) noexcept
+    {
+        if (!dc || !HasConfirmedMemoSolidBackground(buf)) return false;
+        wil::unique_hbrush brush{
+            Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(buf.memoSolidBackground,
+                (buf.memoSolidBackground & 0xFFFFFFu) == (GetSysColor(COLOR_HIGHLIGHT) & 0xFFFFFFu) ? 255 : 100) };
+        if (!brush) return false;
+        RECT rect{ 0, 0, buf.width, buf.height };
+        if (!PatBlt(dc, 0, 0, buf.width, buf.height, BLACKNESS)) return false;
+        return FillRect(dc, &rect, brush.get()) != 0;
+    }
+
+    // Как на прямом GetDC: сначала прозрачная очистка, затем alpha-100
+    // пользовательская/selection заливка. Порядок важен при пересечении rect.
+    static void ReplayMemoBackgrounds(HDC dc, const EditBufferedSession& buf) noexcept
+    {
+        for (const auto& op : buf.memoBackgrounds)
+        {
+            const RECT& r = op.rect;
+            PatBlt(dc, r.left, r.top, r.right - r.left, r.bottom - r.top, BLACKNESS);
+            if (op.fill)
+            {
+                wil::unique_hbrush brush{
+                    Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(op.color,
+                        (op.color & 0xFFFFFFu) == (GetSysColor(COLOR_HIGHLIGHT) & 0xFFFFFFu) ? 255 : 100) };
+                if (brush) FillRect(dc, &r, brush.get());
+            }
+        }
     }
 
     // ── FlushEditBuffer ─────────────────────────────────────────────────────
     // Компонует результат и выводит на экран.
     // Использует bgSnapshot вместо повторного BitBlt(screenDC):
     //   bgSnapshot → фон без «загрязнения»
-    //   g_sessionBlacknessRects → BLACKNESS для ETO_OPAQUE областей
+    //   обычный Edit: g_sessionBlacknessRects → BLACKNESS для ETO_OPAQUE
+    //   TMemo: memoBackgrounds → BLACKNESS и цветные заливки по порядку
     //   buf->memDC  → текст с premultiplied alpha
     static void FlushEditBuffer() noexcept
     {
@@ -278,8 +448,20 @@ namespace GlassCore::EditControl
             return;
         }
         g_activeEditBuffer = nullptr;
-
         GdiFlush();
+#if defined(_DEBUG)
+        const bool logMemoFlush = AllowDelphiMemoLog(buf->hWnd, 1);
+        if (logMemoFlush)
+        {
+            size_t nonzero = 0;
+            unsigned maxAlpha = 0;
+            MemoAlphaStats(buf->bits, buf->width, buf->height, nonzero, maxAlpha);
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiMemo] Flush hwnd=0x%p focused=%d blackRects=%zu memoBackgrounds=%zu paintDepth=%zu dcDepth=%zu inkAlphaCount=%zu inkAlphaMax=%u",
+                buf->hWnd, GetFocus() == buf->hWnd ? 1 : 0, g_sessionBlacknessRects.size(),
+                buf->memoBackgrounds.size(), g_editSessionStack.size(), g_editDcStack.size(), nonzero, maxAlpha);
+        }
+#endif
 
         const DWORD editStyle =
             buf->hWnd ? static_cast<DWORD>(GetWindowLongW(buf->hWnd, GWL_STYLE)) : 0u;
@@ -287,12 +469,16 @@ namespace GlassCore::EditControl
         // ── Compose-буфер ────────────────────────────────────────────────────
         HDC     composeDC = CreateCompatibleDC(buf->screenDC);
         HBITMAP composeBmp = nullptr;
+        void* composeBits = nullptr;
         HGDIOBJ oldComposeBmp = nullptr;
         bool composed = false;
 
         if (composeDC)
         {
-            composeBmp = CreateCompatibleBitmap(buf->screenDC, buf->width, buf->height);
+            if (buf->delphiMemo)
+                composeBmp = CreateMemoComposeBitmap(buf->screenDC, buf->width, buf->height, &composeBits);
+            if (!composeBmp)
+                composeBmp = CreateCompatibleBitmap(buf->screenDC, buf->width, buf->height);
             if (composeBmp)
             {
                 oldComposeBmp = SelectObject(composeDC, composeBmp);
@@ -322,26 +508,69 @@ namespace GlassCore::EditControl
                         buf->screenDC, 0, 0, SRCCOPY);
                 }
 
-                // ── 2. BLACKNESS для ETO_OPAQUE областей ─────────────────────
-                for (RECT r : g_sessionBlacknessRects)
+                // ── 2. Фон для ETO_OPAQUE областей ───────────────────────────
+                if (buf->delphiMemo)
                 {
-                    if (editStyle == kEditStyleInsetTextRect)
-                        InflateRect(&r, 2, 2);
-                    RECT clip{ 0, 0, buf->width, buf->height };
-                    if (!IntersectRect(&r, &r, &clip) || IsRectEmpty(&r)) continue;
-                    PatBlt(composeDC, r.left, r.top, r.right - r.left, r.bottom - r.top, BLACKNESS);
+                    const bool primed = PrimeMemoSolidBackground(composeDC, *buf);
+#if defined(_DEBUG)
+                    if (logMemoFlush)
+                        DebugLog(DBG_NORMAL, L"[GlassCore][DelphiMemo] SolidBackground hwnd=0x%p color=0x%08X confirmed=%d primed=%d target=compose",
+                            buf->hWnd, static_cast<unsigned>(buf->memoSolidBackground),
+                            HasConfirmedMemoSolidBackground(*buf) ? 1 : 0, primed ? 1 : 0);
+#else
+                    (void)primed;
+#endif
+                    ReplayMemoBackgrounds(composeDC, *buf);
+                }
+                else
+                {
+                    for (RECT r : g_sessionBlacknessRects)
+                    {
+                        if (editStyle == kEditStyleInsetTextRect)
+                            InflateRect(&r, 2, 2);
+                        RECT clip{ 0, 0, buf->width, buf->height };
+                        if (!IntersectRect(&r, &r, &clip) || IsRectEmpty(&r)) continue;
+                        PatBlt(composeDC, r.left, r.top, r.right - r.left, r.bottom - r.top, BLACKNESS);
+                    }
                 }
 
                 // ── 3. AlphaBlend текста (tblend — из профиля капсулы, не RAM-превью) ──
                 const BYTE sessionTblend =
                     GlassCore::Text::ResolveEffectiveTargetBlendAlpha(buf->useDualPass);
                 BLENDFUNCTION bf{ AC_SRC_OVER, 0, sessionTblend, AC_SRC_ALPHA };
-                GdiAlphaBlend(composeDC, 0, 0, buf->width, buf->height,
+                const BOOL blendOk = GdiAlphaBlend(composeDC, 0, 0, buf->width, buf->height,
                     buf->memDC, 0, 0, buf->width, buf->height, bf);
+#if defined(_DEBUG)
+                if (logMemoFlush)
+                {
+                    GdiFlush();
+                    // Проверяем фактический результат CreateDIBSection, а не
+                    // знак высоты в GetObject(DIBSECTION): он может нормализоваться.
+                    const bool isDib = composeBits != nullptr;
+                    size_t nonzero = 0;
+                    unsigned maxAlpha = 0;
+                    if (isDib)
+                        MemoAlphaStats(static_cast<const RGBQUAD*>(composeBits),
+                            buf->width, buf->height, nonzero, maxAlpha);
+                    DebugLog(DBG_NORMAL,
+                        L"[GlassCore][DelphiMemo] Compose hwnd=0x%p dib=%d blend=%d tblend=%u alphaCount=%zu alphaMax=%u",
+                        buf->hWnd, isDib ? 1 : 0, blendOk ? 1 : 0,
+                        static_cast<unsigned>(sessionTblend), nonzero, maxAlpha);
+                }
+#else
+                (void)blendOk;
+#endif
 
                 // ── 4. Один BitBlt на экран ─────────────────────────────────
-                BitBlt(buf->screenDC, 0, 0, buf->width, buf->height,
+                const BOOL copyOk = BitBlt(buf->screenDC, 0, 0, buf->width, buf->height,
                     composeDC, 0, 0, SRCCOPY);
+#if defined(_DEBUG)
+                if (logMemoFlush)
+                    DebugLog(DBG_NORMAL, L"[GlassCore][DelphiMemo] Copy hwnd=0x%p ok=%d",
+                        buf->hWnd, copyOk ? 1 : 0);
+#else
+                (void)copyOk;
+#endif
 
                 SelectObject(composeDC, oldComposeBmp);
                 DeleteObject(composeBmp);
@@ -353,13 +582,34 @@ namespace GlassCore::EditControl
         // Fallback если compose DC не создался
         if (!composed)
         {
-            for (RECT r : g_sessionBlacknessRects)
+#if defined(_DEBUG)
+            if (logMemoFlush)
+                DebugLog(DBG_NORMAL, L"[GlassCore][DelphiMemo] ComposeFallback hwnd=0x%p screenDc=0x%p",
+                    buf->hWnd, buf->screenDC);
+#endif
+            if (buf->delphiMemo)
             {
-                if (editStyle == kEditStyleInsetTextRect)
-                    InflateRect(&r, 2, 2);
-                RECT clip{ 0, 0, buf->width, buf->height };
-                if (!IntersectRect(&r, &r, &clip) || IsRectEmpty(&r)) continue;
-                PatBlt(buf->screenDC, r.left, r.top, r.right - r.left, r.bottom - r.top, BLACKNESS);
+                const bool primed = PrimeMemoSolidBackground(buf->screenDC, *buf);
+#if defined(_DEBUG)
+                if (logMemoFlush)
+                    DebugLog(DBG_NORMAL, L"[GlassCore][DelphiMemo] SolidBackground hwnd=0x%p color=0x%08X confirmed=%d primed=%d target=fallback",
+                        buf->hWnd, static_cast<unsigned>(buf->memoSolidBackground),
+                        HasConfirmedMemoSolidBackground(*buf) ? 1 : 0, primed ? 1 : 0);
+#else
+                (void)primed;
+#endif
+                ReplayMemoBackgrounds(buf->screenDC, *buf);
+            }
+            else
+            {
+                for (RECT r : g_sessionBlacknessRects)
+                {
+                    if (editStyle == kEditStyleInsetTextRect)
+                        InflateRect(&r, 2, 2);
+                    RECT clip{ 0, 0, buf->width, buf->height };
+                    if (!IntersectRect(&r, &r, &clip) || IsRectEmpty(&r)) continue;
+                    PatBlt(buf->screenDC, r.left, r.top, r.right - r.left, r.bottom - r.top, BLACKNESS);
+                }
             }
             const BYTE sessionTblend =
                 GlassCore::Text::ResolveEffectiveTargetBlendAlpha(buf->useDualPass);
@@ -382,6 +632,8 @@ namespace GlassCore::EditControl
         delete buf;
     }
 
+    static bool IsRichEditKind(GlassShared::GlassControlKind kind) noexcept;
+
     // ── ApplyEditBackgroundRect ─────────────────────────────────────────────
     // Обработка ETO_OPAQUE: PatBlt(BLACKNESS) + опциональный FillRect.
     static void ApplyEditBackgroundRect(
@@ -402,20 +654,42 @@ namespace GlassCore::EditControl
         GetClientRect(sessionHwnd, &clientClip);
         if (!IntersectRect(&r, &r, &clientClip) || IsRectEmpty(&r)) return;
 
-        PatBlt(targetDC, r.left, r.top, r.right - r.left, r.bottom - r.top, BLACKNESS);
-        if (useSession && g_activeEditBuffer && targetDC == g_activeEditBuffer->memDC)
-            PushSessionBlacknessRect(r, g_activeEditBuffer->width, g_activeEditBuffer->height);
-
+        const BOOL cleared = PatBlt(targetDC, r.left, r.top, r.right - r.left, r.bottom - r.top, BLACKNESS);
+#if defined(_DEBUG)
+        if (AllowDelphiMemoLog(sessionHwnd, 2))
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiMemo] ApplyBackground api=PatBlt hwnd=0x%p source=0x%p target=0x%p targetWnd=0x%p session=%d rect=[%ld,%ld,%ld,%ld] rop=BLACKNESS result=%d bk=0x%08X",
+                sessionHwnd, hdc, targetDC, WindowFromDC(targetDC), useSession ? 1 : 0,
+                r.left, r.top, r.right, r.bottom, cleared, static_cast<unsigned>(GetBkColor(hdc)));
+#else
+        (void)cleared;
+#endif
         const COLORREF color = backgroundOverride ? *backgroundOverride : GetBkColor(hdc);
         const COLORREF rgb = color & 0xFFFFFFu;
         const COLORREF sysWnd = GetSysColor(COLOR_WINDOW) & 0xFFFFFFu;
         const COLORREF sysBtn = GetSysColor(COLOR_BTNFACE) & 0xFFFFFFu;
+        // RichEdit/TMemo skip only COLOR_WINDOW; other plain Edits keep their policy.
+        const bool fill = IsRichEditKind(GlassShared::GlassGetWindowKind(sessionHwnd)) || IsDelphiMemo(sessionHwnd)
+            ? rgb != sysWnd : rgb != 0 && rgb != sysBtn && rgb != sysWnd;
+
+        if (useSession && g_activeEditBuffer && targetDC == g_activeEditBuffer->memDC)
+        {
+            if (g_activeEditBuffer->delphiMemo)
+            {
+                // BLACKNESS выше стирает старый текст из DIB. Заливку откладываем
+                // до композиции, иначе она смешивается с текстом при tblend < 255.
+                g_activeEditBuffer->memoBackgrounds.push_back({ r, color, fill });
+                return;
+            }
+            PushSessionBlacknessRect(r, g_activeEditBuffer->width, g_activeEditBuffer->height);
+        }
 
         wil::unique_hbrush brush{
-            Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(color, 255) };
+            Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(color,
+                rgb == (GetSysColor(COLOR_HIGHLIGHT) & 0xFFFFFFu) ? 255 : 100) };
         if (!brush) return;
 
-        if (rgb == 0 || rgb == sysBtn || rgb == sysWnd)
+        if (!fill)
         {
             // Прозрачный фон — только BLACKNESS, без FillRect
         }
@@ -454,7 +728,6 @@ namespace GlassCore::EditControl
     //  OVERALL DISPATCHER MAP
     // =========================================================================
     static bool IsEditKind(GlassShared::GlassControlKind kind);
-    static bool IsRichEditKind(GlassShared::GlassControlKind kind) noexcept;
 
     BOOL WINAPI Edit_MyExtTextOutW(HDC, int, int, UINT, const RECT*, LPCWSTR, UINT, const INT*);
     BOOL WINAPI Edit_MyExtTextOutA(HDC, int, int, UINT, const RECT*, LPCSTR, UINT, const INT*);
@@ -636,6 +909,36 @@ namespace GlassCore::EditControl
     {
         const GlassShared::GlassControlKind controlKind = GlassShared::GlassGetWindowKind(sessionHwnd);
 
+        // В VCL TMemo BeginPaint может синхронно вызвать WM_NCPAINT и GetDCEx
+        // с DCX_WINDOW до того, как вернёт клиентский HDC. Этот временный DC
+        // освобождается раньше EndPaint: привязывать к нему буфер нельзя.
+        // WindowFromDC не различает эти два DC; используем точный HDC из
+        // post-BeginPaint и не переадресуем в буфер чужие/вложенные DC.
+        if (!g_editSessionStack.empty() && (IsDelphiMemo(sessionHwnd)
+            || GlassCore::DelphiInput::IsSpinEdit(sessionHwnd)))
+        {
+            const auto& paint = g_editSessionStack.back();
+            if (paint.hwnd != sessionHwnd || !paint.paintDc || paint.paintDc != hdc
+                || !GlassCore::PaintDispatcher::IsCurrentPaintDcForHwnd(sessionHwnd, hdc)
+                || (g_activeEditBuffer && (g_activeEditBuffer->hWnd != sessionHwnd
+                    || g_activeEditBuffer->screenDC != paint.paintDc)))
+            {
+#if defined(_DEBUG)
+                if (AllowDelphiMemoLog(sessionHwnd, 0))
+                    DebugLog(DBG_NORMAL,
+                        L"[GlassCore][DelphiMemo] NonPaintPass hwnd=0x%p dc=0x%p paintHwnd=0x%p paintDc=0x%p options=0x%X count=%u",
+                        sessionHwnd, hdc, paint.hwnd, paint.paintDc, options, c);
+#endif
+                return origW(hdc, x, y, options, lprect, lpString, c, lpDx);
+            }
+        }
+
+        if (!g_editSessionStack.empty() && c && !g_editSessionStack.back().numberBackgroundCleared
+            && g_editSessionStack.back().hwnd == sessionHwnd
+            && g_editSessionStack.back().paintDc == hdc
+            && GlassCore::DelphiInput::ClearNumberBoxGlyphBackground(sessionHwnd, hdc, lprect, options))
+            g_editSessionStack.back().numberBackgroundCleared = true;
+
         SyncActiveEditBufferDualPassFromGlobals();
 
         // ── Определяем нужен ли session buffer (только канал BeginPaint) ───────
@@ -663,6 +966,49 @@ namespace GlassCore::EditControl
             SetBkColor(targetDC, GetBkColor(hdc));
             SetBkMode(targetDC, GetBkMode(hdc));
         }
+
+#if defined(_DEBUG)
+        if (AllowDelphiMemoLog(sessionHwnd, 0))
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiMemo] ExtTextOut hwnd=0x%p focused=%d dc=0x%p dcWnd=0x%p "
+                L"paintDepth=%zu dcDepth=%zu count=%u options=0x%X textColor=0x%08X bk=0x%08X "
+                L"wantSession=%d useSession=%d accepted=%d rects=%zu",
+                sessionHwnd, GetFocus() == sessionHwnd ? 1 : 0, hdc, WindowFromDC(hdc),
+                g_editSessionStack.size(), g_editDcStack.size(), c, options,
+                static_cast<unsigned>(GetTextColor(hdc)), static_cast<unsigned>(GetBkColor(hdc)),
+                wantSession ? 1 : 0, useSession ? 1 : 0,
+                EditSessionBufferAcceptsSourceDc(g_activeEditBuffer, sessionHwnd, hdc) ? 1 : 0,
+                g_sessionBlacknessRects.size());
+        if (AllowDelphiInputLog(sessionHwnd, 0))
+        {
+            WCHAR cls[64]{};
+            GetClassNameW(sessionHwnd, cls, _countof(cls));
+            const RECT r = lprect ? *lprect : RECT{};
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiInput] ExtTextOut hwnd=0x%p class=%s focus=%d dc=0x%p dcWnd=0x%p obj=%u caller=0x%p paintDepth=%zu dcDepth=%zu options=0x%X count=%u rect=[%ld,%ld,%ld,%ld] bk=0x%08X textColor=0x%08X",
+                sessionHwnd, cls, GetFocus() == sessionHwnd ? 1 : 0, hdc, WindowFromDC(hdc),
+                static_cast<unsigned>(GetObjectType(hdc)), callerMod, g_editSessionStack.size(), g_editDcStack.size(),
+                options, c, r.left, r.top, r.right, r.bottom,
+                static_cast<unsigned>(GetBkColor(hdc)), static_cast<unsigned>(GetTextColor(hdc)));
+        }
+        if (AllowDelphiComboEditLog(sessionHwnd))
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiComboEdit] ExtTextOut hwnd=0x%p parent=0x%p focused=%d dc=0x%p dcWnd=0x%p caller=0x%p paintDepth=%zu dcDepth=%zu options=0x%X count=%u x=%d y=%d bk=0x%08X",
+                sessionHwnd, GetParent(sessionHwnd), GetFocus() == sessionHwnd ? 1 : 0,
+                hdc, WindowFromDC(hdc), callerMod, g_editSessionStack.size(), g_editDcStack.size(),
+                options, c, x, y, static_cast<unsigned>(GetBkColor(hdc)));
+        if (AllowDelphiMemoLog(sessionHwnd, 0))
+        {
+            RECT clip{};
+            const int clipKind = GetClipBox(hdc, &clip);
+            const RECT r = lprect ? *lprect : RECT{};
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiMemo] TextGeometry hwnd=0x%p caller=0x%p dc=0x%p target=0x%p obj=%d x=%d y=%d rectPresent=%d rect=[%ld,%ld,%ld,%ld] clipKind=%d clip=[%ld,%ld,%ld,%ld] align=0x%X mode=%d",
+                sessionHwnd, callerMod, hdc, targetDC, GetObjectType(hdc), x, y, lprect ? 1 : 0,
+                r.left, r.top, r.right, r.bottom, clipKind, clip.left, clip.top, clip.right, clip.bottom,
+                GetTextAlign(hdc), GetBkMode(hdc));
+        }
+#endif
 
         // ── RichEdit20: фон на весь клиент (без изменений) ────────────────────
         if (IsRichEdit20Only(controlKind) && sessionHwnd)
@@ -807,9 +1153,17 @@ namespace GlassCore::EditControl
             const bool sessionLikeUseDualPass = GlassCore::Text::PlainEditUseDualPass(sessionHwnd, rm);
             const auto& inkCapsule =
                 GlassCore::Text::GetRuntimeInkCapsuleProfile(sessionLikeUseDualPass);
-            if (SUCCEEDED(GlassCore::Text::ExtTextOutWithAlphaMultilinePlainGetDc(
-                hdc, x, y, drawOptions, lprect, lpString, c, lpDx, origW, sessionLikeUseDualPass, &inkCapsule)))
-                return TRUE;
+            const HRESULT hrGetDc = GlassCore::Text::ExtTextOutWithAlphaMultilinePlainGetDc(
+                hdc, x, y, drawOptions, lprect, lpString, c, lpDx, origW, sessionLikeUseDualPass, &inkCapsule);
+#if defined(_DEBUG)
+            if (AllowDelphiMemoLog(sessionHwnd, 2))
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiMemo] DirectGetDC hwnd=0x%p focused=%d dc=0x%p dcWnd=0x%p options=0x%X count=%u dual=%d hr=0x%08lX fallback=%d",
+                    sessionHwnd, GetFocus() == sessionHwnd ? 1 : 0, hdc, WindowFromDC(hdc),
+                    options, c, sessionLikeUseDualPass ? 1 : 0,
+                    static_cast<unsigned long>(hrGetDc), FAILED(hrGetDc) ? 1 : 0);
+#endif
+            if (SUCCEEDED(hrGetDc)) return TRUE;
             return origW(hdc, x, y, drawOptions, lprect, lpString, c, lpDx);
         }
 
@@ -831,6 +1185,15 @@ namespace GlassCore::EditControl
             const auto& inkCapsule = GlassCore::Text::GetRuntimeInkCapsuleProfile(plainDual);
             const HRESULT hrPlain = GlassCore::Text::ExtTextOutWithAlpha(
                 hdc, x, y, drawOptions, lprect, lpString, c, lpDx, origW, directMode, sessionHwnd, &inkCapsule);
+#if defined(_DEBUG)
+            if (AllowDelphiInputLog(sessionHwnd, 1))
+                DebugLog(DBG_NORMAL, L"[GlassCore][DelphiInput] TextResult hwnd=0x%p dc=0x%p dcWnd=0x%p options=0x%X count=%u hr=0x%08lX fallback=%d",
+                    sessionHwnd, hdc, WindowFromDC(hdc), options, c,
+                    static_cast<unsigned long>(hrPlain), FAILED(hrPlain) ? 1 : 0);
+            if (AllowDelphiComboEditLog(sessionHwnd))
+                DebugLog(DBG_NORMAL, L"[GlassCore][DelphiComboEdit] TextResult hwnd=0x%p dc=0x%p options=0x%X count=%u hr=0x%08lX fallback=%d",
+                    sessionHwnd, hdc, options, c, static_cast<unsigned long>(hrPlain), FAILED(hrPlain) ? 1 : 0);
+#endif
             if (SUCCEEDED(hrPlain))
                 return TRUE;
             DebugLog(DBG_NORMAL,
@@ -870,6 +1233,26 @@ namespace GlassCore::EditControl
         if (dcWnd && !IsEditKind(GlassShared::GlassGetWindowKind(dcWnd)))
             return orig(hdc, x, y, options, lprect, lpString, c, lpDx);
 
+#if defined(_DEBUG)
+        if (IsDelphiMemo(sessionHwnd) && (options & ETO_GLYPH_INDEX))
+        {
+            static thread_local ULONGLONG epoch = 0;
+            static thread_local unsigned budget = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (!epoch || now - epoch >= 1000) { epoch = now; budget = 4; }
+            if (budget)
+            {
+                --budget;
+                void* frames[8]{};
+                const USHORT captured = CaptureStackBackTrace(0, _countof(frames), frames, nullptr);
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiMemo] ExtTextOutStack hwnd=0x%p focused=%d dc=0x%p dcWnd=0x%p caller=0x%p options=0x%X frames=%u stack=[%p,%p,%p,%p,%p,%p,%p,%p]",
+                    sessionHwnd, GetFocus() == sessionHwnd ? 1 : 0, hdc, dcWnd, callerMod, options,
+                    static_cast<unsigned>(captured), frames[0], frames[1], frames[2], frames[3],
+                    frames[4], frames[5], frames[6], frames[7]);
+            }
+        }
+#endif
         return Edit_WorkExtTextOutCore(sessionHwnd, hdc, x, y, options, lprect, lpString, c, lpDx, callerMod, orig);
     }
 
@@ -883,6 +1266,14 @@ namespace GlassCore::EditControl
             return orig(hdc, lprc, hbr);
         if (!lprc || !hbr)
             return orig(hdc, lprc, hbr);
+
+        if (!g_editSessionStack.empty())
+        {
+            const auto& paint = g_editSessionStack.back();
+            if (paint.hotKeyFillHook && paint.paintDc == hdc
+                && GlassCore::DelphiInput::ClearHotKeyBackground(paint.hwnd, hdc, lprc, hbr))
+                return TRUE;
+        }
 
         LOGBRUSH lb{};
         if (GetObject(hbr, sizeof(lb), &lb) && lb.lbStyle == BS_SOLID)
@@ -1069,6 +1460,28 @@ namespace GlassCore::EditControl
             L"[GlassCore][Edit] BeginPaint: mod=0x%p hWnd=0x%p kind=%d depth=%zu",
             callerMod, hWnd, static_cast<int>(kind), g_editSessionStack.size());
         EnableEditHooksForModule(callerMod, kind, true);
+        if (callerMod && GlassCore::DelphiInput::IsHotKey(hWnd))
+        {
+            EnableHooksOnModule(callerMod, EHK_FILLRECT, true);
+            g_editSessionStack.back().hotKeyFillHook = true;
+        }
+    }
+
+    [[nodiscard]] static bool OnEditAfterBeginPaint(
+        HWND hWnd, HDC hdc, LPPAINTSTRUCT /*ps*/, HMODULE /*callerMod*/) noexcept
+    {
+        if (g_shutdown.load(std::memory_order_acquire) || !hdc
+            || (!IsDelphiMemo(hWnd) && !GlassCore::DelphiInput::IsSpinEdit(hWnd)
+                && !GlassCore::DelphiInput::IsNumberBox(hWnd) && !GlassCore::DelphiInput::IsHotKey(hWnd))
+            || g_editSessionStack.empty() || g_editSessionStack.back().hwnd != hWnd)
+            return false;
+        g_editSessionStack.back().paintDc = hdc;
+#if defined(_DEBUG)
+        if (AllowDelphiMemoLog(hWnd, 1))
+            DebugLog(DBG_NORMAL, L"[GlassCore][DelphiMemo] PaintBind hwnd=0x%p dc=0x%p depth=%zu",
+                hWnd, hdc, g_editSessionStack.size());
+#endif
+        return false; // только связываем HDC, фон не очищаем
     }
 
     static void OnEndPaintEdit(HWND hWnd, HMODULE /*callerMod*/)
@@ -1083,6 +1496,7 @@ namespace GlassCore::EditControl
 
         const EditPaintSession s = g_editSessionStack.back();
         g_editSessionStack.pop_back();
+        if (s.hotKeyFillHook) EnableHooksOnModule(s.mod, EHK_FILLRECT, false);
         EnableEditHooksForModule(s.mod, s.kind, false);
         DebugLog(DBG_NORMAL, L"[GlassCore][Edit] EndPaint: hWnd=0x%p depth=%zu",
             hWnd, g_editSessionStack.size());
@@ -1099,8 +1513,13 @@ namespace GlassCore::EditControl
 
         GlassCore::TextInk::EnsureTextInkClientRegistered(hWnd);
 
-        g_bypassEditBuffer = false;
-        g_sessionBlacknessRects.clear();
+        // GetDC может быть вложен в WM_PAINT: его начало не должно стирать
+        // накопленные ETO_OPAQUE-прямоугольники или сбрасывать fallback буфера.
+        if (g_editSessionStack.empty() && g_editDcStack.empty())
+        {
+            g_bypassEditBuffer = false;
+            g_sessionBlacknessRects.clear();
+        }
         if (IsRichEdit20Only(kind) && g_editSessionStack.empty())
         {
             g_re20FullClientBgPrimedHwnd = nullptr;
@@ -1176,6 +1595,7 @@ namespace GlassCore::EditControl
     void Startup()
     {
         GlassCore::PaintDispatcher::RegisterPaintProvider({ OnBeginPaintEdit, OnEndPaintEdit });
+        GlassCore::PaintDispatcher::RegisterPostPaintProvider({ OnEditAfterBeginPaint });
         GlassCore::PaintDispatcher::RegisterGetDCProvider({ OnGetDCEdit, OnReleaseDCEdit });
         PrewarmModule(GetModuleHandleW(L"user32.dll"));
         PrewarmModule(GetModuleHandleW(L"gdi32full.dll"));

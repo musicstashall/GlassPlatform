@@ -38,12 +38,12 @@ namespace GlassShared
         InternetExplorer_Server = 18, // MSHTML Trident / MMC DocObject — GlassMark (IeServer_Attach), сессия PaintDispatcher + IAT StretchBlt (GlassCore)
         Edit                    = 19, // Edit, TEdit, TMemo
         WinForms_Edit           = 20, // .EDIT (WindowsForms10)
-        RichEdit20W             = 21, // RichEdit20W, TRichEdit
+        RichEdit20W             = 21, // RichEdit20W
         WinForms_RichEdit20W    = 22, // .RichEdit20W
-        RichEdit50W             = 23, // RICHEDIT50W
+        RichEdit50W             = 23, // RICHEDIT50W, TRichEdit
         WinForms_RichEdit50W    = 24, // .RICHEDIT50W
         ScrollBar               = 25, // класс ScrollBar — ScrollBarHost (WndCompat) + BitBlt/AlphaBlend в ScrollBarThemeHooks (GlassCore)
-        ListBox                 = 26, // ListBox, TListBox (нативный)
+        ListBox                 = 26, // ListBox, TListBox, TCheckListBox, TColorListBox, TFileListBox, TDirectoryListBox
         WinForms_ListBox        = 27, // .LISTBOX (WinForms)
         StatusBar               = 28, // msctls_statusbar32
         ProgressBar             = 29, // msctls_progress32
@@ -57,6 +57,7 @@ namespace GlassShared
         UpDown                    = 36, // msctls_updown32, TUpDown — UpDownHost + DrawThemeBackground Spin (GlassCore)
         Root                      = 37, // top-level / GA_ROOT в g_rootWindows (WndCompat RootSubclass)
         AMCCustomTab              = 38, // AMCCustomTab — кастомный C#/WinForms таб-контрол mmc.exe (MFC42u.dll), BWM PaintHandler
+        CoolBar                   = 39, // TCoolBar / CoolBar — свой путь Delphi (TCoolBarSubclass + delphi/TCoolBarDraw)
     };
 
     // Атом для имени property — создаётся один раз в процессе.

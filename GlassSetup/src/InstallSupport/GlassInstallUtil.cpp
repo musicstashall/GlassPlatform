@@ -1095,7 +1095,7 @@ BOOL CALLBACK CloseWindowsForPid(HWND hwnd, LPARAM param) {
 // Unknown image identity fails closed. Never send WM_CLOSE by basename alone.
 namespace {
 bool VisitSelectedSettings(const std::wstring& root64,const std::wstring& root32,
-    unsigned mask,bool close,bool& running,const std::atomic_bool* cancelled) {
+    unsigned mask,bool close,bool& running,const std::atomic_bool* cancelled,std::vector<DWORD>* pids=nullptr) {
     running=false;
     if(!(mask&36u))return true;
     if(((mask&4u)&&root64.empty()) || ((mask&32u)&&root32.empty())) {SetLastError(ERROR_INVALID_PARAMETER);return false;}
@@ -1123,6 +1123,7 @@ bool VisitSelectedSettings(const std::wstring& root64,const std::wstring& root32
             const bool selected=((mask&4u)&&SameInstallPath(path,exe64)) || ((mask&32u)&&SameInstallPath(path,exe32));
             if(selected) {
                 running=true;
+                if(pids)pids->push_back(entry.th32ProcessID);
                 if(close)EnumWindows(CloseWindowsForPid,static_cast<LPARAM>(entry.th32ProcessID));
             }
             CloseHandle(process);
@@ -1169,6 +1170,26 @@ std::wstring NativeRundll64() {
     const std::wstring path = std::wstring(windows) + L"\\Sysnative\\rundll32.exe";
     return PathFileExistsW(path.c_str()) ? path : std::wstring{};
 #endif
+}
+
+std::wstring FormatSelectedSettingsReport(const std::wstring& root64,const std::wstring& root32,
+    unsigned mask) noexcept {
+    try {
+        bool running=false;
+        std::vector<DWORD> pids;
+        if(!VisitSelectedSettings(root64,root32,mask,false,running,nullptr,&pids))return {};
+        const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+        const wchar_t* note=ru?L"окно не закрылось":L"window stayed open";
+        std::wstring text;
+        for(const DWORD pid:pids) {
+            if(!text.empty())text+=L"\r\n";
+            text+=L"GlassSettings.exe (PID ";
+            text+=std::to_wstring(pid);
+            text+=L"): ";
+            text+=note;
+        }
+        return text;
+    }catch(...){return {};}
 }
 
 std::wstring System64ExePath(const wchar_t* exeName) {

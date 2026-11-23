@@ -43,7 +43,6 @@ struct Selection {
     bool secureUxRemovalWithoutSettings = false;
     // Same row indices as GlassProductPlan::Product. SUT has its separate protocol.
     std::uint32_t removeMask = 0;
-    unsigned confirmedSettingsRemovalRisk = 0;
     constexpr bool Removes(unsigned row) const noexcept { return (removeMask & (1u<<row))!=0; }
     static constexpr std::uint32_t kManagedRemovalMask = 0x6Fu;
     // Windows 11 certificate page: the user chose to add the author certificate

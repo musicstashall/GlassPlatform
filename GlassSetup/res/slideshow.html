@@ -81,12 +81,11 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 .unlock-status-dot{width:8px;height:8px;border-radius:50%;background:#b7a8ff;box-shadow:0 0 0 5px #b7a8ff1a,0 0 17px #b7a8ffb0;animation:status-beat 1.4s ease-in-out infinite}
 @keyframes status-beat{50%{transform:scale(.72);opacity:.55}}
 .unlock-substatus{margin:11px 0 0 18px;color:#8e92ac;font-size:10px;letter-spacing:1.1px;text-transform:uppercase}
-/* Same glass surface as the product plan; foreground only while waiting for consent. */
-.unlock-holder-shade{position:absolute;inset:0;z-index:4;background:#080b1b65;backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);pointer-events:none}
-.unlock-holder-shade[hidden],.unlock-holders[hidden]{display:none!important}
+/* Список процессов — акриловое окно поверх страницы, без затемняющей шторки. */
+.unlock-holders[hidden]{display:none!important}
 #unlock-panel .unlock-copy{top:var(--page-heading-top);max-height:326px;overflow:auto;padding-right:8px}
 #unlock-panel .unlock-status{margin-top:18px}
-#unlock-panel .unlock-holders{position:absolute;left:510px;right:48px;top:94px;bottom:48px;z-index:5;display:flex;flex-direction:column;min-height:0;padding:18px;border:1px solid #ffffff21;border-radius:14px;background:linear-gradient(150deg,#ffffff14,#ffffff00 40%),linear-gradient(165deg,#3437568f,#131526c7);backdrop-filter:blur(22px) saturate(165%);-webkit-backdrop-filter:blur(22px) saturate(165%);box-shadow:inset 0 1px #ffffff1f,inset 0 0 0 1px #ffffff05,0 16px 36px #04050e52;pointer-events:auto}
+#unlock-panel .unlock-holders{position:absolute;left:510px;right:48px;top:94px;bottom:48px;z-index:5;display:flex;flex-direction:column;min-height:0;padding:18px;border:1px solid #ffffff38;border-radius:14px;background:linear-gradient(160deg,#ffffff2e,#ffffff0a 46%),linear-gradient(165deg,#4a4e8680,#1a1d38a6);backdrop-filter:blur(28px) saturate(180%);-webkit-backdrop-filter:blur(28px) saturate(180%);box-shadow:inset 0 1px #ffffff38,inset 0 0 0 1px #ffffff14,0 18px 40px #04050e40;pointer-events:auto}
 .unlock-holders-title{flex:0 0 auto;margin:0 0 14px;padding-bottom:12px;border-bottom:1px solid #ffffff20;color:#c1b4ff;font-size:10px;font-weight:700;letter-spacing:1.3px;text-transform:uppercase}
 .unlock-holder-list{display:flex;flex-direction:column;gap:6px;margin:0;padding:0 4px 0 0;min-height:0;overflow:auto;list-style:none;scrollbar-color:#777296 #191b30;scrollbar-width:thin}
 .unlock-holder{flex-shrink:0;min-width:0;padding:8px 9px;border:1px solid #ffffff12;border-left:2px solid #a7dddf;border-radius:7px;background:#ffffff05}
@@ -201,6 +200,12 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 .error-reason{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;margin-top:18px;width:430px;padding:11px 14px 12px;border:1px solid #ff829a38;border-left:2px solid #ff829a;border-radius:12px;background:linear-gradient(110deg,#70283c46,#2d1e3238);box-shadow:inset 0 1px #ffffff08}
 .error-reason-label{color:#ffb6c1;font-size:9px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase}
 .error-detail{flex:1 1 auto;min-height:0;margin:7px 0 0;padding-right:6px;max-height:168px;overflow:auto;color:#f3e6e9;font-size:12px;line-height:1.52;white-space:pre-wrap;overflow-wrap:anywhere;scrollbar-color:#8d6472 #2d1e32;scrollbar-width:thin}
+.error-reason[hidden],#error-copy-menu[hidden]{display:none}
+.error-detail{-webkit-user-select:text;user-select:text;cursor:text}
+.error-detail:focus-visible{outline:1px solid #f8b9cb;outline-offset:2px}
+#error-copy-menu{position:fixed;z-index:1000;padding:4px;border:1px solid #8d6472;border-radius:6px;background:#291f35;color:#fff;box-shadow:0 3px 12px #0009}
+#error-copy-command{display:block;padding:6px 16px;border:0;border-radius:3px;background:transparent;color:inherit;font:inherit;cursor:pointer}
+#error-copy-command:hover,#error-copy-command:focus-visible{background:#694457}
 .error-detail::-webkit-scrollbar{width:9px}.error-detail::-webkit-scrollbar-track{background:#2d1e32;border-radius:8px}.error-detail::-webkit-scrollbar-thumb{background:#8d6472;border:2px solid #2d1e32;border-radius:8px}
 .error-note{flex-shrink:0;max-height:52px;overflow:auto;overflow-wrap:anywhere;pointer-events:auto;margin:12px 0 0;max-width:420px;color:#aaa6b6;font-size:11px;line-height:1.55;white-space:pre-wrap}
 .error-visual{position:absolute;right:52px;top:64px;width:435px;height:435px;z-index:4;display:grid;place-items:center;opacity:0;transform:scale(.92);animation:complete-pop .92s .13s cubic-bezier(.18,.8,.25,1) forwards;pointer-events:none}
@@ -226,9 +231,8 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 #stage[data-mode="loading"] #loading-panel{display:flex}
 #stage[data-mode="checking"] #checking-panel,
 #stage[data-mode="conflicts"] #conflicts-panel,
-#stage[data-mode="downgrade"] #downgrade-panel,
-#stage[data-mode="version-invalid"] #version-invalid-panel,
 #stage[data-mode="license"] #license-panel,
+#stage[data-mode="settings-close"] #unlock-panel,
 #stage[data-mode="unlock-modules"] #unlock-panel,
 #stage[data-mode="unlock-processes"] #unlock-panel,
 #stage[data-mode="components"] #components-panel,
@@ -238,7 +242,6 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 #stage[data-mode="launching"] #launch-panel,
 #stage[data-mode="uninstalling"] #uninstalling-panel,
 #stage[data-mode="full-cleanup"] #confirm-panel,
-#stage[data-mode="settings-removal-risk"] #confirm-panel,
 #stage[data-mode="confirm-cancel"] #confirm-panel,
 #stage[data-mode="cancelling"] #cancelling-panel,
 #stage[data-mode="cancelled"] #cancelled-panel,
@@ -277,20 +280,6 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 .conflict-name{color:#f2effa;font-size:12px;font-weight:650;letter-spacing:.15px}
 .conflict-detail{color:#a9acc4;font-size:10px;line-height:1.4}
 .conflicts-instructions{position:absolute;left:48px;top:443px;width:558px;margin:0;padding-left:12px;border-left:2px solid #c1b4ff75;color:#d0cce1;font-size:11px;line-height:1.52}
-.blocked-scene{background:#101225}
-.blocked-banner{position:absolute;right:0;top:0;width:750px;height:540px;object-fit:cover;opacity:.26;mask-image:linear-gradient(90deg,transparent 0%,#000 42%,#000 100%);-webkit-mask-image:linear-gradient(90deg,transparent 0%,#000 42%,#000 100%)}
-.blocked-shade{position:absolute;inset:0;background:linear-gradient(90deg,#101225 0%,#101225ed 48%,#10122560 100%)}
-.blocked-kicker{position:absolute;left:48px;top:121px;color:#ffb7c5;font-size:9px;font-weight:700;letter-spacing:1.8px;text-transform:uppercase}
-.blocked-title{position:absolute;left:48px;top:151px;width:550px;margin:0;color:#f7f2f7;font-size:36px;line-height:1.12;font-weight:370;letter-spacing:-.9px}
-.blocked-body{position:absolute;left:48px;top:238px;width:520px;margin:0;color:#bfc0d3;font-size:13px;line-height:1.57;white-space:pre-wrap}
-.blocked-version-row{position:absolute;left:48px;top:378px;width:520px;display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.blocked-version-card{min-width:0;padding:12px 14px;border:1px solid #ffffff1c;border-radius:12px;background:linear-gradient(145deg,#22243be8,#15172aee);box-shadow:inset 0 1px #ffffff0b}
-.blocked-version-label{display:block;margin-bottom:7px;color:#a0a3bd;font-size:8px;font-weight:700;letter-spacing:1.1px;text-transform:uppercase}
-.blocked-version-value{display:block;overflow:hidden;color:#e8e3fa;font-size:18px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
-.blocked-note{position:absolute;left:48px;top:489px;width:520px;margin:0;color:#969bb4;font-size:10px;line-height:1.4}
-#downgrade-panel .blocked-title{color:#ffe1e7}
-#downgrade-panel .blocked-version-card:first-child{border-color:#ff9aab45}
-#downgrade-panel .blocked-version-card:first-child .blocked-version-value{color:#ffc0cc}
 .license-scene{background:#101225}
 .license-banner{position:absolute;inset:0 0 0 auto;width:680px;height:540px;object-fit:cover;opacity:.19;mask-image:linear-gradient(90deg,transparent 0%,#000 55%,#000 100%);-webkit-mask-image:linear-gradient(90deg,transparent 0%,#000 55%,#000 100%)}
 .license-overlay{position:absolute;inset:0;background:linear-gradient(90deg,#101225 0%,#101225eb 55%,#10122589 100%)}
@@ -744,11 +733,6 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 #components-warning-ok:hover{background:#ffffff19}
 #components-warning-close{color:#a8abc0;right:12px;top:12px}
 
-#stage[data-mode="settings-removal-risk"] .error-copy{top:78px;width:880px}
-#stage[data-mode="settings-removal-risk"] .complete-visual{display:none}
-#stage[data-mode="settings-removal-risk"] #confirm-title{font-size:29px;line-height:1.16;margin:10px 0 12px}
-#stage[data-mode="settings-removal-risk"] #confirm-body{width:850px;max-height:285px;overflow-y:auto;white-space:pre-line;font-size:15px;line-height:1.4}
-#stage[data-mode="settings-removal-risk"] #confirm-note{width:820px;margin-top:14px}
 #stage[data-mode="cleanup-review"] #components-select-all,
 #stage[data-mode="cleanup-review"] #components-count{display:none}
 #stage[data-mode="cleanup-review"] .comp-slim{border:1px solid #f4be7240;padding:14px}
@@ -841,7 +825,6 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 <img id="unlock-banner" class="unlock-backdrop" alt="" aria-hidden="true"><div class="unlock-shade"></div><div class="native-brand">GlassPlatform</div>
 <div class="unlock-copy"><div id="unlock-kicker" class="unlock-kicker"></div><h1 id="unlock-title" class="unlock-title"></h1><p id="unlock-description" class="unlock-description"></p>
 <div class="unlock-status"><span class="unlock-status-dot" aria-hidden="true"></span><span id="unlock-status"></span></div><div id="unlock-substatus" class="unlock-substatus"></div></div>
-<div id="unlock-holder-shade" class="unlock-holder-shade" hidden aria-hidden="true"></div>
 <section id="unlock-holders" class="unlock-holders" hidden role="group" aria-labelledby="unlock-holders-title">
 <h2 id="unlock-holders-title" class="unlock-holders-title"></h2><ul id="unlock-holder-list" class="unlock-holder-list"></ul></section>
 <div class="unlock-visual" aria-hidden="true"><svg class="unlock-svg" viewBox="0 0 480 360" xmlns="http://www.w3.org/2000/svg"><defs>
@@ -862,16 +845,6 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 <img id="conflicts-banner" class="conflicts-banner" alt="" aria-hidden="true"><div class="conflicts-shade"></div><div class="native-brand">GlassPlatform</div>
 <div id="conflicts-kicker" class="conflicts-kicker"></div><h1 id="conflicts-title" class="conflicts-title"></h1><p id="conflicts-body" class="conflicts-body"></p>
 <ul id="conflict-list" class="conflict-list" aria-label="Detected conflicting applications"></ul><p id="conflicts-instructions" class="conflicts-instructions"></p></section>
-<section id="downgrade-panel" class="mode-panel blocked-scene" role="alert" aria-live="assertive">
-<img id="downgrade-banner" class="blocked-banner" alt="" aria-hidden="true"><div class="blocked-shade"></div><div class="native-brand">GlassPlatform</div>
-<div id="downgrade-kicker" class="blocked-kicker"></div><h1 id="downgrade-title" class="blocked-title"></h1><p id="downgrade-body" class="blocked-body"></p>
-<div class="blocked-version-row"><div class="blocked-version-card"><span id="installed-version-label" class="blocked-version-label"></span><strong id="installed-version" class="blocked-version-value"></strong></div>
-<div class="blocked-version-card"><span id="setup-version-label" class="blocked-version-label"></span><strong id="setup-version" class="blocked-version-value"></strong></div></div><p id="downgrade-note" class="blocked-note"></p></section>
-<section id="version-invalid-panel" class="mode-panel blocked-scene" role="alert" aria-live="assertive">
-<img id="version-invalid-banner" class="blocked-banner" alt="" aria-hidden="true"><div class="blocked-shade"></div><div class="native-brand">GlassPlatform</div>
-<div id="version-invalid-kicker" class="blocked-kicker"></div><h1 id="version-invalid-title" class="blocked-title"></h1><p id="version-invalid-body" class="blocked-body"></p>
-<div class="blocked-version-row"><div class="blocked-version-card"><span id="invalid-installed-version-label" class="blocked-version-label"></span><strong id="invalid-installed-version" class="blocked-version-value"></strong></div>
-<div class="blocked-version-card"><span id="invalid-setup-version-label" class="blocked-version-label"></span><strong id="invalid-setup-version" class="blocked-version-value"></strong></div></div><p id="version-invalid-note" class="blocked-note"></p></section>
 <section id="license-panel" class="mode-panel license-scene" aria-labelledby="license-title">
 <img id="license-banner" class="license-banner" alt="" aria-hidden="true"><div class="license-overlay"></div><div id="license-brand" class="license-brand">GlassPlatform</div>
 <div class="license-heading"><h1 id="license-title" class="license-title"></h1><p id="license-intro" class="license-intro"></p></div>
@@ -893,7 +866,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 <section id="error-panel" class="mode-panel error-scene" role="alert" aria-live="assertive">
 <img id="error-banner" class="banner-portrait" alt="" aria-hidden="true"><div class="error-ambient" aria-hidden="true"></div><div class="complete-sheen error-sheen" aria-hidden="true"></div><div class="native-brand">GlassPlatform</div>
 <div class="error-copy"><div id="error-tag" class="error-tag"></div><h1 id="error-title" class="error-title"></h1><p id="error-body" class="error-body"></p>
-<div class="error-reason"><div id="error-reason-label" class="error-reason-label"></div><p id="error-detail" class="error-detail"></p></div><p id="error-note" class="error-note"></p></div>
+<div class="error-reason" hidden><div id="error-reason-label" class="error-reason-label"></div><p id="error-detail" class="error-detail" tabindex="0" aria-labelledby="error-reason-label"></p></div><p id="error-note" class="error-note"></p></div>
 <div class="error-visual" aria-hidden="true"><svg class="error-svg" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg"><defs>
 <radialGradient id="errorGlow"><stop offset="0" stop-color="#ff829a" stop-opacity=".34"/><stop offset=".62" stop-color="#b94b69" stop-opacity=".15"/><stop offset="1" stop-color="#b94b69" stop-opacity="0"/></radialGradient>
 <linearGradient id="errorRingGradient" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ffb7c4"/><stop offset=".54" stop-color="#ffc1c8"/><stop offset="1" stop-color="#ef6d8a"/></linearGradient>
@@ -972,6 +945,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 <circle cx="200" cy="200" r="86" fill="#181b30de" stroke="#c1b4ff" stroke-width="2.2"/><circle cx="200" cy="200" r="71" fill="#c1b4ff12" stroke="#ffffff20" stroke-width="1.2"/>
 <path d="M180 190h30a18 18 0 1 1 0 36h-22M190 178l-14 12 14 12" fill="none" stroke="#e6e1ff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div></section>
 </div></main>
+<div id="error-copy-menu" role="menu" hidden><button id="error-copy-command" type="button" role="menuitem"></button></div>
 <script>
 'use strict';
 const images={start:'https://glassplatform.invalid/assets/slide_start.jpg',taskbar:'https://glassplatform.invalid/assets/slide_taskbar.jpg',notification:'https://glassplatform.invalid/assets/slide_notification.png',context_menu:'https://glassplatform.invalid/assets/slide_context_menu.jpg',explorer:'https://glassplatform.invalid/assets/slide_explorer.jpg'};
@@ -987,12 +961,12 @@ const slides=[
 const uiResources={
 ru:{title:'GlassPlatform · Установка',tagline:'Новый взгляд',slide:'Слайд',slideRole:'слайд',carouselRole:'слайд-шоу',choose:'Выбрать слайд',resume:'Продолжить слайд-шоу',pause:'Приостановить слайд-шоу',
 inspectionKicker:'ОБСЛУЖИВАНИЕ',inspectionTitle:'Проверяем продукты',inspectionCopy:'Анализируем установленное состояние и доступные пакеты.',inspectionStatus:'Анализируем установленные продукты',inspectionSource:'Установленные продукты и источники',checkingKicker:'ВЕРСИЯ УСТАНОВЩИКА',checkingTitle:'Проверяем новую версию',checkingCopy:'Ищем обновление GlassSetup.',checkingStatus:'Запрос к GitHub Releases',checkingSub:'Это займёт несколько секунд',checkingSource:'GitHub Releases',
-forceKicker:'UNLOCKER · ПОВТОРНАЯ ВЫГРУЗКА',forceTitle:'Освобождаем модули',forceDescription:'Закройте указанные приложения и повторите проверку или явно продолжите на свой риск. Установщик не будет принудительно выгружать модули или завершать эти процессы. Может потребоваться перезагрузка.',forceStatus:'Повторная выгрузка модулей…',forceSubstatus:'Этап 1 из 2 · освобождение модулей',forceHoldersTitle:'Занятые модули и удерживающие их процессы',
+forceKicker:'UNLOCKER · ПОВТОРНАЯ ВЫГРУЗКА',forceTitle:'Освобождаем модули',forceDescription:'Закройте указанные приложения и повторите проверку или явно продолжите на свой риск. Установщик не будет принудительно выгружать модули или завершать эти процессы. Может потребоваться перезагрузка.',forceStatus:'Повторная выгрузка модулей…',forceSubstatus:'Этап 1 из 2 · освобождение модулей',forceHoldersTitle:'Занятые модули и удерживающие их процессы',settingsKicker:'GLASSSETTINGS',settingsTitle:'Закройте GlassSettings',settingsDescription:'GlassSettings не закрылся. Если остались несохранённые изменения, сохраните или отмените их и закройте окно, затем нажмите «Повторить».',settingsStatus:'Ожидание закрытия GlassSettings',settingsSubstatus:'Установка продолжится после закрытия окна',settingsHoldersTitle:'Нужно закрыть',
 unlockKicker:'UNLOCKER · РАЗБЛОКИРОВКА ПРОЦЕССОВ',unlockTitle:'Закрываем приложения',unlockDescription:'Приложения могут быть завершены принудительно. Проводник не завершается целиком: закрываются только его файловые окна.',unlockStatus:'Закрытие процессов…',unlockSubstatus:'Проводник защищён от принудительного завершения',unlockHoldersTitle:'Процессы, которые удерживают модули',
 doneTag:'ГОТОВО',doneTitle:'Всё готово!',doneBody:'Выбранные операции выполнены.',doneReady:'ОПЕРАЦИИ ВЫПОЛНЕНЫ',doneNote:'Мастер можно закрыть. Журналы: %WINDIR%\\Temp\\GlassSetupLogs-* (доступ администратора).',doneWarnTag:'ГОТОВО, ЕСТЬ ЗАМЕЧАНИЯ',doneWarnTitle:'Операции завершены с замечаниями',doneWarnBody:'Есть замечания к завершающим действиям установщика. Подробности приведены ниже и в журнале %WINDIR%\\Temp\\GlassSetupLogs-*.',doneWarnLabel:'ЗАМЕЧАНИЯ',errorTag:'ОШИБКА',errorTitle:'Не удалось выполнить операции',errorBody:'Не удалось завершить выбранные операции. Подробности приведены ниже.',errorDetails:'ДЕТАЛИ',errorReason:'',errorNote:'Подробности: %WINDIR%\\Temp\\GlassSetupLogs-* (доступ администратора).'},
 en:{title:'GlassPlatform · Setup',tagline:'A new perspective',slide:'Slide',slideRole:'slide',carouselRole:'carousel',choose:'Choose a slide',resume:'Resume slideshow',pause:'Pause slideshow',
 inspectionKicker:'MAINTENANCE',inspectionTitle:'Checking products',inspectionCopy:'Analyzing installed state and available packages.',inspectionStatus:'Analyzing installed products',inspectionSource:'Installed products and sources',checkingKicker:'SETUP VERSION',checkingTitle:'Checking for a newer version',checkingCopy:'Looking for a GlassSetup update.',checkingStatus:'Requesting GitHub Releases',checkingSub:'This should only take a few seconds',checkingSource:'GitHub Releases',
-forceKicker:'UNLOCKER · RETRYING MODULE RELEASE',forceTitle:'Releasing modules',forceDescription:'Close the listed applications and retry, or explicitly continue at your own risk. Setup will not force-unload modules or terminate these processes. A restart may be required.',forceStatus:'Retrying module unload…',forceSubstatus:'Stage 1 of 2 · module release',forceHoldersTitle:'Modules held by these processes',
+forceKicker:'UNLOCKER · RETRYING MODULE RELEASE',forceTitle:'Releasing modules',forceDescription:'Close the listed applications and retry, or explicitly continue at your own risk. Setup will not force-unload modules or terminate these processes. A restart may be required.',forceStatus:'Retrying module unload…',forceSubstatus:'Stage 1 of 2 · module release',forceHoldersTitle:'Modules held by these processes',settingsKicker:'GLASSSETTINGS',settingsTitle:'Close GlassSettings',settingsDescription:'GlassSettings did not close. If it still has unsaved changes, save or discard them and close the window, then choose Retry.',settingsStatus:'Waiting for GlassSettings to close',settingsSubstatus:'Setup continues after the window closes',settingsHoldersTitle:'Close this window',
 unlockKicker:'UNLOCKER · PROCESS RELEASE',unlockTitle:'Closing applications',unlockDescription:'Applications may be terminated if they do not close. Explorer itself is not terminated; only its file windows are closed.',unlockStatus:'Closing processes…',unlockSubstatus:'Explorer is protected from forced termination',unlockHoldersTitle:'Processes still holding modules',
 doneTag:'DONE',doneTitle:'You’re all set!',doneBody:'The selected operations have completed.',doneReady:'OPERATIONS COMPLETED',doneNote:'You can close the wizard. Logs: %WINDIR%\\Temp\\GlassSetupLogs-* (administrator access).',doneWarnTag:'DONE WITH NOTES',doneWarnTitle:'Operations completed with notes',doneWarnBody:'Some final setup actions need attention. Details are listed below and in the %WINDIR%\\Temp\\GlassSetupLogs-* log.',doneWarnLabel:'NOTES',errorTag:'ERROR',errorTitle:'Operations could not be completed',errorBody:'The selected operations could not be completed. Details are shown below.',errorDetails:'DETAILS',errorReason:'',errorNote:'See %WINDIR%\\Temp\\GlassSetupLogs-* (administrator access).'}
 };
@@ -1003,7 +977,7 @@ function setLocale(value){locale=String(value).toLowerCase().startsWith('ru')?'r
 function render(){const ui=uiResources[locale];document.title=ui.title;document.getElementById('tagline').textContent=ui.tagline;setPlatformVersion(platformVersion);stage.setAttribute('aria-roledescription',ui.carouselRole);root.replaceChildren();dots.replaceChildren();const skipSlides=(window.GLASSPLATFORM_HOST==='unins'||hostState.appMode==='unins');if(!skipSlides)slides.forEach((s,i)=>{const t=s[locale],el=document.createElement('section');el.className='slide '+s.id;el.setAttribute('role','group');el.setAttribute('aria-roledescription',ui.slideRole);el.setAttribute('aria-label',`${i+1} / ${slides.length}: ${t[1]} ${t[2]}`);el.innerHTML=`<div class="art"><img class="image" src="${images[s.id]}" alt="" draggable="false"></div><div class="copy"><p class="eyebrow"></p><h1></h1><p class="script"></p><p class="description"></p><div class="detail"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3 8 3 3 7-7"/></svg><span></span></div></div>`;['.eyebrow','h1','.script','.description','.detail span'].forEach((sel,k)=>el.querySelector(sel).textContent=t[k]);root.append(el);const b=document.createElement('button');b.className='dot';b.type='button';b.setAttribute('aria-label',`${ui.slide} ${i+1}: ${t[1]} ${t[2]}`);b.innerHTML='<span></span>';b.onclick=()=>goTo(i,true);dots.append(b)});dots.setAttribute('aria-label',ui.choose);update();syncModeText();}
 function setModeText(id,value){const node=document.getElementById(id);if(node)node.textContent=String(value||'');}
 function parseHoldReport(value){return String(value||'').split(/\r\n?|\n/).map(line=>line.trim()).filter(Boolean).map(line=>{if(line==='…'||line==='...')return{more:true};const marker=line.lastIndexOf(' (PID '),separator=marker>=0?line.indexOf('): ',marker+6):-1;if(marker>=0&&separator>marker)return{process:line.slice(0,marker),pid:line.slice(marker+6,separator),modules:line.slice(separator+3)};return{raw:line};});}
-function renderHolderReport(processMode){const panel=document.getElementById('unlock-holders'),heading=document.getElementById('unlock-holders-title'),list=document.getElementById('unlock-holder-list');if(!panel||!heading||!list)return;const isUnlockMode=mode==='unlock-modules'||mode==='unlock-processes',records=parseHoldReport(hostState.holdReport);panel.hidden=!isUnlockMode||hostState.unlockActive===true||records.length===0;document.getElementById('unlock-holder-shade').hidden=panel.hidden;list.replaceChildren();if(panel.hidden)return;heading.textContent=processMode?uiResources[locale].unlockHoldersTitle:uiResources[locale].forceHoldersTitle;for(const record of records){const item=document.createElement('li');if(record.more){item.className='unlock-holder-more';item.textContent=locale==='ru'?'И другие процессы…':'Additional holders…';}else if(record.raw){item.className='unlock-holder-raw';item.textContent=record.raw;}else{item.className='unlock-holder';const meta=document.createElement('div');meta.className='unlock-holder-meta';const process=document.createElement('span');process.className='unlock-holder-process';process.textContent=record.process;const pid=document.createElement('span');pid.className='unlock-holder-pid';pid.textContent=record.pid?`PID ${record.pid}`:'';const modules=document.createElement('span');modules.className='unlock-holder-modules';modules.textContent=record.modules||'—';meta.append(process,pid);item.append(meta,modules);}list.append(item);}}
+function renderHolderReport(processMode){const panel=document.getElementById('unlock-holders'),heading=document.getElementById('unlock-holders-title'),list=document.getElementById('unlock-holder-list');if(!panel||!heading||!list)return;const settingsClose=mode==='settings-close',isUnlockMode=settingsClose||mode==='unlock-modules'||mode==='unlock-processes',records=parseHoldReport(hostState.holdReport);panel.hidden=!isUnlockMode||hostState.unlockActive===true||records.length===0;list.replaceChildren();if(panel.hidden)return;heading.textContent=settingsClose?uiResources[locale].settingsHoldersTitle:(processMode?uiResources[locale].unlockHoldersTitle:uiResources[locale].forceHoldersTitle);for(const record of records){const item=document.createElement('li');if(record.more){item.className='unlock-holder-more';item.textContent=locale==='ru'?'И другие процессы…':'Additional holders…';}else if(record.raw){item.className='unlock-holder-raw';item.textContent=record.raw;}else{item.className='unlock-holder';const meta=document.createElement('div');meta.className='unlock-holder-meta';const process=document.createElement('span');process.className='unlock-holder-process';process.textContent=record.process;const pid=document.createElement('span');pid.className='unlock-holder-pid';pid.textContent=record.pid?`PID ${record.pid}`:'';const modules=document.createElement('span');modules.className='unlock-holder-modules';modules.textContent=record.modules||'—';meta.append(process,pid);item.append(meta,modules);}list.append(item);}}
 function componentLock(title){
  const lock=document.createElement('span');
  lock.className='comp-lock';lock.dataset.tooltip=String(title);lock.setAttribute('role','img');lock.setAttribute('aria-label',String(title));
@@ -1014,7 +988,7 @@ function componentLock(title){
 let warningReturnFocus=null;
 function closeProductWarning(){document.getElementById('components-warning-dialog').hidden=true;if(warningReturnFocus&&warningReturnFocus.isConnected)warningReturnFocus.focus();}
 function dialogParagraph(parent,text,className=''){const p=document.createElement('p');p.className=className;p.textContent=text||'—';parent.append(p);return p;}
-function secureUxManualRiskText(){return locale==='ru'?'GlassSettings не установлен. Автоматическое переключение на штатную тему и проверка состояния SecureUxTheme недоступны. Перед удалением самостоятельно верните штатную тему Windows. Возможны некорректное оформление и сбои сеанса. Вы принимаете ответственность за последствия; может потребоваться перезагрузка.':'GlassSettings is not installed. Automatic stock-theme switching and SecureUxTheme runtime verification are unavailable. Restore a stock Windows theme yourself before removal. Incorrect styling and session failures are possible. You accept responsibility for the consequences; a restart may be required.';}
+function secureUxManualRiskText(){return locale==='ru'?'GlassSettings не установлен, поэтому установщик не сможет сам вернуть стандартную тему Windows. Перед удалением SecureUxTheme включите стандартную тему вручную, а после удаления перезагрузите компьютер. Иначе окна могут отображаться неправильно, а работа Windows — нарушиться. Вы берёте на себя ответственность за возможные последствия.':'GlassSettings is not installed, so the installer can\'t switch back to the standard Windows theme for you. Before removing SecureUxTheme, turn on the standard theme yourself, and restart the computer afterwards. Otherwise windows may look wrong and Windows may stop working properly. You take responsibility for any consequences.';}
 function secureUxRemovalIsManual(item){
  const native=document.getElementById('product-'+item?.removalDependencyId);
  return !!item?.removalWithoutSettings&&!(native?.checked&&native.dataset.intent!=='remove');
@@ -1820,21 +1794,64 @@ function renderCertificatePanel(){
  }
  setModeText('certificate-subject',cert.subject||'');setModeText('certificate-thumbprint',cert.thumbprint||'');setModeText('certificate-validity',cert.validity||'');setModeText('certificate-store',hostUi.certStore||'LocalMachine\\TrustedPeople');
 }
+const errorDetail=document.getElementById('error-detail');
+const errorCopyMenu=document.getElementById('error-copy-menu');
+const errorCopyCommand=document.getElementById('error-copy-command');
+function selectedErrorText(){
+ const selection=window.getSelection();
+ return mode==='error'&&selection&&!selection.isCollapsed&&
+  errorDetail.contains(selection.anchorNode)&&errorDetail.contains(selection.focusNode)?selection.toString():'';
+}
+function closeErrorCopyMenu(){errorCopyMenu.hidden=true;}
+function syncErrorDetail(text){
+ if(errorDetail.textContent!==text){closeErrorCopyMenu();errorDetail.textContent=text;}
+ errorDetail.parentElement.hidden=!text.trim();
+ errorCopyCommand.textContent=locale==='ru'?'Копировать':'Copy';
+ if(mode!=='error'||errorDetail.parentElement.hidden)closeErrorCopyMenu();
+}
+function openErrorCopyMenu(x,y){
+ errorCopyMenu.hidden=false;
+ errorCopyCommand.disabled=!selectedErrorText();
+ errorCopyMenu.style.left=Math.max(0,Math.min(x,window.innerWidth-errorCopyMenu.offsetWidth))+'px';
+ errorCopyMenu.style.top=Math.max(0,Math.min(y,window.innerHeight-errorCopyMenu.offsetHeight))+'px';
+}
+document.addEventListener('contextmenu',e=>{
+ e.preventDefault();
+ closeErrorCopyMenu();
+ if(mode!=='error'||errorDetail.parentElement.hidden||!errorDetail.contains(e.target))return;
+ openErrorCopyMenu(e.clientX,e.clientY);
+});
+// Не переносим фокус мышью: иначе Chromium может снять выделение до Copy.
+errorCopyCommand.addEventListener('mousedown',e=>e.preventDefault());
+errorCopyCommand.addEventListener('click',()=>{
+ if(selectedErrorText())document.execCommand('copy');
+ closeErrorCopyMenu();
+});
+document.addEventListener('pointerdown',e=>{if(!errorCopyMenu.contains(e.target))closeErrorCopyMenu();});
+window.addEventListener('blur',closeErrorCopyMenu);
+document.addEventListener('keydown',e=>{
+ if(mode==='error'&&!errorDetail.parentElement.hidden&&e.target===errorDetail&&
+    (e.key==='ContextMenu'||(e.shiftKey&&e.key==='F10'))){
+  e.preventDefault();
+  const bounds=errorDetail.getBoundingClientRect();
+  openErrorCopyMenu(bounds.left,bounds.bottom);
+ }else if(!errorCopyMenu.hidden&&(e.key==='Escape'||e.key==='Enter'||e.key===' ')){
+  e.preventDefault();e.stopImmediatePropagation();
+  if(e.key==='Escape')closeErrorCopyMenu();
+  else if(!errorCopyCommand.disabled)errorCopyCommand.click();
+ }
+},true);
 function syncModeText(){const x=uiResources[locale],hostUi=hostState.ui||{},done=completionText||hostUi||x,failed=errorText||hostUi||x;
- for(const id of ['checking-banner','unlock-banner','complete-banner','error-banner','license-banner','conflicts-banner','downgrade-banner','version-invalid-banner']){const el=document.getElementById(id);if(el&&el.getAttribute('src')!==bannerImage)el.src=bannerImage;}for(const id of ['components-banner','certificate-banner','launch-banner','uninstalling-banner','confirm-banner','cancelling-banner','cancelled-banner']){const el=document.getElementById(id);if(el&&el.getAttribute('src')!==bannerImage)el.src=bannerImage;}
+ for(const id of ['checking-banner','unlock-banner','complete-banner','error-banner','license-banner','conflicts-banner']){const el=document.getElementById(id);if(el&&el.getAttribute('src')!==bannerImage)el.src=bannerImage;}for(const id of ['components-banner','certificate-banner','launch-banner','uninstalling-banner','confirm-banner','cancelling-banner','cancelled-banner']){const el=document.getElementById(id);if(el&&el.getAttribute('src')!==bannerImage)el.src=bannerImage;}
  const inspecting=!!hostState.checkingProducts;document.getElementById('checking-kicker').textContent=inspecting?x.inspectionKicker:x.checkingKicker;document.getElementById('checking-title').textContent=inspecting?x.inspectionTitle:x.checkingTitle;document.getElementById('checking-copy').textContent=inspecting?x.inspectionCopy:x.checkingCopy;document.getElementById('checking-status').textContent=hostState.checkingStatus||(inspecting?x.inspectionStatus:x.checkingStatus);document.getElementById('checking-sub').textContent=x.checkingSub;document.getElementById('checking-source').textContent=inspecting?x.inspectionSource:x.checkingSource;
- const processMode=mode==='unlock-processes';unlockPanel.classList.toggle('processes',processMode);unlockPanel.classList.toggle('is-idle',hostState.unlockActive!==true);
- document.getElementById('unlock-kicker').textContent=hostUi.unlockKickerOverride||(processMode?x.unlockKicker:x.forceKicker);document.getElementById('unlock-title').textContent=hostState.monitorRisk?hostState.monitorRiskTitle:hostUi.unlockTitleOverride||(processMode?x.unlockTitle:x.forceTitle);document.getElementById('unlock-description').textContent=hostState.monitorRisk?hostState.monitorRiskBody:hostUi.unlockDescOverride||(processMode?x.unlockDescription:x.forceDescription);document.getElementById('unlock-status').textContent=(hostState.unlockActive&&hostState.status)?hostState.status:(processMode?x.unlockStatus:x.forceStatus);document.getElementById('unlock-substatus').textContent=processMode?x.unlockSubstatus:x.forceSubstatus;renderHolderReport(processMode);
+ const settingsClose=mode==='settings-close',processMode=mode==='unlock-processes';unlockPanel.classList.toggle('processes',processMode);unlockPanel.classList.toggle('is-idle',settingsClose||hostState.unlockActive!==true);
+ document.getElementById('unlock-kicker').textContent=settingsClose?x.settingsKicker:(hostUi.unlockKickerOverride||(processMode?x.unlockKicker:x.forceKicker));document.getElementById('unlock-title').textContent=settingsClose?x.settingsTitle:(hostState.monitorRisk?hostState.monitorRiskTitle:hostUi.unlockTitleOverride||(processMode?x.unlockTitle:x.forceTitle));document.getElementById('unlock-description').textContent=settingsClose?x.settingsDescription:(hostState.monitorRisk?hostState.monitorRiskBody:hostUi.unlockDescOverride||(processMode?x.unlockDescription:x.forceDescription));document.getElementById('unlock-status').textContent=settingsClose?x.settingsStatus:((hostState.unlockActive&&hostState.status)?hostState.status:(processMode?x.unlockStatus:x.forceStatus));document.getElementById('unlock-substatus').textContent=settingsClose?x.settingsSubstatus:(processMode?x.unlockSubstatus:x.forceSubstatus);renderHolderReport(processMode);
  const finishWarnings=Array.isArray(hostState.finishWarnings)?hostState.finishWarnings.filter(w=>w&&typeof w.title==='string'&&w.title):[],hasWarnings=finishWarnings.length>0;document.getElementById('complete-panel').classList.toggle('has-warnings',hasWarnings);
  document.getElementById('complete-tag').textContent=hasWarnings?(hostUi.doneWarnTag||x.doneWarnTag):(done.doneTag||x.doneTag);document.getElementById('complete-title').textContent=hasWarnings?(hostUi.doneWarnTitle||x.doneWarnTitle):(done.doneTitle||x.doneTitle);document.getElementById('complete-body').textContent=hasWarnings?(hostUi.doneWarnBody||x.doneWarnBody):(done.doneBody||x.doneBody);document.getElementById('complete-ready-text').textContent=done.doneReady||x.doneReady;document.getElementById('complete-note').textContent=done.doneNote||x.doneNote;
  document.getElementById('complete-warn-label').textContent=hostUi.doneWarnLabel||x.doneWarnLabel;const warnList=document.getElementById('complete-warn-list');warnList.replaceChildren();for(const w of finishWarnings){const li=document.createElement('li');li.className='complete-warn-item';li.append(document.createTextNode(w.title));if(typeof w.detail==='string'&&w.detail){const d=document.createElement('span');d.className='complete-warn-detail';d.textContent=w.detail;li.append(d);}warnList.append(li);}
- document.getElementById('error-tag').textContent=failed.errorTag||x.errorTag;document.getElementById('error-title').textContent=failed.errorTitle||x.errorTitle;document.getElementById('error-body').textContent=failed.errorBody||x.errorBody;document.getElementById('error-reason-label').textContent=failed.errorDetails||x.errorDetails;document.getElementById('error-detail').textContent=hostState.errorReason||failed.errorReason||x.errorReason;document.getElementById('error-note').textContent=(hostState.page==='error'&&hostState.status)?(hostState.status+'\n'+(failed.errorNote||x.errorNote)):(failed.errorNote||x.errorNote);
+ document.getElementById('error-tag').textContent=failed.errorTag||x.errorTag;document.getElementById('error-title').textContent=failed.errorTitle||x.errorTitle;document.getElementById('error-body').textContent=failed.errorBody||x.errorBody;document.getElementById('error-reason-label').textContent=failed.errorDetails||x.errorDetails;syncErrorDetail(String(hostState.errorReason??failed.errorReason??x.errorReason??''));document.getElementById('error-note').textContent=(hostState.page==='error'&&hostState.status)?(hostState.status+'\n'+(failed.errorNote||x.errorNote)):(failed.errorNote||x.errorNote);
  setModeText('conflicts-kicker',hostUi.conflictsTag);setModeText('conflicts-title',hostUi.conflictsTitle);setModeText('conflicts-body',hostUi.conflictsBody);setModeText('conflicts-instructions',hostUi.conflictsInstructions);
  const conflictList=document.getElementById('conflict-list');conflictList.replaceChildren();for(const item of Array.isArray(hostState.conflicts)?hostState.conflicts:[]){if(!item||typeof item.name!=='string'||typeof item.detail!=='string')continue;const li=document.createElement('li');li.className='conflict-item';const dot=document.createElement('span');dot.className='conflict-dot';dot.setAttribute('aria-hidden','true');const copy=document.createElement('div');copy.className='conflict-copy';const name=document.createElement('strong');name.className='conflict-name';name.textContent=item.name;const detail=document.createElement('span');detail.className='conflict-detail';detail.textContent=item.detail;copy.append(name,detail);li.append(dot,copy);conflictList.append(li)}
- setModeText('downgrade-kicker',hostUi.downgradeTag);setModeText('downgrade-title',hostUi.downgradeTitle);setModeText('downgrade-body',hostState.downgradeBody);setModeText('downgrade-note',hostUi.downgradeNote);
- setModeText('version-invalid-kicker',hostUi.versionInvalidTag);setModeText('version-invalid-title',hostUi.versionInvalidTitle);setModeText('version-invalid-body',hostState.blockReason||hostUi.versionInvalidBody);setModeText('version-invalid-note',hostState.versionInvalidNote||hostUi.versionInvalidNote);
- setModeText('installed-version-label',hostUi.versionLabel);setModeText('installed-version',hostState.installedGlassVersion||'—');setModeText('setup-version-label',hostUi.setupVersionLabel);setModeText('setup-version',hostState.setupProductVersion||'—');
- setModeText('invalid-installed-version-label',hostUi.versionLabel);setModeText('invalid-installed-version',hostState.installedGlassVersion||'—');setModeText('invalid-setup-version-label',hostUi.setupVersionLabel);setModeText('invalid-setup-version',hostState.setupProductVersion||'—');
  setModeText('license-brand',hostUi.brand||'GlassPlatform');setModeText('license-title',hostUi.licenseTitle);setModeText('license-intro',hostUi.licenseIntro);setModeText('license-accept-text',hostUi.licenseAccept);setModeText('eula-content',hostState.eula);
  const accept=document.getElementById('license-accept');if(accept&&typeof hostState.accepted==='boolean')accept.checked=hostState.accepted;
  setModeText('certificate-brand',hostUi.brand||'GlassPlatform');setModeText('certificate-kicker',hostUi.certTag||(locale==='ru'?'СЕРТИФИКАТ РАЗРАБОТЧИКА':'DEVELOPER CERTIFICATE'));setModeText('certificate-title',hostUi.certTitle||(locale==='ru'?'Принять сертификат разработчика?':'Accept the developer certificate?'));setModeText('certificate-intro',hostUi.certIntro||'');setModeText('certificate-facts-label',hostUi.certDetailsLabel||'');setModeText('certificate-subject-label',hostUi.certSubjectLabel||'');setModeText('certificate-thumbprint-label',hostUi.certThumbprintLabel||'');setModeText('certificate-validity-label',hostUi.certValidityLabel||'');setModeText('certificate-store-label',hostUi.certStoreLabel||'');renderCertificatePanel();
@@ -1855,7 +1872,7 @@ function syncModeText(){const x=uiResources[locale],hostUi=hostState.ui||{},done
   choice.onchange=()=>window.chrome?.webview?.postMessage('cleanup:'+key+':'+(choice.checked?'1':'0'));
   label.querySelector('small').textContent=locale==='ru'?`Удалить сохранённые настройки ${key==='platform'?'GlassPlatform':'OpenGlass'}.`:`Remove saved ${key==='platform'?'GlassPlatform':'OpenGlass'} settings.`;
  }
- const settingsRisk=mode==='settings-removal-risk';setModeText('confirm-tag',settingsRisk?(locale==='ru'?'ПЕРЕД УДАЛЕНИЕМ SETTINGS':'BEFORE REMOVING SETTINGS'):hostUi.confirmTag||(locale==='ru'?'ПОДТВЕРЖДЕНИЕ ОТМЕНЫ':'CONFIRM CANCELLATION'));setModeText('confirm-title',settingsRisk?(locale==='ru'?'Риск для Platform':'Platform risk'):hostUi.confirmTitle||(locale==='ru'?'Прервать установку?':'Cancel installation?'));setModeText('confirm-body',settingsRisk?hostState.settingsRiskBody:hostUi.confirmBody||'');setModeText('confirm-note',settingsRisk?(locale==='ru'?'Отмена возвращает к выбору без изменений.':'Cancel returns to selection without making changes.'):hostUi.confirmNote||'');
+ setModeText('confirm-tag',hostUi.confirmTag||(locale==='ru'?'ПОДТВЕРЖДЕНИЕ ОТМЕНЫ':'CONFIRM CANCELLATION'));setModeText('confirm-title',hostUi.confirmTitle||(locale==='ru'?'Прервать установку?':'Cancel installation?'));setModeText('confirm-body',hostUi.confirmBody||'');setModeText('confirm-note',hostUi.confirmNote||'');
  if(fullCleanup){
   const both=!!hostState.cleanupPlatformEligible&&!!hostState.cleanupOgEligible;
   const product=hostState.cleanupOgEligible?'OpenGlass':'GlassPlatform';
@@ -1888,7 +1905,7 @@ function animateComponentEntrance(){
    {duration:360,delay:index*65,easing:'cubic-bezier(.2,.8,.2,1)',fill:'backwards'});
  });
 }
-function setMode(value){const raw=String(value),alias=raw==='slideshow'?'welcome':raw;const valid=['loading','welcome','checking','conflicts','downgrade','version-invalid','license','components','certificate','cleanup-review','uninstall-select','installing','uninstalling','unlock-modules','unlock-processes','launching','settings-removal-risk','full-cleanup','confirm-cancel','cancelling','cancelled','complete','error'];const next=valid.includes(alias)?alias:'welcome';if(next!==mode){endComponentDrag(false);clearTimeout(componentHideTimer);clearTimeout(componentNoteTimer);componentNoticeWaitsForActivity=false;document.getElementById('components-gesture-status').className='component-toast';clearComponentEdge();}if(next==='welcome'&&!assetsReady){pendingMode='welcome';mode='loading';stage.dataset.mode='loading';syncModeText();clearTimeout(timer);return}if(next!=='welcome')pendingMode='';if(mode===next&&stage.dataset.mode===next){syncModeText();return}mode=next;stage.dataset.mode=mode;if(componentWorkspaceActive())componentEntrancePending=true;syncModeText();animateComponentEntrance();if(isCarouselMode())schedule();else clearTimeout(timer);}
+function setMode(value){const raw=String(value),alias=raw==='slideshow'?'welcome':raw;const valid=['loading','welcome','checking','conflicts','license','components','certificate','cleanup-review','uninstall-select','installing','uninstalling','settings-close','unlock-modules','unlock-processes','launching','full-cleanup','confirm-cancel','cancelling','cancelled','complete','error'];const next=valid.includes(alias)?alias:'welcome';if(next!==mode){endComponentDrag(false);clearTimeout(componentHideTimer);clearTimeout(componentNoteTimer);componentNoticeWaitsForActivity=false;document.getElementById('components-gesture-status').className='component-toast';clearComponentEdge();}if(next==='welcome'&&!assetsReady){pendingMode='welcome';mode='loading';stage.dataset.mode='loading';syncModeText();clearTimeout(timer);return}if(next!=='welcome')pendingMode='';if(mode===next&&stage.dataset.mode===next){syncModeText();return}mode=next;stage.dataset.mode=mode;if(componentWorkspaceActive())componentEntrancePending=true;syncModeText();animateComponentEntrance();if(isCarouselMode())schedule();else clearTimeout(timer);}
 function setCompletionText(tag,title,body,note,ready){completionText={doneTag:String(tag||''),doneTitle:String(title||''),doneBody:String(body||''),doneNote:String(note||''),doneReady:String(ready||'')};syncModeText();}
 function setErrorText(tag,title,body,details,reason,note){errorText={errorTag:String(tag||''),errorTitle:String(title||''),errorBody:String(body||''),errorDetails:String(details||''),errorReason:String(reason||''),errorNote:String(note||'')};syncModeText();}
 function update(){[...root.children].forEach((el,i)=>{el.classList.toggle('active',i===index);el.setAttribute('aria-hidden',i!==index)});[...dots.children].forEach((b,i)=>b.setAttribute('aria-current',i===index));pauseButton.innerHTML=paused?'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7Z"/></svg>':'<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>';pauseButton.setAttribute('aria-label',paused?uiResources[locale].resume:uiResources[locale].pause);pauseButton.setAttribute('aria-pressed',String(paused));}
@@ -1900,6 +1917,11 @@ stage.addEventListener('keydown',e=>{if(!isCarouselMode()||!dots.children.length
 // WebView2 owns keyboard focus while an HTML page is active. Forward Escape to
 // the native host so it follows the same confirmation/rollback path as the close button.
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&window.chrome&&window.chrome.webview){e.preventDefault();window.chrome.webview.postMessage('cancel');}});
+let demoPointerHeld=false;
+function setDemoHold(hold){if(!hostState.demoTour||!window.chrome||!window.chrome.webview||demoPointerHeld===hold)return;demoPointerHeld=hold;window.chrome.webview.postMessage(hold?'demo-hold':'demo-release');}
+document.addEventListener('pointerdown',e=>{if(e.isPrimary)setDemoHold(true);},{capture:true});
+for(const type of ['pointerup','pointercancel'])document.addEventListener(type,e=>{if(e.isPrimary)setDemoHold(false);},{capture:true});
+window.addEventListener('blur',()=>setDemoHold(false));
 document.addEventListener('visibilitychange',schedule);
 function resize(){const v=document.getElementById('viewport');stage.style.transform=`scale(${Math.min(v.clientWidth/1000,v.clientHeight/540)})`;}window.addEventListener('resize',resize);resize();
 bindComponentWorkspace();
@@ -1909,6 +1931,6 @@ setLocale(params.get('lang')||window.GLASSPLATFORM_LOCALE||'ru');
 
 window.GlassSlideshow={setLocale,goTo,setPaused,setPlatformVersion,setMode,setCompletionText,setErrorText,setBackground(color){if(CSS.supports('color',color))document.documentElement.style.setProperty('--background',color)},setInterval(ms){if(Number.isFinite(ms)&&ms>=1500){interval=ms;schedule()}},getState(){return{index,locale,paused,interval,mode}}};
 // WebView2 host can send JSON objects, without executing scripts.
-if(window.chrome&&window.chrome.webview){window.chrome.webview.addEventListener('message',event=>{const m=event.data;if(!m||typeof m!=='object')return;if(m.type==='component-notice-click'){dismissComponentNoticeOnActivity({detail:1});return;}if(m.type==='component-notice-scroll'){dismissComponentNoticeOnActivity({type:'wheel',detail:0});return;}if(m.type==='init'||m.type==='state'){hostState={...hostState,...m,ui:{...(hostState.ui||{}),...(m.ui||{})}};if(m.locale&&m.locale!==locale)setLocale(m.locale);if(typeof m.platformVersion==='string')setPlatformVersion(m.platformVersion);if(typeof m.page==='string')setMode(m.page);syncModeText();}});const accept=document.getElementById('license-accept');accept.addEventListener('change',()=>window.chrome.webview.postMessage('accept:'+(accept.checked?'1':'0')));window.chrome.webview.postMessage('ready');}
+if(window.chrome&&window.chrome.webview){window.chrome.webview.addEventListener('message',event=>{const m=event.data;if(!m||typeof m!=='object')return;if(m.type==='component-notice-click'){dismissComponentNoticeOnActivity({detail:1});return;}if(m.type==='component-notice-scroll'){dismissComponentNoticeOnActivity({type:'wheel',detail:0});return;}if(m.type==='init'||m.type==='state'){hostState={...hostState,...m,ui:{...(hostState.ui||{}),...(m.ui||{})}};if(m.locale&&m.locale!==locale)setLocale(m.locale);if(typeof m.platformVersion==='string')setPlatformVersion(m.platformVersion);if(typeof m.page==='string')setMode(m.page);if(!hostState.demoTour)demoPointerHeld=false;syncModeText();}});const accept=document.getElementById('license-accept');accept.addEventListener('change',()=>window.chrome.webview.postMessage('accept:'+(accept.checked?'1':'0')));window.chrome.webview.postMessage('ready');}
 Promise.all([...document.images].map(img=>img.decode?img.decode().catch(()=>{}):Promise.resolve())).then(()=>{assetsReady=true;const pending=pendingMode;pendingMode='';if(pending)setMode(pending);else schedule();});
 </script></body></html>

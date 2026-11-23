@@ -80,16 +80,23 @@ inline std::wstring WarningText(GlassProductPlan::Warning warning, bool ru, bool
         text+=ru?(platform64?L"Без Platform x64 не будет оформления 64-битных приложений":L"Без Platform x86 не будет оформления 32-битных приложений"):
             (platform64?L"Without Platform x64, styling is unavailable for 64-bit applications":L"Without Platform x86, styling is unavailable for 32-bit applications");
         if(platform64==os64)text+=ShellSuffix(ru);
-        text+=ru?L". Остальные продукты работают независимо. Продолжение разрешено.":L". Other products are independent. You can continue.";
+        text+=ru?L". Остальные продукты от этого не зависят.":L". Other products don't depend on it.";
     };
     platformWarning(W::NoPlatform64,true);
     platformWarning(W::NoPlatform32,false);
-    add(W::NoHelper64,L"Platform x64 остаётся без GlassSettings x64. При последующем обслуживании может быть недоступен доверенный Native x64 для контроля и выгрузки модулей. Разрядности независимы; установка Settings x86 не заменяет helper x64.",L"Platform x64 will remain without GlassSettings x64. A trusted Native x64 helper for module monitoring and unloading may be unavailable during later maintenance. Architectures are independent; Settings x86 does not replace the x64 helper.");
-    add(W::NoHelper32,L"Platform x86 остаётся без GlassSettings x86. При последующем обслуживании может быть недоступен доверенный Native x86 для контроля и выгрузки модулей. Разрядности независимы; установка Settings x64 не заменяет helper x86.",L"Platform x86 will remain without GlassSettings x86. A trusted Native x86 helper for module monitoring and unloading may be unavailable during later maintenance. Architectures are independent; Settings x64 does not replace the x86 helper.");
-    add(W::ManualSettings,L"Без GlassSettings потребуется вручную редактировать реестр и управлять службами и задачами. Продолжение разрешено.",L"Without GlassSettings, registry settings, services and scheduled tasks must be managed manually. You can continue.");
-    add(W::ManualOpenGlass,L"Без GlassSettings настройка OpenGlass и управление его службами и задачами выполняются вручную. Продолжение разрешено.",L"Without GlassSettings, OpenGlass registry settings, services and scheduled tasks must be managed manually. You can continue.");
-    add(W::ManualVisualStyles,L"SecureUxTheme остаётся без GlassSettings. Вы принимаете ответственность за ручной контроль визуальных стилей и перезапуск Windows. Перед удалением SecureUxTheme необходимо вернуть штатный визуальный стиль.",L"SecureUxTheme will operate without GlassSettings. You accept responsibility for managing visual styles and restarting Windows manually. Restore a stock visual style before removing SecureUxTheme.");
-    add(W::DamageRetained,L"Повреждённый продукт остаётся без восстановления.",L"A damaged product is being retained without repair.");
+    // NoHelper* заменяет отдельную страницу риска при удалении GlassSettings:
+    // без Settings своей разрядности Platform нельзя безопасно выгрузить позже.
+    add(W::NoHelper64,L"Platform x64 останется без GlassSettings x64. Тогда при обновлении или удалении Platform x64 её не удастся безопасно отключить от запущенных программ: может понадобиться перезагрузка, иначе возможны сбои программ. Рекомендуем установить или оставить GlassSettings x64 — версия x86 его не заменяет.",
+        L"Platform x64 will be left without GlassSettings x64. When Platform x64 is later updated or removed, it can't be safely detached from running applications: a restart may be needed, otherwise applications may crash. We recommend installing or keeping GlassSettings x64 — the x86 version doesn't replace it.");
+    add(W::NoHelper32,L"Platform x86 останется без GlassSettings x86. Тогда при обновлении или удалении Platform x86 её не удастся безопасно отключить от запущенных программ: может понадобиться перезагрузка, иначе возможны сбои программ. Рекомендуем установить или оставить GlassSettings x86 — версия x64 его не заменяет.",
+        L"Platform x86 will be left without GlassSettings x86. When Platform x86 is later updated or removed, it can't be safely detached from running applications: a restart may be needed, otherwise applications may crash. We recommend installing or keeping GlassSettings x86 — the x64 version doesn't replace it.");
+    add(W::ManualSettings,L"Без GlassSettings не останется программы настроек: включать, выключать и настраивать оформление придётся вручную, через реестр Windows.",
+        L"Without GlassSettings there is no settings app: styling has to be turned on, off and adjusted manually in the Windows registry.");
+    add(W::ManualOpenGlass,L"Без GlassSettings OpenGlass придётся включать, выключать и настраивать вручную.",
+        L"Without GlassSettings, OpenGlass has to be turned on, off and adjusted manually.");
+    add(W::ManualVisualStyles,L"SecureUxTheme останется без GlassSettings. Темы оформления придётся переключать вручную, иногда с перезапуском Windows. Перед удалением SecureUxTheme сначала верните стандартную тему Windows.",
+        L"SecureUxTheme will be left without GlassSettings. Visual styles will have to be switched manually, sometimes with a Windows restart. Before removing SecureUxTheme, switch back to the standard Windows theme first.");
+    add(W::DamageRetained,L"Этот продукт повреждён и не будет исправлен.",L"This product is damaged and will not be repaired.");
     return text;
 }
 inline std::size_t Index(const wchar_t* id) {

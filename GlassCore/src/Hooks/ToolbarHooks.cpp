@@ -4,9 +4,11 @@
 //
 // Toolbar: текст — DrawThemeText на comctl32;
 //   glow — DrawTextExW на uxtheme.dll.
-// Иконки — MaskBlt / BitBlt (gdi32 IAT в comctl32).
+// ToolbarWindow32: MaskBlt / BitBlt (gdi32 IAT в comctl32):
 //   32bpp+alpha → AlphaBlend; иначе black-key + AlphaBlend.
 //   1bpp-маска ImageList: skip после alpha_direct; orig после blackkey.
+// Exact TToolBar (VCL): также caller EXE; временная opaque-копия источника
+//   и настоящий comctl32!MaskBlt с неизменными маской/ROP. BitBlt — native.
 // Фон erase (F4): Root NM_CUSTOMDRAW CDDS_PREERASE → DrawThemeParentBackground.
 // Хуки включаются на callerModule при каждом BeginPaint.
 
@@ -19,14 +21,17 @@
 #include <Subsystems/PaintDispatcher.h>
 #include <Subsystems/TextGlowClientRegistry.h>
 #include <Subsystems/GdiHookUtils.h>
+#include <Subsystems/OpaqueBitmapSource.h>
 #include <Subsystems/Settings.h>
 #include <GlassControlKind.h>
+#include <GlassBackdropMark.h>
 #include <Subsystems/RootSwcaGradient.h>
 #include <BitmapUtils.h>
 #include <wil.h>
 #include <CommCtrl.h>
 #include <uxtheme.h>
 #include <WinApiUtils.h>
+#include <array>
 #include <vector>
 
 #pragma comment(lib, "msimg32.lib")
@@ -37,12 +42,22 @@ using namespace std::literals;
 namespace GlassCore::ToolbarControl
 {
     // =========================================================================
-    //  Thread-local: стек HMODULE (LIFO) — зеркало стека DC в PaintDispatcher.
+    //  Thread-local: стек paint-сессий (LIFO) — зеркало DC в PaintDispatcher.
     // Симметричный Enable/Disable на каждый Begin/End; глубину IAT ведёт HookDispatcher::hookRef.
     // Guard в телах хуков: !g_modStack.empty() — активная paint-сессия Toolbar (не путать с hookRef).
     // =========================================================================
 
-    thread_local std::vector<HMODULE> g_modStack;
+    struct PaintSession
+    {
+        HWND hwnd{};
+        HMODULE caller{};
+        bool vclIcons{};
+        // Снимок только реально полученных refs. Даже если второй comctl32
+        // загрузится во время paint, End освободит ровно модули из Begin.
+        std::array<HMODULE, 2> iconModules{};
+    };
+    thread_local std::vector<PaintSession> g_modStack;
+    thread_local bool g_inOpaqueIcon = false;
 
     // Удаление фона иконок Toolbar: Root\Control\Toolbar (presence color = chroma; иначе black-key).
     // Читаем один раз на внешнюю paint-сессию (g_modStack пуст), как ListViewHooks.
@@ -92,6 +107,49 @@ namespace GlassCore::ToolbarControl
         if (!hWnd)
             hWnd = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
         return IsToolbarGlassSessionAllowed(hWnd);
+    }
+
+    [[nodiscard]] static bool IsVclToolbarWindow(HWND hwnd) noexcept
+    {
+        wchar_t name[64]{};
+        return IsWindow(hwnd) && GetClassNameW(hwnd, name, static_cast<int>(_countof(name)))
+            && StrEqI(name, L"TToolBar");
+    }
+
+    // BWM ctrl + caller EXE: exact TToolBar рисует ImageList через comctl32,
+    // хотя BeginPaint вызван VCL-кодом EXE. Не распространять на формы/панели.
+    [[nodiscard]] static bool IsVclToolbarIconSession(HWND hwnd, HMODULE caller) noexcept
+    {
+        const HMODULE exe = GlassCore::ModuleHandler::g_entryPointModule;
+        return exe && caller && GlassCore::Root::IsFullInjectionMode() && IsVclToolbarWindow(hwnd)
+            && GlassShared::GlassIsBackdropAllowedForHwnd(hwnd)
+            && reinterpret_cast<HMODULE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)) == exe
+            && (caller == exe || caller == GlassCore::ModuleHandler::g_comctl32New
+                || caller == GlassCore::ModuleHandler::g_comctl32Legacy);
+    }
+
+    [[nodiscard]] static bool IsVclToolbarIconDc(HDC dc, HMODULE caller) noexcept
+    {
+        if (g_shutdown.load(std::memory_order_acquire) || g_inOpaqueIcon
+            || !dc || g_modStack.empty() || GetMapMode(dc) != MM_TEXT) return false;
+        const auto& s = g_modStack.back();
+        if (!s.vclIcons || (caller != s.iconModules[0] && caller != s.iconModules[1])
+            || !IsVclToolbarIconSession(s.hwnd, s.caller)
+            || !GlassCore::PaintDispatcher::IsTopWindowDrawingSession(s.hwnd)
+            || !GlassCore::PaintDispatcher::IsPaintStackDcForHwnd(s.hwnd, dc)) return false;
+        const HWND owner = WindowFromDC(dc);
+        return owner == s.hwnd || (!owner && GetObjectType(dc) == OBJ_MEMDC
+            && GlassCore::PaintDispatcher::GetStackOwnerForDc(dc) == s.hwnd);
+    }
+
+    [[nodiscard]] static bool TakeVclImageDiag() noexcept
+    {
+        static thread_local ULONGLONG epoch{};
+        static thread_local unsigned budget{};
+        const auto now = GetTickCount64();
+        if (!epoch || now - epoch >= 1000) { epoch = now; budget = 12; }
+        if (!budget) return false;
+        --budget; return true;
     }
 
     static void EnsureToolbarTextColorOnDc(HDC hdc) noexcept
@@ -173,8 +231,10 @@ namespace GlassCore::ToolbarControl
             it->second.moduleAddress = baseAddress;
         }
 
+        const int before = it->second.GetRef(index);
         it->second.EnableHook(index, enable);
-        return true;
+        // false-возврат EnableHook(true) означает также вложенное увеличение hookRef.
+        return enable ? it->second.GetRef(index) > before : it->second.GetRef(index) < before;
     }
 
     // ── DisableAllOverallHooks ───────────────────────────────────────────────
@@ -330,14 +390,15 @@ namespace GlassCore::ToolbarControl
     }
 
     // ── MaskBlt ─────────────────────────────────────────────────────────────
-    // Toolbar использует MaskBlt для рисования иконок через ImageList.
-    // Если MaskBlt вызван с маской — hasAlpha ненадёжен, всегда BlackKeyAlpha.
-    // Без маски + hasAlpha → GdiAlphaBlend напрямую (настоящая альфа).
+    // TToolBar: непрозрачная копия + настоящий MaskBlt, как у BWM. Маска и
+    // ROP определяют покрытие, чёрные детали иконки не являются color-key.
+    // Остальные toolbar сохраняют ранее принятый alpha/black-key renderer.
     BOOL WINAPI Overall_MyMaskBlt(
         HDC hdcDest, int xDest, int yDest, int width, int height,
         HDC hdcSrc, int xSrc, int ySrc,
         HBITMAP hbmMask, int xMask, int yMask, DWORD rop)
     {
+        const DWORD entryError = GetLastError();
         HMODULE callerMod = GetCallerModule(_ReturnAddress());
         auto orig = GetOverallOrigSafe<OHK_MASKBLT, decltype(&MaskBlt)>(callerMod);
 
@@ -348,6 +409,35 @@ namespace GlassCore::ToolbarControl
         if (g_modStack.empty())
             return orig(hdcDest, xDest, yDest, width, height,
                         hdcSrc, xSrc, ySrc, hbmMask, xMask, yMask, rop);
+
+        if (g_modStack.back().vclIcons)
+        {
+            const auto native = [&] {
+                return orig(hdcDest, xDest, yDest, width, height,
+                    hdcSrc, xSrc, ySrc, hbmMask, xMask, yMask, rop);
+            };
+            if (!IsVclToolbarIconDc(hdcDest, callerMod) || width <= 0 || height <= 0
+                || !hdcSrc || hdcSrc == hdcDest
+                || GetCurrentObject(hdcSrc, OBJ_BITMAP) == GetCurrentObject(hdcDest, OBJ_BITMAP))
+            { SetLastError(entryError); return native(); }
+            g_inOpaqueIcon = true;
+            auto leave = wil::scope_exit([]() noexcept { g_inOpaqueIcon = false; });
+            BOOL result{}; DWORD error{}; bool prepared{};
+            {
+                GlassCore::GdiUtils::OpaqueBitmapSource image{hdcSrc};
+                prepared = static_cast<bool>(image);
+                SetLastError(entryError);
+                result = native(); // ровно один native draw, в том числе при ошибке подготовки
+                error = GetLastError();
+            }
+            if (TakeVclImageDiag())
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][TToolBar] MaskBlt dc=0x%p src=0x%p dst=[%d,%d,%d,%d] srcXY=[%d,%d] mask=0x%p maskXY=[%d,%d] rop=0x%08X opaqueCopy=%d result=%d",
+                    hdcDest, hdcSrc, xDest, yDest, width, height, xSrc, ySrc,
+                    hbmMask, xMask, yMask, rop, prepared ? 1 : 0, result);
+            SetLastError(error);
+            return result;
+        }
 
         if (!IsToolbarGlassSessionAllowedForHdc(hdcDest))
             return orig(hdcDest, xDest, yDest, width, height,
@@ -417,6 +507,11 @@ namespace GlassCore::ToolbarControl
             return BitBlt(hdc, x, y, cx, cy, hdcSrc, x1, y1, rop);
 
         if (g_modStack.empty())
+            return orig(hdc, x, y, cx, cy, hdcSrc, x1, y1, rop);
+
+        // VCL-маршрут нормализует только MaskBlt. Его 1bpp/ROP-проходы
+        // остаются native, в том числе если этот BitBlt включён внешней сессией.
+        if (g_modStack.back().vclIcons)
             return orig(hdc, x, y, cx, cy, hdcSrc, x1, y1, rop);
 
         if (!IsToolbarGlassSessionAllowedForHdc(hdc))
@@ -502,7 +597,7 @@ namespace GlassCore::ToolbarControl
     // uxtheme: glow DrawTextExW;
     // sysmon CreateSolidBrush.
 
-    static void EnableToolbarHooksForModule(HWND hWnd, HMODULE callerMod, bool enable)
+    static void EnableToolbarHooksForModule(HWND hWnd, HMODULE callerMod, bool enable, bool vclIcons)
     {
         auto* g_new    = GlassCore::ModuleHandler::g_comctl32New;
         auto* g_legacy = GlassCore::ModuleHandler::g_comctl32Legacy;
@@ -516,8 +611,11 @@ namespace GlassCore::ToolbarControl
             if (glow && hUx)
                 EnableHooksOnModule(hUx, OHK_DRAWTEXTEX, enable);
 
-            EnableHooksOnModule(g_new, OHK_MASKBLT, enable);
-            EnableHooksOnModule(g_new, OHK_BITBLT, enable);
+            if (!vclIcons)
+            {
+                EnableHooksOnModule(g_new, OHK_MASKBLT, enable);
+                EnableHooksOnModule(g_new, OHK_BITBLT, enable);
+            }
         }
 
         if (callerMod == g_new || callerMod == g_legacy)
@@ -536,6 +634,7 @@ namespace GlassCore::ToolbarControl
 
     static void OnBeginGlobal(HWND hWnd, HMODULE callerMod)
     {
+        if (g_shutdown.load(std::memory_order_acquire)) return;
         using namespace GlassShared;
         if (GlassGetWindowKind(hWnd) != GlassControlKind::Toolbar)
             return;
@@ -546,22 +645,40 @@ namespace GlassCore::ToolbarControl
             GlassCore::Settings::QueryIconBackgroundColorRemovalContext(
                 { L"Root", L"Control", L"Toolbar" }, g_toolbarIconRemoval);
 
-        g_modStack.push_back(callerMod);
-        EnableToolbarHooksForModule(hWnd, callerMod, true);
+        PaintSession session{};
+        session.hwnd = hWnd; session.caller = callerMod;
+        // Exact-класс задаёт и native-барьер. Неавторизованная VCL-сессия
+        // не должна попасть в generic alpha/black-key через внешний IAT-ref.
+        session.vclIcons = IsVclToolbarWindow(hWnd);
+        if (session.vclIcons && IsVclToolbarIconSession(hWnd, callerMod))
+        {
+            const std::array<HMODULE, 2> modules{GlassCore::ModuleHandler::g_comctl32New,
+                GlassCore::ModuleHandler::g_comctl32Legacy};
+            for (size_t i = 0; i < modules.size(); ++i)
+                if (modules[i] && (i == 0 || modules[i] != modules[0])
+                    && EnableHooksOnModule(modules[i], OHK_MASKBLT, true))
+                    session.iconModules[i] = modules[i];
+        }
+        // Даже без полученного MaskBlt-ref запись служит native-барьером:
+        // process-wide IAT внешней сессии не авторизует этот paint.
+        g_modStack.push_back(session);
+        EnableToolbarHooksForModule(hWnd, callerMod, true, session.vclIcons);
 
-        DebugLog(DBG_NORMAL, L"[GlassCore][Toolbar] Begin: callerMod=0x%p hWnd=0x%p depth=%zu",
-            callerMod, hWnd, g_modStack.size());
+        DebugLog(DBG_NORMAL,
+            L"[GlassCore][Toolbar] Begin: callerMod=0x%p hWnd=0x%p depth=%zu vclIcons=%d maskModules=[0x%p,0x%p]",
+            callerMod, hWnd, g_modStack.size(), session.vclIcons ? 1 : 0,
+            session.iconModules[0], session.iconModules[1]);
     }
 
     static void OnEndGlobal(HWND hWnd, HMODULE /*callerMod*/)
     {
-        using namespace GlassShared;
-        if (GlassGetWindowKind(hWnd) != GlassControlKind::Toolbar) return;
-        if (g_modStack.empty()) return;
-
-        const HMODULE mod = g_modStack.back();
+        if (g_modStack.empty() || g_modStack.back().hwnd != hWnd) return;
+        const PaintSession session = g_modStack.back();
         g_modStack.pop_back();
-        EnableToolbarHooksForModule(hWnd, mod, false);
+        EnableToolbarHooksForModule(hWnd, session.caller, false, session.vclIcons);
+        for (size_t i = session.iconModules.size(); i > 0; --i)
+            if (session.iconModules[i-1])
+                EnableHooksOnModule(session.iconModules[i-1], OHK_MASKBLT, false);
         if (g_modStack.empty())
             g_toolbarSuppressMaskBitBlt = false;
         DebugLog(DBG_NORMAL, L"[GlassCore][Toolbar] End: hWnd=0x%p depth=%zu", hWnd, g_modStack.size());

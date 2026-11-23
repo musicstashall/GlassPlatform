@@ -29,6 +29,7 @@
 #include "CorePch.h"
 #include <Hooks/RootWindowHooks.h>
 #include <Hooks/RootGdiHooks.h>
+#include <Hooks/delphi/BomeMemoDraw.h>
 #include <Hooks/ExplorerFrame.h>
 #include <Module/ModuleHandler.h>
 #include <Subsystems/PaintDispatcher.h>
@@ -39,6 +40,8 @@
 
 #include <RootBackdropPolicy.h>
 #include <GlassBackdropMark.h>
+#include <GlassDelphiPanel.h>
+#include <GlassDelphiButtonGroups.h>
 
 #include <string>
 #include <unordered_map>
@@ -63,6 +66,7 @@ namespace GlassCore::Root
             std::vector<HookSpec> dcHooks;          // только GetDC / ReleaseDC
             std::vector<HookSpec> compatDcHooks;    // только CreateCompatibleDC / DeleteDC
             bool winFormsDrawTextEx = false;        // не IAT: Detours в Button, вместе с paint-сессией
+            bool bomeMemo = false;           // four all-or-native EXE imports, Paint + GetDC
         };
 
         static wil::srwlock                                     s_cacheLock;
@@ -83,11 +87,13 @@ namespace GlassCore::Root
             // Статика Classify покрывает только instMod == entry-point,
             // а caller BeginPaint виден лишь в сессии. Только Paint-канал.
             bool entryPointSetBkColor = false;
+            bool bomeMemo = false; // includes an unarmed/native session barrier
         };
         struct RootHookSession
         {
             HWND hWnd = nullptr;
             std::vector<HookSpec> specs;
+            bool bomeMemo = false;
         };
         thread_local std::vector<RootPaintSession>              g_rootPaintStack;
         thread_local std::vector<RootHookSession>               g_rootDcStack;
@@ -347,6 +353,10 @@ namespace GlassCore::Root
             const HMODULE instMod = reinterpret_cast<HMODULE>(GetWindowLongPtrW(hWnd, GWLP_HINSTANCE));
             const ATOM dlgAtom = static_cast<ATOM>(GetClassLongPtrW(hWnd, GCW_ATOM));
             const bool is32770 = (dlgAtom == static_cast<ATOM>(32770));
+            // BWM window path for exact TBomeMemo / TBMGutter (not native memo/Edit).
+            // A missing/conflicting import must not leave only SetBkColor armed.
+            cache.bomeMemo = instMod == GlassCore::ModuleHandler::g_entryPointModule
+                && GlassCore::BomeMemo::IsWindow(hWnd);
 
             // USER32.dll + класс диалога #32770 — BWM Paint
             if (StrEqI(wndBase.c_str(), L"USER32.dll") && StrEqI(cls, L"#32770"))
@@ -574,14 +584,70 @@ namespace GlassCore::Root
             if (StrEqI(wndBase.c_str(), L"System.Windows.Forms.ni.dll") && IsWinFormsDotWindow(hWnd))
                 cache.winFormsDrawTextEx = true;
 
+            // VCL paints windowless labels and group captions directly from the EXE.
+            // Share the exact panel/frame classes with the native background bridge;
+            // the handler verifies either that bridge's DC or the current paint owner.
+            if (instMod == GlassCore::ModuleHandler::g_entryPointModule
+                && (StrEqI(cls, L"TGroupBox") || StrEqI(cls, L"TTabSheet")
+                    || StrEqI(cls, L"TCard") || StrEqI(cls, L"TRadioGroup")
+                    || GlassShared::IsDelphiPanelClassName(cls)))
+            {
+                PushPaint(instMod, OHK_DELPHI_DRAWTHEMETEXTEX, cache);
+                PushDc(instMod, OHK_DELPHI_DRAWTHEMETEXTEX, cache);
+            }
+
+            // Custom-painted VCL groups: one known source, the EXE. Reuse root's
+            // existing balanced paint/GetDC sessions; never hook all Button HWNDs.
+            if (instMod == GlassCore::ModuleHandler::g_entryPointModule
+                && GlassShared::IsDelphiButtonGroupsClassName(cls))
+            {
+                for (const size_t slot : {OHK_DELPHI_GROUP_TEXT, OHK_DELPHI_GROUP_FILL,
+                    OHK_DELPHI_GROUP_GRADIENT, OHK_DELPHI_GROUP_GDIGRADIENT})
+                {
+                    PushPaint(instMod, slot, cache);
+                    PushDc(instMod, slot, cache);
+                }
+            }
+
+            // VCL-таблицы (TShownValueList, TStringGrid, TDrawGrid) рисуют ячейки
+            // и свой Header сами, не через SysHeader32: TCustomGrid.WMPaint из EXE.
+            // Набор только на время WM_PAINT; тела проверяют окно и DC.
+            if (instMod == GlassCore::ModuleHandler::g_entryPointModule
+                && (StrEqI(cls, L"TShownValueList")
+                    || StrEqI(cls, L"TStringGrid")
+                    || StrEqI(cls, L"TDrawGrid")
+                    || StrEqI(cls, L"TValueListEditor")
+                    || StrEqI(cls, L"TControlList")))
+            {
+                PushPaint(instMod, OHK_DELPHI_GRID_TEXT, cache);
+                PushPaint(instMod, OHK_DELPHI_GRID_FILL, cache);
+                PushPaint(instMod, OHK_DELPHI_GRID_THEME, cache);
+                // Стирание фона (WM_ERASEBKGND) VCL делает PatBlt-ом с кистью
+                // FixedColor — без этого фиксированные ячейки остаются плотными.
+                PushPaint(instMod, OHK_PATBLT, cache);
+                // Диагностика (только лог): Blt из промежуточного буфера в DC таблицы.
+                PushPaint(instMod, OHK_BITBLT, cache);
+                // Цвет фона клиента: GetSysColor(COLOR_WINDOW) внутри paint-сессии.
+                PushPaint(instMod, OHK_GETSYSCOLOR, cache);
+            }
+
             // Точка входа процесса — типичные диалоги / сценарии владельца — BWM Paint (+ HEX: Paint+Dc)
             if (instMod == GlassCore::ModuleHandler::g_entryPointModule)
             {
                 void* ep = GlassCore::ModuleHandler::g_entryPointModule;
-                PushPaint(ep, OHK_SETBKCOLOR, cache);
-                PushPaint(ep, OHK_DRAWTEXT, cache);
-                PushPaint(ep, OHK_GETSYSCOLORBR, cache);
-                PushPaint(ep, OHK_CREATESOLIDBRUSH, cache);
+                // Panels and VCL groups consume the *actual solid brush* in
+                // their delphi draw paths. Generic remaps would destroy it
+                // before the client fill can apply the requested alpha=100.
+                if (!GlassShared::IsDelphiPanelClassName(cls)
+                    && !GlassShared::IsDelphiButtonGroupsClassName(cls)
+                    && !cache.bomeMemo)
+                {
+                    PushPaint(ep, OHK_SETBKCOLOR, cache);
+                    PushPaint(ep, OHK_GETSYSCOLORBR, cache);
+                    PushPaint(ep, OHK_CREATESOLIDBRUSH, cache);
+                }
+                if (!cache.bomeMemo)
+                    PushPaint(ep, OHK_DRAWTEXT, cache);
                 // BWM Paint, ветка «else // window», «callerModule == EntryPointModule»:
                 // «else if (szModuleName == msinfo32.exe)» — там szModuleName это basename
                 // caller-модуля BeginPaint (т.е. имя EXE точки входа), а не модуль окна.
@@ -611,6 +677,56 @@ namespace GlassCore::Root
         //
         // HookBeginPaint обходит g_paintProviders вместе с Button/Static/… — порядок регистрации
         // до PaintDispatcher::Startup см. CLAUDE.md. Здесь нет if по классу окна — только s_rootCache.
+
+        // VCL-таблицы: после BeginPaint (и любого стирания фона до него) чистим
+        // repaint-область чёрным. Приложение фон фиксированных ячеек не заливает
+        // ни FillRect, ни PatBlt (в журнале для них нет ни Fill, ни PatBlt),
+        // поэтому единственный способ убрать непрозрачный фон — чёрная база.
+        static bool Root_OnDelphiGridAfterBeginPaint(
+            HWND hWnd, HDC hdc, LPPAINTSTRUCT ps, HMODULE /*callerMod*/) noexcept
+        {
+            if (g_shutdown.load(std::memory_order_acquire) || !hWnd || !hdc || !ps)
+                return false;
+            if (IsRectEmpty(&ps->rcPaint))
+                return false;
+            wchar_t cls[256]{};
+            if (!GetClassNameW(hWnd, cls, _countof(cls)))
+                return false;
+            if (!(StrEqI(cls, L"TStringGrid") || StrEqI(cls, L"TDrawGrid")
+                || StrEqI(cls, L"TShownValueList") || StrEqI(cls, L"TValueListEditor")
+                || StrEqI(cls, L"TControlList")))
+                return false;
+            if (!GlassShared::GlassIsBackdropAllowedForHwnd(hWnd))
+                return false;
+            const RECT rc = ps->rcPaint;
+            const BOOL ok = PatBlt(hdc, rc.left, rc.top, rc.right - rc.left,
+                rc.bottom - rc.top, BLACKNESS);
+#if defined(_DEBUG)
+            // Диагностика поверхности: dcWnd/bmp показывают, куда реально легла
+            // заливка (оконный DC, memory DC, DIB), px — что вернулось обратно.
+            const HWND dcWnd = WindowFromDC(hdc);
+            const HGDIOBJ bmp = GetCurrentObject(hdc, OBJ_BITMAP);
+            const COLORREF px = GetPixel(hdc, rc.left + 2, rc.top + 2);
+            wchar_t parentCls[128]{};
+            const HWND parent = GetParent(hWnd);
+            if (parent)
+                GetClassNameW(parent, parentCls, _countof(parentCls));
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiGrid] Erase hwnd=0x%p rect=[%ld,%ld,%ld,%ld] ok=%d dc=0x%p dcWnd=0x%p bmp=0x%p px=0x%08X ex=0x%08X parent=0x%p parentCls=\"%s\"",
+                hWnd, rc.left, rc.top, rc.right, rc.bottom, ok ? 1 : 0,
+                hdc, dcWnd, bmp, static_cast<unsigned>(px),
+                static_cast<unsigned>(GetWindowLongPtrW(hWnd, GWL_EXSTYLE)),
+                parent, parentCls);
+#endif
+            return ok != FALSE;
+        }
+
+        static bool Root_OnBomeMemoAfterBeginPaint(
+            HWND hwnd, HDC dc, LPPAINTSTRUCT ps, HMODULE caller) noexcept
+        {
+            return !g_shutdown.load(std::memory_order_acquire)
+                && GlassCore::BomeMemo::AfterBeginPaint(hwnd, dc, ps, caller);
+        }
 
         // EnableRootHook держит ref-count на паре (module, OHK) в HookDispatcher.
         static void EnableSpecs(const std::vector<HookSpec>& specs, bool enable) noexcept
@@ -647,6 +763,7 @@ namespace GlassCore::Root
                 chartInherit = lr.inheritedFromChartGraph;
                 session.specs = lr.cache->paintHooks;
                 session.winFormsDrawTextEx = lr.cache->winFormsDrawTextEx;
+                session.bomeMemo = lr.cache->bomeMemo;
             }
             // BWM PaintHandler.cpp, ветка «window», callerModule == EntryPointModule:
             // фон окон и #32770-диалогов, рисуемых кодом самого EXE (dfrgui.exe),
@@ -655,7 +772,10 @@ namespace GlassCore::Root
             // Только Paint-канал, только OHK_SETBKCOLOR (scope задачи).
             bool wantEntrySetBk = false;
             if (callerMod && GlassCore::ModuleHandler::g_entryPointModule
-                && callerMod == GlassCore::ModuleHandler::g_entryPointModule)
+                && callerMod == GlassCore::ModuleHandler::g_entryPointModule
+                && !GlassShared::IsDelphiPanelWindow(hWnd)
+                && !GlassShared::IsDelphiButtonGroupsWindow(hWnd)
+                && !GlassCore::BomeMemo::IsWindow(hWnd))
             {
                 void* ep = GlassCore::ModuleHandler::g_entryPointModule;
                 bool already = false;
@@ -670,8 +790,15 @@ namespace GlassCore::Root
                 if (!already)
                     wantEntrySetBk = true;
             }
-            if (session.specs.empty() && !session.winFormsDrawTextEx && !wantEntrySetBk)
+            if (session.specs.empty() && !session.winFormsDrawTextEx && !wantEntrySetBk && !session.bomeMemo)
                 return;
+            if (session.bomeMemo)
+            {
+                const unsigned mask = IsFullInjectionMode()
+                    && callerMod == GlassCore::ModuleHandler::g_entryPointModule
+                    ? AcquireBomeMemoHooks() : 0;
+                GlassCore::BomeMemo::BeginSession(hWnd, true, mask);
+            }
             wchar_t cn[256]{};
             GetClassNameW(hWnd, cn, _countof(cn));
             if (IsMmcChartSessionClass(cn))
@@ -699,6 +826,42 @@ namespace GlassCore::Root
             }
             if (session.winFormsDrawTextEx)
                 GlassCore::FormsHooks::DrawTextExAttach(true);
+            // VCL может быть в runtime-пакете (bpl): тогда фон клиента таблицы
+            // (TCustomGrid.Paint: GetSysColor(COLOR_WINDOW) → CreateBrushIndirect →
+            // FillRect(ClientRect)) рисуется через IAT пакета, а не точки входа, и
+            // наши grid-слоты там не стоят. Включаем тот же набор на модуле,
+            // вызвавшем BeginPaint (парная пара снимется в Root_OnEndPaint).
+            if (callerMod
+                && (StrEqI(cn, L"TStringGrid") || StrEqI(cn, L"TDrawGrid")
+                    || StrEqI(cn, L"TShownValueList") || StrEqI(cn, L"TValueListEditor")
+                    || StrEqI(cn, L"TControlList")))
+            {
+                static constexpr size_t kGridSessionSpecs[] = {
+                    OHK_DELPHI_GRID_TEXT, OHK_DELPHI_GRID_FILL, OHK_DELPHI_GRID_THEME,
+                    OHK_GETSYSCOLOR, OHK_PATBLT, OHK_BITBLT };
+                unsigned added = 0;
+                for (const size_t idx : kGridSessionSpecs)
+                {
+                    bool already = false;
+                    for (const auto& sp : session.specs)
+                    {
+                        if (sp.module == static_cast<void*>(callerMod) && sp.index == idx)
+                        {
+                            already = true;
+                            break;
+                        }
+                    }
+                    if (already)
+                        continue;
+                    EnableRootHook(callerMod, idx, true);
+                    session.specs.push_back(HookSpec{ static_cast<void*>(callerMod), idx });
+                    ++added;
+                }
+                if (added)
+                    DebugLog(DBG_NORMAL,
+                        L"[GlassCore][Root][Session] BeginPaint: hwnd=0x%p class=\"%s\" caller=0x%p +%u grid-слотов на модуле caller'а",
+                        hWnd, cn, callerMod, added);
+            }
             g_rootPaintStack.push_back(std::move(session));
         }
 
@@ -717,6 +880,8 @@ namespace GlassCore::Root
                     EnableRootHook(GlassCore::ModuleHandler::g_entryPointModule, OHK_SETBKCOLOR, false);
                 if (session.winFormsDrawTextEx)
                     GlassCore::FormsHooks::DrawTextExAttach(false);
+                if (session.bomeMemo && GlassCore::BomeMemo::EndSession(hWnd, true))
+                    ReleaseBomeMemoHooks();
                 return;
             }
             // Пары для этого HWND нет (открытие было без кеша/спеков) — тихий выход.
@@ -724,7 +889,7 @@ namespace GlassCore::Root
 
         // --- Канал 2: GetDC / ReleaseDC (аналог PaintHandler::Dc) ---
 
-        static void Root_OnGetDC(HWND hWnd, HMODULE /*callerMod*/) noexcept
+        static void Root_OnGetDC(HWND hWnd, HMODULE callerMod) noexcept
         {
             if (g_shutdown.load(std::memory_order_acquire)) return;
             if (!GlassShared::GlassIsBackdropAllowedForHwnd(hWnd)) return;
@@ -737,8 +902,16 @@ namespace GlassCore::Root
                 const RootCacheLookupResult lr = LookupRootHookCacheLocked(hWnd);
                 if (!lr.cache) return;
                 session.specs = lr.cache->dcHooks;
+                session.bomeMemo = lr.cache->bomeMemo;
             }
-            if (session.specs.empty()) return;
+            if (session.specs.empty() && !session.bomeMemo) return;
+            if (session.bomeMemo)
+            {
+                const unsigned mask = IsFullInjectionMode()
+                    && callerMod == GlassCore::ModuleHandler::g_entryPointModule
+                    ? AcquireBomeMemoHooks() : 0;
+                GlassCore::BomeMemo::BeginSession(hWnd, false, mask);
+            }
             wchar_t cn[256]{};
             GetClassNameW(hWnd, cn, _countof(cn));
             if (IsMmcChartSessionClass(cn))
@@ -760,6 +933,8 @@ namespace GlassCore::Root
                 auto session = std::move(*it);
                 g_rootDcStack.erase((it + 1).base());
                 EnableSpecs(session.specs, false);
+                if (session.bomeMemo && GlassCore::BomeMemo::EndSession(hWnd, false))
+                    ReleaseBomeMemoHooks();
                 return;
             }
             // Пары для этого HWND нет — тихий выход.
@@ -813,7 +988,7 @@ namespace GlassCore::Root
         ClassifyRootWindow(hRoot, cache);
 
         if (cache.paintHooks.empty() && cache.dcHooks.empty()
-            && cache.compatDcHooks.empty() && !cache.winFormsDrawTextEx)
+            && cache.compatDcHooks.empty() && !cache.winFormsDrawTextEx && !cache.bomeMemo)
             return;
 
         // Предпрогрев IAT-кешей модулей из спеков (только чтение) — холодный скан PE
@@ -831,6 +1006,7 @@ namespace GlassCore::Root
             entry.dcHooks.insert(entry.dcHooks.end(), cache.dcHooks.begin(), cache.dcHooks.end());
             entry.compatDcHooks.insert(entry.compatDcHooks.end(), cache.compatDcHooks.begin(), cache.compatDcHooks.end());
             entry.winFormsDrawTextEx |= cache.winFormsDrawTextEx;
+            entry.bomeMemo |= cache.bomeMemo;
             prewarmModules.reserve(
                 entry.paintHooks.size() + entry.dcHooks.size() + entry.compatDcHooks.size());
             for (auto& [mod, idx] : entry.paintHooks) { (void)idx; if (mod) prewarmModules.push_back(mod); }
@@ -881,8 +1057,30 @@ namespace GlassCore::Root
     }
 
     // Engine::Startup: регистрируем три канала в PaintDispatcher.
+#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
+    static void VclProbePaintBegin(HWND hWnd, HMODULE) noexcept
+    {
+        if (!g_shutdown.load(std::memory_order_acquire) && IsFullInjectionMode())
+            BeginVclDrawProbe(hWnd, true);
+    }
+    static void VclProbePaintEnd(HWND hWnd, HMODULE) noexcept { EndVclDrawProbe(hWnd, true); }
+    static void VclProbeDcBegin(HWND hWnd, HMODULE) noexcept
+    {
+        if (!g_shutdown.load(std::memory_order_acquire) && IsFullInjectionMode())
+            BeginVclDrawProbe(hWnd, false);
+    }
+    static void VclProbeDcEnd(HWND hWnd, HMODULE) noexcept { EndVclDrawProbe(hWnd, false); }
+#endif
+
     void Startup() noexcept
     {
+#if defined(_DEBUG)
+#if defined(GLASS_DELPHI_DRAW_PROBE)
+        DebugLog(DBG_IMPORTANT, L"[GlassCore][DelphiProbeBuild] optional IAT probe compiled=1 (diagnostic; not a normal visual test)");
+#else
+        DebugLog(DBG_IMPORTANT, L"[GlassCore][DelphiProbeBuild] optional IAT probe compiled=0");
+#endif
+#endif
         /*using namespace Hooks::DebugDetourHooks;
         (void)SetEnabled(DDH_All, true);*/
         // Предпрогрев IAT точки входа для динамического SETBKCOLOR
@@ -890,8 +1088,15 @@ namespace GlassCore::Root
         if (void* ep = GlassCore::ModuleHandler::g_entryPointModule)
             PrewarmRootHook(ep);
         GlassCore::PaintDispatcher::RegisterPaintProvider({ Root_OnBeginPaint, Root_OnEndPaint });
+        GlassCore::PaintDispatcher::RegisterPostPaintProvider({ Root_OnDelphiGridAfterBeginPaint });
+        GlassCore::PaintDispatcher::RegisterPostPaintProvider({ Root_OnBomeMemoAfterBeginPaint });
+        GlassCore::Root::RegisterDelphiGridPaintProvider();
         GlassCore::PaintDispatcher::RegisterGetDCProvider({ Root_OnGetDC, Root_OnReleaseDC });
         GlassCore::PaintDispatcher::RegisterCompatDCProvider({ Root_OnCreateCompatDC, Root_OnDeleteDC });
+#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
+        GlassCore::PaintDispatcher::RegisterPaintProvider({ VclProbePaintBegin, VclProbePaintEnd });
+        GlassCore::PaintDispatcher::RegisterGetDCProvider({ VclProbeDcBegin, VclProbeDcEnd });
+#endif
         DebugLog(DBG_IMPORTANT, L"[GlassCore][Root] Startup: провайдеры PaintDispatcher зарегистрированы");
     }
 
@@ -912,6 +1117,10 @@ namespace GlassCore::Root
         g_rootPaintStack.clear();
         g_rootDcStack.clear();
         g_rootCompatDcStack.clear();
+        GlassCore::BomeMemo::ClearSessions();
+#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
+        ClearVclDrawProbe();
+#endif
 
         DisableAllRootHooks();
         SetRootGdiShutdown(false);

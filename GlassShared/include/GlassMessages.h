@@ -55,6 +55,8 @@ namespace WndCompat
 
     // SendMessageTimeout → RebarSubclassProc → RemoveWindowSubclass
     inline constexpr UINT WM_GLASS_DETACH_REBAR      = WM_APP + 0x20C;
+    // Delphi TCoolBar (классы окна TCoolBar / CoolBar) — свой путь отрисовки.
+    inline constexpr UINT WM_GLASS_DETACH_COOLBAR    = WM_APP + 0x225;
 
     // 0x211–0x212 зарезервированы (ранее IE_Server APPLY/DETACH при субклассе; сессия — PaintDispatcher + GlassMark).
 

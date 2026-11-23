@@ -586,8 +586,8 @@ bool InstallEngine::CommitOfficialOpenGlass(bool removing) noexcept {
             after.keyPath.c_str(),officialOpenGlassTarget_.c_str(),after.directory.c_str(),openGlassPackage_.version.c_str(),after.version.c_str(),inventoryError.c_str());
         if(!ran||(code!=ERROR_SUCCESS&&code!=ERROR_SUCCESS_REBOOT_REQUIRED)||!confirmed) {
             rollbackSucceeded_.store(false,std::memory_order_release);
-            SetFailure((ru?L"Операция OpenGlass не подтверждена. Его состояние могло измениться; upstream-установка не откатывалась. ":
-                L"OpenGlass operation was not confirmed. Its state may have changed; the upstream installation was not rolled back. ")+error+L" "+inventoryError,
+            SetFailure((ru?L"Не удалось убедиться, что установка или удаление OpenGlass завершились. Операция могла пройти частично, прежнее состояние не восстановлено. Перезагрузите компьютер и запустите установщик снова. ":
+                L"Couldn't confirm that installing or removing OpenGlass finished. It may have completed partially, and the previous state was not restored. Restart the computer and run Setup again. ")+error+L" "+inventoryError,
                 (code==ERROR_SUCCESS||code==ERROR_SUCCESS_REBOOT_REQUIRED)?ERROR_INSTALL_FAILURE:code);return false;
         }
         if(code==ERROR_SUCCESS_REBOOT_REQUIRED)AddFinishWarning(ru?L"OpenGlass: требуется перезагрузка":L"OpenGlass: restart required",
@@ -600,8 +600,8 @@ bool InstallEngine::CommitOfficialOpenGlass(bool removing) noexcept {
         SetStatus(labels_.finalize,selection_.openGlassResources?9600:10000);return true;
     }catch(...) {
         if(attempted)rollbackSucceeded_.store(false,std::memory_order_release);
-        SetFailure(ru?L"Операция OpenGlass завершилась ошибкой; автоматический откат upstream не выполнялся.":
-            L"OpenGlass operation failed; no automatic upstream rollback was performed.",ERROR_INSTALL_FAILURE);return false;
+        SetFailure(ru?L"Установка или удаление OpenGlass завершились ошибкой; прежнее состояние не восстановлено. Перезагрузите компьютер и запустите установщик снова.":
+            L"Installing or removing OpenGlass failed; the previous state was not restored. Restart the computer and run Setup again.",ERROR_INSTALL_FAILURE);return false;
     }
 }
 
@@ -624,8 +624,8 @@ bool InstallEngine::OfficialResourcesPhase(bool preparing) noexcept {
             }
             if(!GlassInstallMsi::SupportsResourcesBeforeOpenGlass(tempDir_+L"\\OpenGlassResources-x64.msi")) {
                 InstallLog::Line(L"Resources pre-OG protocol missing in acquired MSI; refusing before managed mutation");
-                SetFailure(ru?L"Пакет Resources устарел: он не поддерживает установку перед OpenGlass. Обновите Resources MSI и каталог релиза, затем перезапустите Setup. Продукты не изменены.":
-                    L"The Resources package is outdated: it cannot be installed before OpenGlass. Update the Resources MSI and release catalog, then restart Setup. Products were not changed.",ERROR_INSTALL_PACKAGE_REJECTED);
+                SetFailure(ru?L"Установочный файл OpenGlass Resources устарел и не подходит для этой версии установщика. Скачайте актуальную версию установщика GlassPlatform и запустите её. Ничего не изменено.":
+                    L"The OpenGlass Resources installation file is outdated and doesn't fit this Setup version. Download the current GlassPlatform Setup and run it. Nothing was changed.",ERROR_INSTALL_PACKAGE_REJECTED);
                 return false;
             }
             if(!GlassInstallRollback::CreateSnapshot(officialResourcesRollback_,x64Dir_,x86Dir_,openGlassDir_,false,
@@ -811,10 +811,8 @@ DWORD WINAPI InstallEngine::RunGlassWorker(LPVOID p) noexcept {
             if(ok && !self->IsCancelRequested())ok=self->PrepareManagedRemoval();
 
             if (ok && !vendorOnly && !self->IsCancelRequested()) {
-                if(GlassProcedurePlan::Settings(self->procedureMask_)) {
-                    ok=GlassInstallUtil::CloseSelectedSettingsProcesses(self->x64Dir_,self->x86Dir_,self->procedureMask_&36u,&self->cancelRequested_);
-                    if(!ok&&!self->IsCancelRequested())self->SetFailure(PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN?L"Не удалось закрыть выбранную версию GlassSettings. Закройте её и повторите операцию.":L"Could not close the selected GlassSettings version. Close it and retry.",GetLastError());
-                }
+                if(GlassProcedurePlan::Settings(self->procedureMask_))
+                    ok=self->WaitForSelectedSettings();
                 if (ok && !self->IsCancelRequested()) ok = self->StopRunningHosts();
             }
 
@@ -1204,9 +1202,11 @@ std::wstring InstallEngine::HoldReport() const noexcept {
 
 void InstallEngine::SignalHold(HoldAction action) noexcept {
     AcquireSRWLockExclusive(&statusLock_);
+    const HoldKind kind=holdKind_;
     holdAction_ = action;
     holdKind_ = HoldKind::None;
-    if (action==HoldAction::Retry) unlockActivity_.Begin(WizardUnlock::Phase::Modules);
+    // Повтор GlassSettings не запускает анимацию выгрузки модулей.
+    if (action==HoldAction::Retry && kind!=HoldKind::Settings) unlockActivity_.Begin(WizardUnlock::Phase::Modules);
     else if (action==HoldAction::Unlock) unlockActivity_.Begin(WizardUnlock::Phase::Processes);
     else unlockActivity_.End();
     ReleaseSRWLockExclusive(&statusLock_);
@@ -1258,6 +1258,48 @@ bool InstallEngine::StopGlassPlatform(GP::PlatformArch arch, const std::wstring&
     // their own visible status and unlock pages.
     InstallLog::LineFormat(L"%s: host stopped",logTag);
     return true;
+}
+
+bool InstallEngine::WaitForSelectedSettings() noexcept {
+    const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
+    const unsigned mask=procedureMask_&36u;
+    const auto fail=[this,ru](DWORD error) {
+        SetFailure(ru?L"Не удалось закрыть выбранную версию GlassSettings. Закройте её и повторите операцию.":
+            L"Could not close the selected GlassSettings version. Close it and retry.",error);
+        return false;
+    };
+    for(;;) {
+        if(IsCancelRequested())return false;
+        const bool closed=GlassInstallUtil::CloseSelectedSettingsProcesses(x64Dir_,x86Dir_,mask,&cancelRequested_);
+        if(closed)return !IsCancelRequested();
+        if(IsCancelRequested())return false;
+        const DWORD error=GetLastError();
+        // Несохранённые изменения оставляют процесс живым. Это не ошибка установки.
+        if(error!=ERROR_TIMEOUT)return fail(error);
+        std::wstring report=GlassInstallUtil::FormatSelectedSettingsReport(x64Dir_,x86Dir_,mask);
+        if(report.empty()) {
+            if(GlassInstallUtil::CloseSelectedSettingsProcesses(x64Dir_,x86Dir_,mask,&cancelRequested_))
+                return !IsCancelRequested();
+            if(IsCancelRequested())return false;
+            const DWORD again=GetLastError();
+            if(again!=ERROR_TIMEOUT)return fail(again);
+            report=ru?L"GlassSettings.exe: окно не закрылось":L"GlassSettings.exe: the window stayed open";
+        }
+        AcquireSRWLockExclusive(&statusLock_);
+        unlockActivity_.End();
+        if(holdGate_)ResetEvent(holdGate_);
+        holdKind_=HoldKind::Settings;
+        holdReport_=std::move(report);
+        holdAction_=HoldAction::None;
+        ReleaseSRWLockExclusive(&statusLock_);
+        InstallLog::Line(L"GlassSettings stayed open; waiting until it is closed");
+        if(IsCancelRequested())return false;
+        WaitForSingleObject(holdGate_,INFINITE);
+        AcquireSRWLockShared(&statusLock_);
+        const auto action=holdAction_.load(std::memory_order_acquire);
+        ReleaseSRWLockShared(&statusLock_);
+        if(action==HoldAction::Cancel || IsCancelRequested()){quietClose_=true;return false;}
+    }
 }
 
 bool InstallEngine::StopRunningHosts() noexcept {
@@ -1374,9 +1416,9 @@ bool InstallEngine::ReleaseLockedModules() noexcept {
         if(action==HoldAction::Cancel || IsCancelRequested()){quietClose_=true;return false;}
         if(action==HoldAction::ContinueRisk) {
             const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
-            AddFinishWarning(ru?L"Продолжено без подтверждённой выгрузки модулей":L"Continued without verified module unloading",
-                ru?L"Вы явно приняли риск. Проверки безопасности MSI не отключены; может потребоваться перезагрузка.":
-                   L"You explicitly accepted the risk. MSI security checks remain enabled; a restart may be required.");
+            AddFinishWarning(ru?L"Продолжено без проверки модулей Glass":L"Continued without checking Glass modules",
+                ru?L"Вы решили продолжить на свой риск. Модули Glass могли остаться загруженными в запущенные программы — перезагрузите компьютер.":
+                   L"You chose to continue at your own risk. Glass modules may still be loaded in running applications — restart the computer.");
             InstallLog::Line(L"Explicit module-monitor risk accepted; state remains unknown/loaded, not unloaded");return true;
         }
 #ifdef GLASS_SETUP_NATIVE_MONITOR
@@ -1436,8 +1478,8 @@ bool InstallEngine::ExtractPayload(HINSTANCE instance) noexcept {
     }
     if (selection_.secureUxTheme) {
         const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
-        SetStatus(ru?L"SecureUxTheme: проверка локального MSI / загрузка":
-                     L"SecureUxTheme: checking local MSI / downloading",400);
+        SetStatus(ru?L"SecureUxTheme: подготовка установочного файла…":
+                     L"SecureUxTheme: preparing the installation file…",400);
         std::wstring error;
         if (!GlassSecureUxPackage::Prepare(tempDir_,cancelRequested_,secureUxPackage_,error)) {
             if (!IsCancelRequested()) SetFailure(error,0);
@@ -1459,8 +1501,8 @@ bool InstallEngine::RecheckSnapshottedProduct(const wchar_t* productCode) noexce
     if (!IsCancelRequested()) {
         InstallLog::LineFormat(L"MSI changed after snapshot; refusing operation: %s (%s)",productCode,detail.c_str());
         const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
-        SetFailure(ru ? L"Расположение или регистрация MSI изменились после создания копии. Операция остановлена; сохраните журнал и обратитесь за помощью."
-                      : L"The MSI location or registration changed after the snapshot. The operation stopped; save the log and ask for help.",ERROR_INVALID_DATA);
+        SetFailure(ru ? L"Сведения об установленном продукте изменились во время работы установщика. Операция остановлена; сохраните журнал и обратитесь за помощью."
+                      : L"Information about an installed product changed while Setup was running. The operation stopped; save the log and ask for help.",ERROR_INVALID_DATA);
     }
     return false;
 }
@@ -1495,8 +1537,8 @@ bool InstallEngine::RecheckRelatedProducts(const wchar_t* productCode) noexcept 
     if (!IsCancelRequested()) {
         InstallLog::LineFormat(L"Unknown or changed related MSI product: %s",productCode);
         const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
-        SetFailure(ru ? L"Связанный MSI-продукт изменился или неизвестен. Установка остановлена; сохраните журнал и обратитесь за помощью."
-                      : L"A related MSI product is unknown or changed. Setup stopped; save the log and ask for help.",ERROR_INVALID_DATA);
+        SetFailure(ru ? L"Найдена неизвестная или изменённая версия одного из продуктов. Установка остановлена; сохраните журнал и обратитесь за помощью."
+                      : L"An unknown or changed version of one of the products was found. Setup stopped; save the log and ask for help.",ERROR_INVALID_DATA);
     }
     return false;
 }
@@ -1554,7 +1596,7 @@ bool InstallEngine::RunOneMsi(const std::wstring& msiPath, const std::wstring& i
             if (removeCode == ERROR_INSTALL_USEREXIT) cancelRequested_.store(true,std::memory_order_release);
             if (!IsCancelRequested()) {
                 const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
-                SetFailure(ru ? L"Не удалось удалить предыдущую версию продукта." : L"Could not remove the previous MSI product.", removeCode);
+                SetFailure(ru ? L"Не удалось удалить предыдущую версию продукта." : L"Could not remove the previous product version.", removeCode);
             }
             return false;
         }
@@ -1710,8 +1752,8 @@ bool InstallEngine::PrepareSecureUxRemoval() noexcept {
     }
     InstallLog::LineFormat(L"Vendor removal preflight refused: %s",error.c_str());
     if(!IsCancelRequested())SetFailure(PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN?
-        L"Удаление SecureUxTheme остановлено до изменений. Проверка MSI или профилей не пройдена. "+error:
-        L"SecureUxTheme removal stopped before changes. MSI/profile preflight failed. "+error,ERROR_INVALID_STATE);
+        L"SecureUxTheme не удалён: не удалось подготовить возврат стандартной темы у всех пользователей. Ничего не изменено. Подробности: "+error:
+        L"SecureUxTheme was not removed: Setup couldn't prepare restoring the default theme for all users. Nothing was changed. Details: "+error,ERROR_INVALID_STATE);
     return false;
 }
 
@@ -1745,8 +1787,8 @@ bool InstallEngine::RemoveOriginalSecureUxTheme() noexcept {
        !GlassSecureUxPackage::RecheckRemoval(tempDir_,cancelRequested_,secureUxRemoval_,error)) {
         InstallLog::LineFormat(L"Vendor removal revalidation refused: %s",error.c_str());
         SetFailure(PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN?
-            L"MSI, активность SecureUxTheme или состав GlassSettings изменились после проверки; удаление отменено.":
-            L"SecureUxTheme MSI/runtime or GlassSettings presence changed after preflight; removal was refused.",ERROR_INVALID_STATE);
+            L"SecureUxTheme или GlassSettings изменились во время работы установщика; удаление SecureUxTheme отменено. Запустите установщик заново.":
+            L"SecureUxTheme or GlassSettings changed while Setup was running; SecureUxTheme removal was canceled. Run Setup again.",ERROR_INVALID_STATE);
         return false;
     }
     if(secureUxLoadedRemoval_) {
@@ -1765,8 +1807,8 @@ bool InstallEngine::RemoveOriginalSecureUxTheme() noexcept {
         }catch(...){error=L"Style preparation could not complete.";}
         if(!prepared) {
             InstallLog::LineFormat(L"Loaded SecureUxTheme removal refused after style preparation: %s",error.c_str());
-            SetFailure((ru?L"MSI SecureUxTheme не удалён. При подготовке визуальный стиль мог быть сброшен; автоматического возврата custom style нет.\n":
-                L"SecureUxTheme MSI was not removed. The visual style may already be reset; no automatic custom-style restore is attempted.\n")+error,ERROR_INVALID_STATE);
+            SetFailure((ru?L"SecureUxTheme не удалён. Возможно, уже включена стандартная тема Windows; прежняя тема не будет возвращена автоматически.\n":
+                L"SecureUxTheme was not removed. The default Windows theme may already be on; the previous theme won't be restored automatically.\n")+error,ERROR_INVALID_STATE);
             return false;
         }
         InstallLog::Line(L"Loaded SecureUxTheme removal: all profile selectors/current-session style and original MSI revalidated; invoking vendor MSI");
@@ -1783,16 +1825,16 @@ bool InstallEngine::RemoveOriginalSecureUxTheme() noexcept {
     InstallLog::LineFormat(L"Original SecureUxTheme removal returned %u (ProductCode %s)",result,secureUxRemoval_.productCode.c_str());
     const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
     if(!removed){SetFailure(secureUxLoadedRemoval_?
-        (ru?L"Не удалось удалить оригинальный MSI SecureUxTheme. При подготовке применён штатный визуальный стиль; custom style автоматически не восстанавливается.":L"Could not remove the original SecureUxTheme MSI. The stock style was applied during preparation; the custom style is not restored automatically."):
-        (ru?L"Не удалось удалить оригинальный MSI SecureUxTheme.":L"Could not remove the original SecureUxTheme MSI."),result);return false;}
-    if(manual)AddFinishWarning(ru?L"SecureUxTheme: ручная подготовка темы":L"SecureUxTheme: manual theme preparation",
-        ru?L"Удаление выполнено без GlassSettings. Штатная тема и состояние загруженных компонентов автоматически не проверялись; ответственность за подготовку темы и последствия принята пользователем. Перезагрузите Windows.":
-           L"Removal completed without GlassSettings. Stock theme and loaded component state were not verified automatically; the user accepted responsibility for theme preparation and consequences. Restart Windows.");
+        (ru?L"Не удалось удалить SecureUxTheme. Перед удалением была включена стандартная тема Windows; прежняя тема не будет возвращена автоматически.":L"Could not remove SecureUxTheme. The standard Windows theme was turned on before removal; your previous theme won't be restored automatically."):
+        (ru?L"Не удалось удалить SecureUxTheme.":L"Could not remove SecureUxTheme."),result);return false;}
+    if(manual)AddFinishWarning(ru?L"SecureUxTheme удалён без GlassSettings":L"SecureUxTheme removed without GlassSettings",
+        ru?L"Установщик не проверял, включена ли стандартная тема Windows. Перезагрузите компьютер. Если после перезагрузки окна выглядят неправильно, включите стандартную тему в параметрах Windows.":
+           L"The installer did not check whether the standard Windows theme is on. Restart the computer. If windows look wrong after the restart, turn on the standard theme in Windows Settings.");
     if(secureUxLoadedRemoval_)for(const auto& skipped:secureUxRemovalProfiles_.SkippedLoadedProfiles()) {
         const std::wstring user=(skipped.second.empty()?L"":skipped.second+L" ")+L"["+skipped.first+L"]";
-        AddFinishWarning(ru?L"SecureUxTheme: профиль пропущен":L"SecureUxTheme: profile skipped",
-            user+(ru?L" — ключ HKEY_USERS отсутствует. Настройки темы этого пользователя не изменены; NTUSER.DAT не подключался.":
-                     L" — HKEY_USERS key is absent. This user's theme settings were not changed; NTUSER.DAT was not loaded."));
+        AddFinishWarning(ru?L"SecureUxTheme: тема пользователя не изменена":L"SecureUxTheme: user theme not changed",
+            user+(ru?L" — не удалось открыть настройки этого пользователя, поэтому его тема не изменена. Если у него окна выглядят неправильно, пусть он включит стандартную тему в параметрах Windows.":
+                     L" — this user's settings could not be opened, so their theme was not changed. If their windows look wrong, they should turn on the standard theme in Windows Settings."));
     }
     if(!GlassInstallMsi::RefreshManagedArp(x64Dir_,x86Dir_,openGlassDir_))
         AddFinishWarning(ru?L"Записи обслуживания обновлены не полностью":L"Maintenance entries were not fully refreshed",
@@ -1846,14 +1888,16 @@ bool InstallEngine::InstallOriginalSecureUxTheme() noexcept {
     std::wstring presenceError;
     if(!GlassSecureUxPackage::QueryInstallPresence(officialProducts,cancelRequested_,presenceError)) {
         InstallLog::LineFormat(L"SecureUxTheme install presence refused: %s",presenceError.c_str());
-        SetFailure(L"SecureUxTheme MSI inventory or ownership could not be verified.",ERROR_INSTALL_PACKAGE_REJECTED);return false;
+        SetFailure(ru?L"Не удалось проверить, установлен ли уже SecureUxTheme. Повторите установку.":
+            L"Couldn't check whether SecureUxTheme is already installed. Retry the installation.",ERROR_INSTALL_PACKAGE_REJECTED);return false;
     }
     if (!officialProducts.empty()) {
-        SetFailure(ru?L"MSI SecureUxTheme появился после проверки плана; повторите установку.":L"SecureUxTheme MSI appeared after plan validation; retry installation.",ERROR_RETRY);
+        SetFailure(ru?L"SecureUxTheme был установлен во время работы установщика; повторите установку.":L"SecureUxTheme was installed while Setup was running; retry the installation.",ERROR_RETRY);
         return false;
     }
     if (secureUxPackage_.alreadyInstalled) {
-        SetFailure(L"SecureUxTheme MSI registration changed during setup; retry installation.",ERROR_RETRY);
+        SetFailure(ru?L"SecureUxTheme изменился во время работы установщика; повторите установку.":
+            L"SecureUxTheme changed while Setup was running; retry the installation.",ERROR_RETRY);
         return false;
     }
     std::wstring error;
@@ -1864,7 +1908,7 @@ bool InstallEngine::InstallOriginalSecureUxTheme() noexcept {
         !GlassMaintenanceCache::Identity(secureUxPackage_.path,currentCode,currentVersion) ||
         _wcsicmp(currentCode.c_str(),secureUxPackage_.productCode.c_str())!=0 ||
         currentVersion!=secureUxPackage_.version) {
-        SetFailure(error.empty()?(ru?L"Оригинальный MSI SecureUxTheme не подготовлен или его идентификатор/версия изменились.":L"Official SecureUxTheme MSI was not prepared or its identity changed."):error,ERROR_INSTALL_PACKAGE_REJECTED);
+        SetFailure(error.empty()?(ru?L"Установочный файл SecureUxTheme не подготовлен или изменился. Повторите установку.":L"The SecureUxTheme installation file wasn't prepared or has changed. Retry the installation."):error,ERROR_INSTALL_PACKAGE_REJECTED);
         return false;
     }
     GlassInstallMsi::ProgressSink sink{};
@@ -1879,8 +1923,8 @@ bool InstallEngine::InstallOriginalSecureUxTheme() noexcept {
     const UINT result=GlassInstallMsi::InstallProduct(secureUxPackage_.path,L"REBOOT=ReallySuppress",&sink);
     InstallLog::LineFormat(L"Original SecureUxTheme MSI returned %u (ProductCode %s)",result,secureUxPackage_.productCode.c_str());
     if (!GlassInstallMsi::MsiSuccess(result)) {
-        SetFailure(ru?L"Не удалось установить оригинальный MSI SecureUxTheme.":
-                      L"Could not install the original SecureUxTheme MSI.",result);
+        SetFailure(ru?L"Не удалось установить SecureUxTheme.":
+                      L"Could not install SecureUxTheme.",result);
         return false;
     }
     // Do not put the vendor ProductCode into Glass rollback's fixed-root list.
@@ -1898,8 +1942,8 @@ bool InstallEngine::InstallOriginalSecureUxTheme() noexcept {
     if (restart)
         AddFinishWarning(ru?L"SecureUxTheme: требуется перезагрузка Windows":
                             L"SecureUxTheme: Windows restart required",
-            ru?L"MSI установлен. Автоматическая перезагрузка подавлена; перезагрузите Windows самостоятельно.":
-               L"The MSI is installed. Automatic restart was suppressed; restart Windows yourself.");
+            ru?L"SecureUxTheme установлен и заработает после перезагрузки. Компьютер не будет перезагружен автоматически — сделайте это сами, когда удобно.":
+               L"SecureUxTheme is installed and will work after a restart. The computer won't restart automatically — do it yourself when convenient.");
     return true;
 }
 
@@ -2048,10 +2092,6 @@ bool InstallEngine::BuildExecutionPlan() noexcept {
             // guards above authorize only these fixed Glass product families.
             fact.source=P::Source::Verified;fact.ownership=P::Ownership::Managed;
         }
-        const unsigned settingsRisk=P::SettingsRemovalRiskMask(selection_.Removes(2),selection_.Removes(5),
-            facts[0].presence==P::Presence::Installed,facts[1].presence==P::Presence::Installed,
-            selection_.Removes(0),selection_.Removes(1));
-        if(settingsRisk & ~selection_.confirmedSettingsRemovalRisk)return refuse(L"Settings removal needs architecture-specific risk consent");
         // Represent the vendor row in the same discovered plan, but keep its
         // transaction commit-last: no Glass INSTALLDIR, rollback or file cleanup.
         const auto sutIndex=P::Index(P::Product::SecureUxTheme);
@@ -2599,13 +2639,13 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
         std::wstring cacheFailure;
         std::vector<std::wstring> needsOriginal;
         if(!GlassMaintenanceCache::Publish(instance_,cacheBlobs.data(),cacheBlobs.size(),IDR_MAINTENANCE_UNINS,&cacheFailure,&needsOriginal))
-            AddFinishWarning(ru?L"Источники обслуживания сохранены не полностью":L"Maintenance sources were not fully saved",
-                (ru?L"Не удалось полностью сохранить источники обслуживания продуктов. Это не ошибка обновления оболочки или запуска компонентов. Сохраните исходный установщик и журнал.\n":
-                    L"Product maintenance sources were not fully saved. This is not a controller update or component startup failure. Keep the original installer and log.\n")+cacheFailure);
+            AddFinishWarning(ru?L"Файлы для восстановления сохранены не полностью":L"Repair files were not fully saved",
+                (ru?L"Установка выполнена, но не все файлы, нужные для будущего восстановления продуктов, удалось сохранить. Сохраните этот установщик и журнал — они могут понадобиться для восстановления.\n":
+                    L"Installation completed, but not all files needed to repair the products later could be saved. Keep this installer and the log — they may be needed for a repair.\n")+cacheFailure);
         if(!needsOriginal.empty()) {
             std::wstring detail=ru?
-                L"Для восстановления следующих продуктов нужен проверенный исходный MSI с полным содержимым поставки. Существующие кандидаты сохранены, но не зарегистрированы как доверенные источники. Это не ошибка сохранения оболочки и не отмена выполненной операции:":
-                L"Repair of the following products needs a verified original MSI and its complete source payload. Existing candidates were retained but were not registered as trusted sources. This is not a controller publication failure or a rollback of the completed operation:";
+                L"Установка выполнена, но для восстановления следующих продуктов в будущем понадобится полный установщик GlassPlatform. Сохраните его:":
+                L"Installation completed, but repairing the following products later will require the full GlassPlatform Setup. Keep it:";
             for(const auto& source:needsOriginal)detail+=L"\n"+source;
             AddFinishWarning(ru?L"Не для всех продуктов доступен источник восстановления":L"Repair sources are unavailable for some products",detail);
         }
@@ -2850,10 +2890,10 @@ bool InstallEngine::CreateRollbackSnapshot() noexcept {
             const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
             const bool directory=rollbackSession_.productPathCode==L"<installation directory>";
             std::wstring message=directory
-                ? (ru ? L"Каталог установки или его содержимое не удалось безопасно проверить: обнаружена ссылка или недоступен путь. Установка остановлена до изменений. Сохраните журнал и обратитесь за помощью; не удаляйте файлы вручную."
-                      : L"The installation directory or its contents could not be checked safely: a link or an inaccessible path was found. Setup stopped before making changes. Save the log and ask for help; do not delete files manually.")
-                : (ru ? L"Не удалось безопасно проверить ранее зарегистрированный MSI: его файлы находятся вне определённого каталога установки либо неизвестны пути, контекст или связанный продукт. Установка остановлена до изменений. Сохраните журнал и обратитесь за помощью; не удаляйте файлы вручную."
-                      : L"A previously registered MSI cannot be verified safely: its files are outside the installation directory, or its paths, context or related products are unknown. Setup stopped before making changes. Save the log and ask for help; do not delete files manually.");
+                ? (ru ? L"Не удалось безопасно проверить папку установки: в ней найдена ссылка на другое место или недоступный файл. Ничего не изменено. Сохраните журнал и обратитесь за помощью; не удаляйте файлы вручную."
+                      : L"The installation folder couldn't be checked safely: it contains a link to another location or an inaccessible file. Nothing was changed. Save the log and ask for help; do not delete files manually.")
+                : (ru ? L"Не удалось безопасно проверить ранее установленный продукт: его файлы находятся вне папки установки или их расположение неизвестно. Ничего не изменено. Сохраните журнал и обратитесь за помощью; не удаляйте файлы вручную."
+                      : L"A previously installed product couldn't be checked safely: its files are outside the installation folder or their location is unknown. Nothing was changed. Save the log and ask for help; do not delete files manually.");
             if (!directory) message+=L"\r\n"+rollbackSession_.productPathCode;
             if (!rollbackSession_.productPathDetail.empty()) message+=L"\r\n"+rollbackSession_.productPathDetail;
             SetFailure(message,ERROR_INVALID_DATA);
@@ -3071,7 +3111,7 @@ bool InstallEngine::PurgeRemnants() noexcept {
             if (removeCode == ERROR_INSTALL_USEREXIT) cancelRequested_.store(true,std::memory_order_release);
             if (!IsCancelRequested()) {
                 const bool ru=PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_RUSSIAN;
-                SetFailure(ru ? L"Не удалось удалить прежний MSI-пакет." : L"Could not remove an older MSI product.", removeCode);
+                SetFailure(ru ? L"Не удалось удалить предыдущую версию продукта." : L"Could not remove the previous product version.", removeCode);
             }
             return false;
         }

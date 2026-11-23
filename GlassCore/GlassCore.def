@@ -5,6 +5,14 @@ LIBRARY GlassCore
 EXPORTS
     GlassCore_ApplyDropDownShow
     GlassCore_ApplyRootBackdropPolicyTransitionForHwnd
+    GlassCore_BeginDelphiBitBtnDraw
+    GlassCore_EndDelphiBitBtnDraw
+    GlassCore_BeginDelphiListBoxDraw
+    GlassCore_EndDelphiListBoxDraw
+    GlassCore_BeginDelphiListBoxProbe
+    GlassCore_EndDelphiListBoxProbe
+    GlassCore_BeginDelphiPanelPaint
+    GlassCore_EndDelphiPanelPaint
     GlassCore_BeginExplorerShellChromeRestore
     GlassCore_ClearThemePaintPreview
     GlassCore_FinalizeRootActivationVisualUpdate

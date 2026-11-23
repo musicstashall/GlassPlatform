@@ -123,7 +123,6 @@
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\InstallEngine.cpp" />
     <ClCompile Include="src\InstallLog.cpp" />
-    <ClCompile Include="src\WizardTheme.cpp" />
     <ClCompile Include="src\InstallSupport\GlassInstallLog.cpp" />
     <ClCompile Include="src\InstallSupport\GlassInstallMsi.cpp" />
     <ClCompile Include="src\InstallSupport\GlassSecureUxPackage.cpp" />
@@ -163,9 +162,7 @@
     <ClInclude Include="src\InstallSupport\GlassMaintenanceLaunch.h" />
     <ClInclude Include="src\InstallSupport\GlassUserDataCleanup.h" />
     <ClInclude Include="src\InstallSupport\GlassCacheDiagnostics.h" />
-    <ClInclude Include="src\WizardTheme.h" />
     <ClInclude Include="src\GdiPlusCompat.h" />
-    <ClInclude Include="src\WizardAssets.h" />
     <ClInclude Include="src\WizardProgress.h" />
     <ClInclude Include="src\WizardUnlockState.h" />
     <ClInclude Include="src\GlassProducts.h" />
@@ -211,6 +208,7 @@
     <None Include="scripts\Verify-InstallerNative.ps1" />
     <None Include="packages.config" />
   </ItemGroup>
+  <Import Project="src\WizardUi\WizardUi.props" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
     <Import Project="..\packages\Detours.4.0.1\build\native\Detours.targets" Condition="Exists('..\packages\Detours.4.0.1\build\native\Detours.targets')" />
