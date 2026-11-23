@@ -251,3 +251,13 @@ assert 'ReflectionColorHistory.Save(recentValues, customColor)' in apply_block
 assert dialog.count('recentValues.Insert(0, appliedColor)') == 1
 assert 'RememberLocalColor' not in dialog
 print('PASS: picker edits do not mutate/rebuild history; only explicit Apply records the final selected color')
+
+assert 'SettingsSession.Current.DirtyChanged += OnSessionChanged' in desktop_preview
+assert 'SettingsSession.Current.DirtyChanged -= OnSessionChanged' in desktop_preview
+live_glass = desktop_preview[desktop_preview.index('private async void OnSessionChanged'):desktop_preview.index('private async Task RefreshWallpaperAsync')]
+assert 'await Task.Delay(150)' in live_glass
+assert '_lastGlassState == state' in live_glass and '_glassRefreshGate.WaitAsync()' in live_glass
+assert '_glassLayers[i].RefreshAsync(_glassWallpaperPaths[i] ?? state.WallpaperPath, true)' in live_glass
+assert 'SetReflection' not in live_glass and 'ReadMonitorWallpapers' not in live_glass
+assert 'new RegistryValueChangeWatcher' not in desktop_preview
+print('PASS: live glass reuses session registry notifications, debounces/deduplicates and preserves reflection/wallpaper sources')

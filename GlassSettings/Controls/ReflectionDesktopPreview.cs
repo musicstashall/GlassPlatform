@@ -15,6 +15,7 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
     private readonly List<FlatGlassPreviewLayer> _glassLayers = [];
     private readonly List<Border> _fallbacks = [];
     private readonly Windows.Graphics.RectInt32[] _bounds;
+    private readonly string?[] _glassWallpaperPaths;
     private readonly List<WallpaperPreviewCrossfade> _wallpapers = [];
     private readonly DesktopEnvironmentWatcher? _watcher;
     private bool _disposed;
@@ -32,6 +33,9 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
         _loading.Visibility = Visibility.Collapsed;
     }
     private int _wallpaperRevision;
+    private int _glassRevision;
+    private readonly SemaphoreSlim _glassRefreshGate = new(1, 1);
+    private DwmCompositionCascadePreview.PreviewState? _lastGlassState;
     public int DesktopWidth { get; }
     public int DesktopHeight { get; }
 
@@ -41,6 +45,7 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
         var bounds = ReadMonitorBounds();
         System.Diagnostics.Debug.WriteLine($"[ReflectionConfigure] preview: monitor snapshot ready, count={bounds.Length}");
         _bounds = bounds;
+        _glassWallpaperPaths = new string?[bounds.Length];
         if (bounds.Length == 0) throw new InvalidOperationException("No desktop displays.");
         int left = bounds.Min(b => b.X), top = bounds.Min(b => b.Y);
         DesktopWidth = bounds.Max(b => b.X + b.Width) - left;
@@ -108,6 +113,7 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
         }
         _watcher = DesktopEnvironmentWatcher.Current;
         if (_watcher is not null) _watcher.Changed += OnEnvironmentChanged;
+        SettingsSession.Current.DirtyChanged += OnSessionChanged;
         Loaded += OnLoaded;
     }
 
@@ -172,6 +178,39 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
             await RefreshWallpaperAsync(true);
     }
 
+    private async void OnSessionChanged(object? sender, EventArgs e)
+    {
+        int revision = ++_glassRevision;
+        try
+        {
+            // Reuse the session notification produced by page operations and the
+            // existing debounced HKCU/HKLM registry snapshot watcher.
+            await Task.Delay(150);
+            if (_disposed || revision != _glassRevision) return;
+            await _glassRefreshGate.WaitAsync();
+            try
+            {
+                if (_disposed || revision != _glassRevision) return;
+                var state = CompositionPreviewRegistryStates.BuildRuntimeActive();
+                foreach (var image in _reflections)
+                    image.Opacity = CompositionPreviewRegistryStates.RuntimeReflectionOpacity;
+                if (_lastGlassState == state) return;
+                for (int i = 0; i < _bounds.Length; i++)
+                {
+                    await _glassLayers[i].RefreshAsync(_glassWallpaperPaths[i] ?? state.WallpaperPath, true);
+                    if (_disposed || revision != _glassRevision) return;
+                }
+                _lastGlassState = state;
+            }
+            finally { _glassRefreshGate.Release(); }
+        }
+        catch (Exception error)
+        {
+            System.Diagnostics.Debug.WriteLine($"[ReflectionConfigure] live glass refresh failed: {error}");
+            System.Diagnostics.Trace.TraceWarning("Reflection live glass: {0}", error);
+        }
+    }
+
     private async Task RefreshWallpaperAsync(bool animate)
     {
         int revision = ++_wallpaperRevision;
@@ -196,8 +235,8 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
                 uint background = monitor?.Monitor.BackgroundColorRef ?? 0;
                 _fallbacks[i].Background = new SolidColorBrush(Windows.UI.Color.FromArgb(
                     255, (byte)background, (byte)(background >> 8), (byte)(background >> 16)));
-                await _glassLayers[i].RefreshAsync(monitor?.Monitor.Path
-                    ?? CurrentWallpaperResolver.TryGetDesktopWallpaperPath(), animate);
+                _glassWallpaperPaths[i] = monitor?.Monitor.Path ?? CurrentWallpaperResolver.TryGetDesktopWallpaperPath();
+                await _glassLayers[i].RefreshAsync(_glassWallpaperPaths[i], animate);
                 if (_disposed || revision != _wallpaperRevision) return;
                 // Empty per-monitor path is a real solid background, not a reason
                 // to resurrect the cached photo from another monitor.
@@ -221,7 +260,8 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
 
     public void Dispose()
     {
-        _disposed = true; _wallpaperRevision++;
+        _disposed = true; _wallpaperRevision++; _glassRevision++;
+        SettingsSession.Current.DirtyChanged -= OnSessionChanged;
         _loading.IsActive = false;
         Loaded -= OnLoaded;
         if (_watcher is not null) _watcher.Changed -= OnEnvironmentChanged;
