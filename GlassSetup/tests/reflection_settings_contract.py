@@ -153,3 +153,10 @@ assert 'ReflectionSourceNaming' not in service
 assert '_Lite' not in state and 'uint ColorRgb = 0' in state
 assert 'state.Source' in service and 'state.Output' in service
 print('PASS: only current publication resolves its explicit source; no legacy paths, filename aliases or color migration')
+
+assert 'var displays = DisplayArea.FindAll();' in desktop_preview
+assert 'new Windows.Graphics.RectInt32[displays.Count]' in desktop_preview
+assert 'bounds[i] = displays[i].OuterBounds;' in desktop_preview
+assert 'DisplayArea.FindAll().Select' not in desktop_preview
+assert 'foreach (var display in displays)' not in desktop_preview
+print('PASS: monitor snapshot uses WinRT Count/indexer, not the failing IEnumerable projection')

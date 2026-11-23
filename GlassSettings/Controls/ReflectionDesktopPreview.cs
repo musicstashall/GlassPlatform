@@ -23,7 +23,14 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
 
     public ReflectionDesktopPreview()
     {
-        var bounds = _bounds = DisplayArea.FindAll().Select(area => area.OuterBounds).ToArray();
+        // FindAll projects an IReadOnlyList whose WinRT IEnumerable QI can fail
+        // on some Windows App SDK runtimes. Use Count/indexer, then LINQ only
+        // on the managed snapshot (never on the projected collection).
+        var displays = DisplayArea.FindAll();
+        var bounds = new Windows.Graphics.RectInt32[displays.Count];
+        for (int i = 0; i < bounds.Length; i++)
+            bounds[i] = displays[i].OuterBounds;
+        _bounds = bounds;
         if (bounds.Length == 0) throw new InvalidOperationException("No desktop displays.");
         int left = bounds.Min(b => b.X), top = bounds.Min(b => b.Y);
         DesktopWidth = bounds.Max(b => b.X + b.Width) - left;
