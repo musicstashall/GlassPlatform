@@ -20,12 +20,18 @@ public static class ReflectionSettingsDialog
         var scale = Number("Reflection_SettingScale", 25, 200, initial.ScalePercent);
         System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] dialog: create picker");
         var picker = new GlassAlphaColorPicker { IsAlphaVisible = true };
-        picker.UseCompactLayout();
         picker.SetColor(((uint)Math.Round(initial.OpacityPercent * 255.0 / 100) << 24) | initial.ColorRgb);
         var presets = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        var darkPreset = new Button { Content = GlassSettingsResources.Get("Reflection_PresetDark") };
-        var lightPreset = new Button { Content = GlassSettingsResources.Get("Reflection_PresetLight") };
+        var darkPreset = new AccentRecentColorSwatch { SwatchColor = Windows.UI.Color.FromArgb(255, 0, 0, 0) };
+        var lightPreset = new AccentRecentColorSwatch { SwatchColor = Windows.UI.Color.FromArgb(255, 160, 160, 160) };
+        GlassSettingsToolTipService.SetToolTip(darkPreset, GlassSettingsResources.Get("Reflection_PresetDark"));
+        GlassSettingsToolTipService.SetToolTip(lightPreset, GlassSettingsResources.Get("Reflection_PresetLight"));
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(darkPreset, GlassSettingsResources.Get("Reflection_PresetDark"));
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(lightPreset, GlassSettingsResources.Get("Reflection_PresetLight"));
         presets.Children.Add(darkPreset); presets.Children.Add(lightPreset);
+        var setColor = new Button { Content = GlassSettingsResources.Get("Reflection_SetColor") };
+        var colorFlyout = new Flyout { Content = picker, Placement = FlyoutPlacementMode.Top };
+        setColor.Flyout = colorFlyout;
         var softness = Number("Reflection_SettingSoftness", 0, 20, initial.Softness);
         var noise = Number("Reflection_SettingNoise", 0, 100, initial.NoisePercent);
         var noiseDensity = Number("Reflection_SettingNoiseDensity", 0, 100, initial.NoiseDensity);
@@ -57,10 +63,7 @@ public static class ReflectionSettingsDialog
         processingRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         processingRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         enabled.VerticalAlignment = VerticalAlignment.Center;
-        presets.VerticalAlignment = VerticalAlignment.Center;
-        Grid.SetColumn(presets, 1);
         processingRow.Children.Add(enabled);
-        processingRow.Children.Add(presets);
         body.Children.Add(processingRow);
         var imageGroup = new StackPanel { Spacing = 12 };
         imageGroup.Children.Add(Row("Reflection_SettingScale", scale));
@@ -99,10 +102,11 @@ public static class ReflectionSettingsDialog
         };
         pickerRail.Children.Add(new TextBlock
         {
-            Text = GlassSettingsResources.Get("Reflection_ColorTitle"),
+            Text = GlassSettingsResources.Get("Reflection_ColorGroup"),
             Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"]
         });
-        pickerRail.Children.Add(picker);
+        pickerRail.Children.Add(presets);
+        pickerRail.Children.Add(setColor);
         // Preview spans the dialog; all editing controls live below it.
         var editors = new Grid { ColumnSpacing = 24 };
         editors.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -130,21 +134,24 @@ public static class ReflectionSettingsDialog
             {
                 if (closed || current != revision) return;
                 System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] reflection render: begin");
-                var png = await ReflectionTextureService.RenderConfiguredAsync(
-                    source, preview.DesktopWidth, preview.DesktopHeight, Values());
-                if (closed || current != revision) return;
-                System.Diagnostics.Debug.WriteLine($"[ReflectionConfigure] reflection render: complete, bytes={png.Length}");
-                using var stream = new MemoryStream(png);
-                using var random = stream.AsRandomAccessStream();
-                // Filter the full desktop canvas before display. Letting the GPU
-                // minify native 3–8px tiles directly produces false large patterns/moiré.
-                var decoder = await Windows.Graphics.Imaging.BitmapDecoder.CreateAsync(random);
                 double rasterScale = preview.XamlRoot?.RasterizationScale ?? 1;
                 double factor = Math.Min(1, Math.Min(
                     Math.Max(1, preview.ActualWidth) * rasterScale / preview.DesktopWidth,
                     Math.Max(1, preview.ActualHeight) * rasterScale / preview.DesktopHeight));
                 int width = Math.Max(1, (int)Math.Round(preview.DesktopWidth * factor));
                 int height = Math.Max(1, (int)Math.Round(preview.DesktopHeight * factor));
+                bool texture = ReflectionTextureService.IsTexture(source);
+                // Texture cells keep the selected pixel scale in the thumbnail;
+                // SVG retains its position/scale in the full virtual desktop.
+                var png = await ReflectionTextureService.RenderConfiguredAsync(
+                    source, texture ? width : preview.DesktopWidth,
+                    texture ? height : preview.DesktopHeight, Values());
+                if (closed || current != revision) return;
+                System.Diagnostics.Debug.WriteLine($"[ReflectionConfigure] reflection render: complete, bytes={png.Length}");
+                using var stream = new MemoryStream(png);
+                using var random = stream.AsRandomAccessStream();
+                // SVG is filtered down; texture is already rendered at display size.
+                var decoder = await Windows.Graphics.Imaging.BitmapDecoder.CreateAsync(random);
                 var pixels = await decoder.GetPixelDataAsync(
                     Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8,
                     Windows.Graphics.Imaging.BitmapAlphaMode.Premultiplied,
@@ -163,6 +170,7 @@ public static class ReflectionSettingsDialog
                 System.Diagnostics.Debug.WriteLine($"[ReflectionConfigure] reflection render/decode failed: {exception}");
                 if (!closed && current == revision)
                 {
+                    preview.ShowReflectionFailure();
                     error.Text = exception.Message;
                     error.Visibility = Visibility.Visible;
                 }
@@ -170,16 +178,22 @@ public static class ReflectionSettingsDialog
             finally { renderGate.Release(); }
         }
         scale.ValueChanged += (_, _) => _ = RefreshAsync();
-        picker.ColorChanged += (_, _) => _ = RefreshAsync();
+        void SyncColorSelection()
+        {
+            uint argb = picker.GetColorArgb();
+            darkPreset.IsSelected = argb == 0xFF000000u;
+            lightPreset.IsSelected = argb == 0xFFA0A0A0u;
+        }
+        picker.ColorChanged += (_, _) => { SyncColorSelection(); _ = RefreshAsync(); };
         void ApplyPreset(uint argb)
         {
             enabled.IsOn = true;
             scale.Value = 100; softness.Value = 0;
             noise.Value = 0; noiseDensity.Value = 50; noiseType.SelectedIndex = 0;
-            picker.SetColor(argb); _ = RefreshAsync();
+            picker.SetColor(argb); SyncColorSelection(); _ = RefreshAsync();
         }
-        darkPreset.Click += (_, _) => ApplyPreset(0xFF000000u);
-        lightPreset.Click += (_, _) => ApplyPreset(0xFFA0A0A0u);
+        darkPreset.Clicked += (_, _) => ApplyPreset(0xFF000000u);
+        lightPreset.Clicked += (_, _) => ApplyPreset(0xFFA0A0A0u);
         softness.ValueChanged += (_, _) => _ = RefreshAsync();
         noise.ValueChanged += (_, _) => _ = RefreshAsync();
         noiseDensity.ValueChanged += (_, _) => _ = RefreshAsync();
@@ -194,6 +208,7 @@ public static class ReflectionSettingsDialog
         {
             groups.IsEnabled = enabled.IsOn;
             picker.IsEnabled = enabled.IsOn;
+            setColor.IsEnabled = enabled.IsOn;
             SyncNoiseControls();
         }
         enabled.Toggled += (_, _) =>
@@ -201,6 +216,7 @@ public static class ReflectionSettingsDialog
             SyncProcessingControls(); _ = RefreshAsync();
         };
         SyncProcessingControls();
+        SyncColorSelection();
         preview.SizeChanged += (_, _) => _ = RefreshAsync();
         System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] dialog: start reflection render");
         _ = RefreshAsync();
@@ -215,7 +231,7 @@ public static class ReflectionSettingsDialog
             });
             return result == HostedDialogResult.Primary ? Values().Normalize() : null;
         }
-        finally { closed = true; revision++; }
+        finally { closed = true; revision++; colorFlyout.Hide(); }
     }
 
     private static NumberBox Number(string label, double minimum, double maximum, double value)

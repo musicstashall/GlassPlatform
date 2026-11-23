@@ -18,6 +18,16 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
     private readonly List<WallpaperPreviewCrossfade> _wallpapers = [];
     private readonly DesktopEnvironmentWatcher? _watcher;
     private bool _disposed;
+    private readonly Viewbox _desktopView;
+    private readonly ProgressRing _loading = new() { IsActive = true, Width = 32, Height = 32 };
+    private bool _wallpaperReady, _reflectionReady;
+    private void UpdateReadyState()
+    {
+        if (!_wallpaperReady || !_reflectionReady || _disposed) return;
+        _desktopView.Opacity = 1;
+        _loading.IsActive = false;
+        _loading.Visibility = Visibility.Collapsed;
+    }
     private int _wallpaperRevision;
     public int DesktopWidth { get; }
     public int DesktopHeight { get; }
@@ -34,7 +44,9 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
         DesktopHeight = bounds.Max(b => b.Y + b.Height) - top;
         var desktop = new Canvas { Width = DesktopWidth, Height = DesktopHeight };
         // Physical desktop coordinates are retained inside one proportionally scaled Viewbox.
-        Children.Add(new Viewbox { Child = desktop, Stretch = Stretch.Uniform, MaxHeight = 200 });
+        _desktopView = new Viewbox { Child = desktop, Stretch = Stretch.Uniform, MaxHeight = 280, Opacity = 0 };
+        Children.Add(_desktopView);
+        Children.Add(_loading);
         Margin = new Thickness(8, 8, 8, 16);
         foreach (var monitor in bounds)
         {
@@ -117,6 +129,13 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
     private static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr clip,
         MonitorEnumProc callback, IntPtr data);
 
+    public void ShowReflectionFailure()
+    {
+        // The dialog displays the error text; do not leave an endless spinner.
+        _reflectionReady = true;
+        UpdateReadyState();
+    }
+
     public void SetReflection(ImageSource source)
     {
         if (_disposed) return;
@@ -125,6 +144,8 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
             image.Source = source;
             image.Opacity = CompositionPreviewRegistryStates.RuntimeReflectionOpacity;
         }
+        _reflectionReady = true;
+        UpdateReadyState();
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e) => await RefreshWallpaperAsync(false);
@@ -172,11 +193,20 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
             System.Diagnostics.Debug.WriteLine($"[ReflectionConfigure] wallpaper failed: {error}");
             System.Diagnostics.Trace.TraceWarning("Reflection wallpaper preview: {0}", error);
         }
+        finally
+        {
+            if (!_disposed && revision == _wallpaperRevision)
+            {
+                _wallpaperReady = true;
+                UpdateReadyState();
+            }
+        }
     }
 
     public void Dispose()
     {
         _disposed = true; _wallpaperRevision++;
+        _loading.IsActive = false;
         Loaded -= OnLoaded;
         if (_watcher is not null) _watcher.Changed -= OnEnvironmentChanged;
         foreach (var transition in _wallpapers) transition.Apply(null, false);

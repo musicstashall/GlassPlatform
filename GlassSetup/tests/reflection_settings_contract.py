@@ -22,7 +22,8 @@ assert '.Where(item => ReflectionCategory(item.FilePath) == category)' in page
 assert 'ReflectionSettingsDialog.ShowAsync(source)' in page
 assert 'if (settings is not null) await ApplyReflectionSourceAsync(source, settings)' in page
 assert 'ReflectionRenderState.Save' not in dialog and 'WriteDwm' not in dialog
-assert 'source, preview.DesktopWidth, preview.DesktopHeight, Values()' in dialog
+assert 'source, texture ? width : preview.DesktopWidth,' in dialog
+assert 'texture ? height : preview.DesktopHeight, Values()' in dialog
 xaml = ET.parse(root / 'GlassSettings/Pages/Dwm/DwmThemeDetailPage.xaml')
 ns = {'x': 'http://schemas.microsoft.com/winfx/2006/xaml', 'ui': 'http://schemas.microsoft.com/winfx/2006/xaml/presentation'}
 pivot = xaml.find('.//ui:Pivot[@x:Name="ReflectionCategoryPivot"]', ns)
@@ -95,7 +96,7 @@ assert 'Margin = new Thickness(0, 12, 0, 0)' in dialog
 assert 'Checkerboard' not in desktop_preview and 'preview.Opacity' not in dialog
 print('PASS: process-only Pivot selection, shared wallpaper without image dimming, top content inset')
 assert 'groups.Loaded +=' in dialog and 'groups.Unloaded +=' in dialog
-assert 'Grid.SetColumn(presets, 1)' in dialog and 'var reset =' not in dialog
+assert 'pickerRail.Children.Add(presets)' in dialog and 'var reset =' not in dialog
 assert 'Shadow = new ThemeShadow()' in desktop_preview
 assert 'Reflection_NoiseSand' in (root / 'GlassSettings/Strings/ru-RU/Resources.resw').read_text()
 assert 'if (type == 4)' in effects and 'u < 1311' in effects and 'u < 64004' in effects
@@ -168,7 +169,7 @@ print('PASS: XAML owns monitor clipping; no geometric Composition clip on its vi
 
 assert 'layout.Children.Add(body); layout.Children.Add(editors);' in dialog
 assert 'editors.Children.Add(groups); editors.Children.Add(pickerRail);' in dialog
-assert 'pickerRail.Children.Add(presets)' not in dialog
+assert 'pickerRail.Children.Add(picker)' not in dialog
 assert 'BitmapInterpolationMode.Fant' in dialog
 assert 'preview.DesktopWidth * factor' in dialog and 'RasterizationScale' in dialog
 assert 'preview.SizeChanged +=' in dialog
@@ -176,11 +177,17 @@ assert 'scale.Value = 100; softness.Value = 0;' in dialog
 assert 'darkPreset.IsEnabled = enabled.IsOn' not in dialog
 print('PASS: compact preview-above-editors layout, full recipe presets and filtered desktop-scale thumbnail')
 
-assert 'darkPreset.Click += (_, _) => ApplyPreset(0xFF000000u);' in dialog
-assert 'lightPreset.Click += (_, _) => ApplyPreset(0xFFA0A0A0u);' in dialog
+assert 'darkPreset.Clicked += (_, _) => ApplyPreset(0xFF000000u);' in dialog
+assert 'lightPreset.Clicked += (_, _) => ApplyPreset(0xFFA0A0A0u);' in dialog
 assert 'Height = 176, VerticalAlignment = VerticalAlignment.Top' in dialog
-assert 'picker.UseCompactLayout();' in dialog
+assert 'UseCompactLayout' not in dialog
 picker_code = (root / 'GlassSettings/Controls/GlassAlphaColorPicker.xaml.cs').read_text()
-assert 'spectrum.Height = 140;' in picker_code
-assert 'Picker.IsMoreButtonVisible = false;' in picker_code
-print('PASS: A layout uses top-aligned editors and compact spectrum; both preset Click handlers are connected')
+assert 'ResizeSpectrum' not in picker_code
+assert 'new AccentRecentColorSwatch' in dialog
+assert 'darkPreset.IsSelected = argb == 0xFF000000u' in dialog
+assert 'lightPreset.IsSelected = argb == 0xFFA0A0A0u' in dialog
+assert 'new Flyout { Content = picker' in dialog and 'setColor.Flyout = colorFlyout' in dialog
+assert 'pickerRail.Children.Add(setColor)' in dialog
+assert '_wallpaperReady || !_reflectionReady' in desktop_preview
+assert '_desktopView.Opacity = 1' in desktop_preview and 'Opacity = 0' in desktop_preview
+print('PASS: shared checked swatches, standard flyout picker, pixel-scale texture vs desktop-scale SVG, loading readiness gate')

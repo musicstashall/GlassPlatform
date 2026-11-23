@@ -2,7 +2,6 @@ using GlassSettings.Core.Flyout;
 using GlassSettings.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.UI;
@@ -69,30 +68,6 @@ public sealed partial class GlassAlphaColorPicker : UserControl
         Picker.ColorChanged += (_, _) => OnPickerColorChanged();
         AddPointerHandlers(Picker);
         AddPointerHandlers(this);
-    }
-
-    /// <summary>Compact spectrum for the reflection editor; other picker consumers are unchanged.</summary>
-    public void UseCompactLayout()
-    {
-        Picker.IsMoreButtonVisible = false;
-        Picker.IsColorChannelTextInputVisible = false;
-        Picker.IsHexInputVisible = true;
-        Picker.HorizontalAlignment = HorizontalAlignment.Stretch;
-        Picker.MinWidth = 0;
-        Picker.Loaded += (_, _) => ResizeSpectrum(Picker);
-    }
-
-    private static void ResizeSpectrum(DependencyObject root)
-    {
-        if (root is ColorSpectrum spectrum)
-        {
-            spectrum.MinHeight = 0;
-            spectrum.MaxHeight = 140;
-            spectrum.Height = 140;
-            return;
-        }
-        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
-            ResizeSpectrum(VisualTreeHelper.GetChild(root, i));
     }
 
     public void SetColor(uint argb)

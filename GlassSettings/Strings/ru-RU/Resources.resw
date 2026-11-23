@@ -1166,4 +1166,6 @@
   <data name="Reflection_ColorTitle" xml:space="preserve"><value>Цвет и прозрачность</value></data>
   <data name="Reflection_PresetDark" xml:space="preserve"><value>Для тёмной темы</value></data>
   <data name="Reflection_PresetLight" xml:space="preserve"><value>Для светлой темы</value></data>
+  <data name="Reflection_ColorGroup" xml:space="preserve"><value>Цвет</value></data>
+  <data name="Reflection_SetColor" xml:space="preserve"><value>Установить</value></data>
 </root>
