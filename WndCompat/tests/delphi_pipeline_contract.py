@@ -1566,7 +1566,12 @@ class DelphiPipelineContract(unittest.TestCase):
                        'dis->hDC', 'serial == s.serial', 'if (s.armed)',
                        'g_dispatcher.DisableAllHooks()', 'BLACKNESS'):
             self.assertIn(marker, code)
-        self.assertNotIn('TSpinEdit', code)
+        # Inside a session TSpinEdit belongs to the edit hooks alone. Its erase outside the sessions is the
+        # rule of every VCL edit (see the erase-outside contract below).
+        session_target = code.split('bool IsTarget(HWND hwnd, bool& isList) noexcept', 1)[1].split(
+            'struct EraseClass', 1)[0]
+        self.assertNotIn('TSpinEdit', session_target)
+        self.assertEqual(code.count('TSpinEdit'), 1)
         self.assertIn('ClearObservedListTail(dis->hwndItem, dis)', read('GlassCore/src/Hooks/delphi/TListBoxDraw.cpp'))
         engine = read('GlassCore/src/Core/Engine.cpp')
         self.assertIn('DelphiBackground::Startup()', engine)
@@ -3124,7 +3129,7 @@ class DelphiPipelineContract(unittest.TestCase):
         for forbidden in ('read_text', 'source.split(', 'code.split(', '-Wno-error'):
             self.assertNotIn(forbidden, runner)
         cases = re.findall(r'name == "([a-z-]+)"', test)
-        self.assertEqual(len(cases), 9)
+        self.assertEqual(len(cases), 13)
         self.assertEqual(sorted(cases), sorted(re.findall(r"self\.run_case\('([a-z-]+)'\)", runner)))
 
     def test_res_version_editor_is_registered_and_bracketed_by_the_paint_dispatcher_lifetime(self):
@@ -3341,6 +3346,154 @@ class DelphiPipelineContract(unittest.TestCase):
         cases = re.findall(r'name == "([a-z-]+)"', test)
         self.assertEqual(len(cases), 8)
         self.assertEqual(sorted(cases), sorted(re.findall(r"self\.run_case\('([a-z-]+)'\)", runner)))
+
+    def test_vcl_erase_sent_outside_sessions_is_replaced_through_the_kept_import(self):
+        code = read('GlassCore/src/Hooks/delphi/TBackgroundHooks.cpp')
+        outside = code.split('bool EraseOutside(HDC dc, const RECT* r, HBRUSH brush) noexcept', 1)[1].split(
+            'int WINAPI ObserveFill(HDC dc, const RECT* r, HBRUSH brush)\n        {', 1)[0]
+        # Cheapest first: a memory DC is not asked for its window, and a window with a session of its own
+        # is not classified. Then the class, the thread, the whole client inside the clip, the brush - and one fill.
+        gates = ('if (GetObjectType(dc) != OBJ_DC) return false;',
+                 'const HWND hwnd = WindowFromDC(dc);',
+                 'for (const Session& s : g_sessions) if (s.hwnd == hwnd) return false;',
+                 'if (!IsEraseTarget(hwnd, target) || GetWindowThreadProcessId(hwnd, nullptr) != GetCurrentThreadId()) return false;',
+                 'const int clipKind = GetClipBox(dc, &clip);',
+                 'const bool whole = IsFullClient(hwnd, dc, r) && clipKind > NULLREGION',
+                 '&& clip.left >= r->left && clip.top >= r->top && clip.right <= r->right && clip.bottom <= r->bottom;',
+                 'const bool cleared = whole && IsSystemBrush(brush, target.windowOnly)',
+                 '&& (!target.number || GlassShared::HasDelphiInputDefaultBackground(hwnd))',
+                 '&& PatBlt(dc, r->left, r->top, r->right-r->left, r->bottom-r->top, BLACKNESS);',
+                 'return cleared;')
+        positions = [outside.index(marker) for marker in gates]
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(outside.count('PatBlt('), 1)
+        # It neither forwards the call nor touches a session, sends nothing and asks nothing of the window.
+        for forbidden in ('orig(', 'FillRect(', 'SendMessage', 'g_sessions[', 'g_sessions.back()', '.push_back(',
+                          '.erase(', 'Acquire', 'EnableHook', 'IsCurrentPaintDcForHwnd', 'IsTopWindowDrawingSession',
+                          'GetDCOrgEx', 'ClientToScreen', 'GetWindowRect', 'IsInsideDraw'):
+            self.assertNotIn(forbidden, outside)
+        # The line is written for every fill that came as far as the class and the thread, replaced or not:
+        # it is what tells, without a debugger, why a control stayed white.
+        self.assertIn('L"[GlassCore][DelphiBackground] erase-outside hwnd=0x%p class=%s dc=0x%p rect=[%ld,%ld,%ld,%ld] '
+                      'client=[%ld,%ld] clip=%d[%ld,%ld,%ld,%ld] whole=%d style=%d rgb=0x%06X cleared=%d"', outside)
+        self.assertIn('budget = 32', outside)
+        self.assertEqual(outside.count('#if defined(_DEBUG)'), 1)
+        self.assertEqual(outside.count('#endif'), 1)
+        debug = outside.split('#if defined(_DEBUG)', 1)[1].split('#endif', 1)[0]
+        self.assertLess(outside.index('const bool cleared = whole && IsSystemBrush('), outside.index('#if defined(_DEBUG)'))
+        # Nothing the release build decides on is computed there, and nothing is drawn or returned.
+        for forbidden in ('PatBlt', 'return', 'whole =', 'cleared =', 'SetLastError'):
+            self.assertNotIn(forbidden, debug)
+        self.assertEqual(outside.count('return false;'), 3)
+
+        fill = code.split('int WINAPI ObserveFill(HDC dc, const RECT* r, HBRUSH brush)\n        {', 1)[1].split(
+            'bool EraseAgain(', 1)[0]
+        # Before every rule of a session, and also while sessions of other windows are open. The checks are
+        # this unit's: the caller's last error is put back whatever they did to it.
+        order = ('if (!orig) return FillRect(dc, r, brush);',
+                 'if (g_shutdown.load(std::memory_order_acquire) || g_inside) return orig(dc, r, brush);',
+                 'const DWORD entryError = GetLastError();',
+                 'const bool erased = EraseOutside(dc, r, brush);',
+                 'SetLastError(entryError);',
+                 'if (erased) return 1;',
+                 'if (g_sessions.empty()) return orig(dc, r, brush);',
+                 'const size_t slot = g_sessions.size() - 1;')
+        positions = [fill.index(marker) for marker in order]
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(code.count('EraseOutside(dc, r, brush)'), 1)
+
+        # The classes are the classifier's VCL names of the five kinds whose client Glass paints, each under
+        # its own kind: a class added there has to be decided here.
+        table = code.split('constexpr EraseClass kEraseClasses[] = {', 1)[1].split('        };', 1)[0]
+        rows = re.findall(r'\{ L"(\w+)", GlassShared::GlassControlKind::(\w+), (true|false) \},', table)
+        self.assertEqual(len(rows), 21)
+        self.assertEqual(len({name for name, _, _ in rows}), 21)
+        self.assertEqual(table.count('{ L"'), 21)
+        classifier = read('WndCompat/Tracker/WindowClassifier.cpp')
+        blocks = {
+            'Edit': classifier.split('// ── Edit ─', 1)[1].split('return ControlKind::Edit;', 1)[0],
+            'RichEdit50W': classifier.split('// ── RichEdit ─', 1)[1].split('return ControlKind::RichEdit50W;', 1)[0].split(
+                'return ControlKind::RichEdit20W;', 1)[1],
+            'ListBox': classifier.split('// ── ListBox ─', 1)[1].split('return ControlKind::ListBox;', 1)[0],
+            'ListView': classifier.split('// ── ListView ─', 1)[1].split('return ControlKind::ListView;', 1)[0],
+            'TreeView': classifier.split('// ── TreeView ─', 1)[1].split('return ControlKind::TreeView;', 1)[0],
+        }
+        for kind, block in blocks.items():
+            with self.subTest(kind=kind):
+                vcl = sorted(name for name in re.findall(r'Equals\(cls, L"(\w+)"\)', block) if re.match(r'T[A-Z]', name))
+                self.assertTrue(vcl)
+                self.assertEqual(sorted(name for name, k, _ in rows if k == kind), vcl)
+        self.assertEqual({k for _, k, _ in rows}, set(blocks))
+        # COLOR_BTNFACE is a colour of its own exactly where the edit hooks keep it.
+        self.assertEqual(sorted(name for name, _, only in rows if only == 'true'), ['TMemo', 'TRichEdit'])
+        self.assertIn('const bool fill = IsRichEditKind(GlassShared::GlassGetWindowKind(sessionHwnd)) || IsDelphiMemo(sessionHwnd)\n'
+                      '            ? rgb != sysWnd : rgb != 0 && rgb != sysBtn && rgb != sysWnd;',
+                      read('GlassCore/src/Hooks/EditHooks.cpp'))
+        target = code.split('bool IsEraseTarget(HWND hwnd, EraseTarget& target) noexcept', 1)[1].split(
+            'bool IsSystemBrush(', 1)[0]
+        for marker in ('if (!hwnd || !GlassCore::Root::IsFullInjectionMode()) return false;',
+                       'if (c.kind != kind || _wcsicmp(target.cls, c.name) != 0) continue;',
+                       'target.windowOnly = c.windowOnly;',
+                       'target.number = _wcsicmp(target.cls, L"TNumberBox") == 0;',
+                       'return GlassShared::GlassIsBackdropAllowedForHwnd(hwnd);'):
+            self.assertIn(marker, target)
+        for forbidden in ('wcsstr', 'wcsncmp', '_wcsnicmp', 'L"T"', 'GWLP_HINSTANCE'):
+            self.assertNotIn(forbidden, target)
+        self.assertIn('|| (!windowOnly && rgb == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFFu));', code)
+
+        # One reference outlives the sessions: taken when such a control is first seen in a paint or a GetDC,
+        # released by Shutdown only. A session's end knows nothing about it.
+        keep = code.split('void Keep(HWND hwnd) noexcept', 1)[1].split('void Begin(HWND hwnd, bool paint) noexcept', 1)[0]
+        for marker in ('if (g_kept.load(std::memory_order_acquire) || !IsEraseTarget(hwnd, target)) return;',
+                       'auto lock = g_lock.lock_exclusive();',
+                       'if (!g_kept.load(std::memory_order_acquire) && AcquireLocked())',
+                       'g_kept.store(true, std::memory_order_release);'):
+            self.assertIn(marker, keep)
+        self.assertLess(keep.index('auto lock = g_lock.lock_exclusive();'), keep.index('AcquireLocked()'))
+        self.assertEqual(code.count('Keep(hwnd);'), 1)
+        begin = code.split('void Begin(HWND hwnd, bool paint) noexcept', 1)[1].split('void End(HWND hwnd, bool paint) noexcept', 1)[0]
+        self.assertLess(begin.index('if (g_shutdown.load(std::memory_order_acquire)) return;'), begin.index('Keep(hwnd);'))
+        self.assertLess(begin.index('Keep(hwnd);'), begin.index('g_sessions.push_back(s);'))
+        end = code.split('void End(HWND hwnd, bool paint) noexcept', 1)[1].split('void PaintBegin(HWND h, HMODULE)', 1)[0]
+        self.assertNotIn('g_kept', end)
+        self.assertEqual(code.count('g_kept.store('), 2)
+        shutdown = code.split('    void Shutdown() noexcept', 1)[1].split('    void ClearObservedListTail(', 1)[0]
+        self.assertLess(shutdown.index('g_dispatcher.DisableAllHooks();'),
+                        shutdown.index('g_kept.store(false, std::memory_order_release);'))
+        # The lock is not recursive: the locked part takes none, and the unlocked entry takes it once.
+        locked = code.split('bool AcquireLocked() noexcept', 1)[1].split('bool Acquire() noexcept', 1)[0]
+        self.assertNotIn('g_lock', locked.split('\n', 1)[1])
+        self.assertEqual(code.count('AcquireLocked()'), 3)
+        # Still one dispatcher with one slot of the EXE; nothing is subclassed, detoured or remapped.
+        self.assertIn('HookDispatcher<1, 3> g_dispatcher{g_dep, nullptr};', code)
+        self.assertEqual(code.count('"FillRect"'), 1)
+        for forbidden in ('SetWindowSubclass', 'Detours::', 'SetWindowsHookEx', 'SetSysColors', 'CreateSolidBrush',
+                          'GetSysColorBrush', 'FindResource', 'InvalidateRect', 'RedrawWindow'):
+            self.assertNotIn(forbidden, code)
+        # The neighbours that erase on their own are not touched: the root subclass and the panel bridge.
+        root = read('WndCompat/Root/RootSubclass.cpp')
+        self.assertEqual(root.count('case WM_ERASEBKGND:'), 1)
+        for neighbour in ('WndCompat/Controls/EditSubclass.cpp', 'WndCompat/Controls/ListBoxSubclass.cpp'):
+            text = read(neighbour)
+            self.assertNotIn('SetWindowSubclass(', text)
+            self.assertNotIn('WM_ERASEBKGND', text)
+
+        # The suite: the window double erases through the EXE's import with a DC of its own; the DC doubles
+        # tell their kind, window and clip.
+        shim = read('WndCompat/tests/vcl_background_test_shim.h')
+        for marker in ('inline HWND WindowFromDC(HDC dc) { ++BgTest::windowLookups; return dc ? dc->owner : nullptr; }',
+                       'inline DWORD GetObjectType(HDC dc) { return !dc ? 0 : dc->owner || dc->screen ? OBJ_DC : OBJ_MEMDC; }',
+                       'inline DWORD GetCurrentThreadId() { return BgTest::thread; }',
+                       '{ *out = dc->frame ? dc->frameClip : dc->owner ? dc->owner->client : RECT{}; return dc->clipKind; }',
+                       'enum class GlassControlKind { None, ListBox, Edit, ComboBox, RichEdit50W, ListView, TreeView };'):
+            self.assertIn(marker, shim)
+        test = read('WndCompat/tests/vcl_background_rendering_tests.cpp')
+        for case in ('erase-outside', 'outside-gates', 'kept-import', 'outside-diagnostics'):
+            self.assertEqual(test.count('name == "%s"' % case), 1)
+        # The test table is written out on its own, not derived from the production one.
+        self.assertNotIn('kEraseClasses', test)
+        self.assertEqual(sorted({name for name in re.findall(r'\{L"(\w+)", GlassControlKind::\w+, (?:true|false)\}', test)
+                                 if name != 'tedit'}), sorted(name for name, _, _ in rows))
 
 if __name__ == "__main__":
     unittest.main()

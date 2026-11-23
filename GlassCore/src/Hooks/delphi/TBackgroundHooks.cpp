@@ -5,11 +5,17 @@
 // the client with the control's brush) whenever Windows sends WM_ERASEBKGND.
 // Windows sends it from inside BeginPaint only when the erase is still pending
 // there. After a window was shown, restored or resized it sends the message on
-// its own, at once and outside any paint: that fill is not seen here, and the
-// WM_PAINT that follows erases nothing. A list then repaints only its rows and
-// keeps what VCL filled below the last one. So when BeginPaint of a list brought
-// no erase, the list is asked to erase once more into the DC BeginPaint has just
-// returned (EraseAgain): the same fill arrives where it can be replaced.
+// its own, at once and outside any paint, with a DC of its own: no session is
+// open, and the control keeps the colour VCL gave it until WM_PAINT arrives.
+// The WM_PAINT that follows erases nothing.
+//
+// Two answers. Once a control whose client Glass paints has been seen, the
+// import stays hooked (Keep), and the default fill of such a control's whole
+// client, made outside every session of that window, is replaced where it is
+// made (EraseOutside): the control is not white in between. And a list repaints
+// only its rows, so it must not keep below the last one what was erased before:
+// when its BeginPaint brought no erase, the list is asked to erase once more
+// into the DC BeginPaint has just returned (EraseAgain).
 #include "CorePch.h"
 #include <Hooks/delphi/TBackgroundHooks.h>
 #include <Hooks/delphi/TListBoxDraw.h>
@@ -38,6 +44,7 @@ namespace GlassCore::DelphiBackground
         HookDispatcher<1, 3> g_dispatcher{g_dep, nullptr};
         wil::srwlock g_lock;
         std::atomic<bool> g_shutdown{true};
+        std::atomic<bool> g_kept{false};  // one reference of the import held between sessions
         struct Session
         {
             HWND hwnd{};
@@ -73,13 +80,59 @@ namespace GlassCore::DelphiBackground
             return (_wcsicmp(cls, L"TNumberBox") == 0 || _wcsicmp(cls, L"THotKey") == 0)
                 && GlassShared::GlassGetWindowKind(hwnd) == GlassShared::GlassControlKind::Edit;
         }
-        bool IsSystemBrush(HBRUSH brush) noexcept
+        // The VCL classes whose client Glass paints: in the end their default
+        // background is transparent, whatever VCL erased. The names and kinds are
+        // the classifier's. `windowOnly`: for this class COLOR_BTNFACE is a colour
+        // of its own, which the edit hooks keep.
+        struct EraseClass { const wchar_t* name; GlassShared::GlassControlKind kind; bool windowOnly; };
+        constexpr EraseClass kEraseClasses[] = {
+            { L"TListBox", GlassShared::GlassControlKind::ListBox, false },
+            { L"TCheckListBox", GlassShared::GlassControlKind::ListBox, false },
+            { L"TColorListBox", GlassShared::GlassControlKind::ListBox, false },
+            { L"TFileListBox", GlassShared::GlassControlKind::ListBox, false },
+            { L"TDirectoryListBox", GlassShared::GlassControlKind::ListBox, false },
+            { L"TEdit", GlassShared::GlassControlKind::Edit, false },
+            { L"TLabeledEdit", GlassShared::GlassControlKind::Edit, false },
+            { L"TButtonedEdit", GlassShared::GlassControlKind::Edit, false },
+            { L"TMaskEdit", GlassShared::GlassControlKind::Edit, false },
+            { L"TSearchBox", GlassShared::GlassControlKind::Edit, false },
+            { L"TNumberBox", GlassShared::GlassControlKind::Edit, false },
+            { L"TSpinEdit", GlassShared::GlassControlKind::Edit, false },
+            { L"THotKey", GlassShared::GlassControlKind::Edit, false },
+            { L"TInplaceEdit", GlassShared::GlassControlKind::Edit, false },
+            { L"TInplaceEditList", GlassShared::GlassControlKind::Edit, false },
+            { L"TMemo", GlassShared::GlassControlKind::Edit, true },
+            { L"TRichEdit", GlassShared::GlassControlKind::RichEdit50W, true },
+            { L"TListView", GlassShared::GlassControlKind::ListView, false },
+            { L"TSystemListView", GlassShared::GlassControlKind::ListView, false },
+            { L"TTreeView", GlassShared::GlassControlKind::TreeView, false },
+            { L"TResTreeView", GlassShared::GlassControlKind::TreeView, false },
+        };
+        struct EraseTarget { WCHAR cls[64]{}; bool windowOnly{}; bool number{}; };
+        bool IsEraseTarget(HWND hwnd, EraseTarget& target) noexcept
+        {
+            using Kind = GlassShared::GlassControlKind;
+            if (!hwnd || !GlassCore::Root::IsFullInjectionMode()) return false;
+            const Kind kind = GlassShared::GlassGetWindowKind(hwnd);
+            if ((kind != Kind::ListBox && kind != Kind::Edit && kind != Kind::RichEdit50W
+                    && kind != Kind::ListView && kind != Kind::TreeView)
+                || !GetClassNameW(hwnd, target.cls, _countof(target.cls))) return false;
+            for (const EraseClass& c : kEraseClasses)
+            {
+                if (c.kind != kind || _wcsicmp(target.cls, c.name) != 0) continue;
+                target.windowOnly = c.windowOnly;
+                target.number = _wcsicmp(target.cls, L"TNumberBox") == 0;
+                return GlassShared::GlassIsBackdropAllowedForHwnd(hwnd);
+            }
+            return false;
+        }
+        bool IsSystemBrush(HBRUSH brush, bool windowOnly = false) noexcept
         {
             LOGBRUSH lb{};
             if (!brush || GetObjectW(brush, sizeof(lb), &lb) != sizeof(lb) || lb.lbStyle != BS_SOLID) return false;
             const COLORREF rgb = lb.lbColor & 0xFFFFFFu;
             return rgb == (GetSysColor(COLOR_WINDOW) & 0xFFFFFFu)
-                || rgb == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFFu);
+                || (!windowOnly && rgb == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFFu));
         }
         bool IsFullClient(HWND hwnd, HDC dc, const RECT* r) noexcept
         {
@@ -90,9 +143,8 @@ namespace GlassCore::DelphiBackground
                 && GetViewportOrgEx(dc, &viewport) && GetWindowOrgEx(dc, &window)
                 && viewport.x == 0 && viewport.y == 0 && window.x == 0 && window.y == 0;
         }
-        bool Acquire() noexcept
+        bool AcquireLocked() noexcept // g_lock is held exclusively
         {
-            auto lock = g_lock.lock_exclusive();
             if (g_shutdown.load(std::memory_order_acquire)) return false;
             HMODULE ep = GlassCore::ModuleHandler::g_entryPointModule;
             if (!ep) return false;
@@ -101,10 +153,26 @@ namespace GlassCore::DelphiBackground
             g_dispatcher.EnableHook(0, true);
             return g_dispatcher.GetRef(0) > before;
         }
+        bool Acquire() noexcept
+        {
+            auto lock = g_lock.lock_exclusive();
+            return AcquireLocked();
+        }
+        // The erase of such a control can arrive at any moment from now on, so
+        // one reference outlives the sessions. Shutdown releases it.
+        void Keep(HWND hwnd) noexcept
+        {
+            EraseTarget target{};
+            if (g_kept.load(std::memory_order_acquire) || !IsEraseTarget(hwnd, target)) return;
+            auto lock = g_lock.lock_exclusive();
+            if (!g_kept.load(std::memory_order_acquire) && AcquireLocked())
+                g_kept.store(true, std::memory_order_release);
+        }
         void Begin(HWND hwnd, bool paint) noexcept
         {
             bool list = false;
             if (g_shutdown.load(std::memory_order_acquire)) return;
+            Keep(hwnd);
             Session s{};
             s.hwnd = hwnd; s.serial = ++g_serial; s.paint = paint;
             if (IsTarget(hwnd, list))
@@ -136,12 +204,64 @@ namespace GlassCore::DelphiBackground
         void DcBegin(HWND h, HMODULE) { Begin(h, false); }
         void DcEnd(HWND h, HMODULE) { End(h, false); }
 
+        // Windows erased the window on its own (see the header). The fill is
+        // told apart by what it lacks: no session of this window is open on its
+        // thread, so the DC is neither BeginPaint's nor GetDC's - it came with
+        // the message. Only the default fill of the whole client is replaced.
+        bool EraseOutside(HDC dc, const RECT* r, HBRUSH brush) noexcept
+        {
+            // Most fills of a VCL application go to a memory DC: no window there.
+            if (GetObjectType(dc) != OBJ_DC) return false;
+            const HWND hwnd = WindowFromDC(dc);
+            for (const Session& s : g_sessions) if (s.hwnd == hwnd) return false;
+            EraseTarget target{};
+            if (!IsEraseTarget(hwnd, target) || GetWindowThreadProcessId(hwnd, nullptr) != GetCurrentThreadId()) return false;
+            // A window DC (frame painting) has the same window behind it, but its
+            // clip spans the frame. The DC of an erase never leaves the client.
+            RECT clip{};
+            const int clipKind = GetClipBox(dc, &clip);
+            const bool whole = IsFullClient(hwnd, dc, r) && clipKind > NULLREGION
+                && clip.left >= r->left && clip.top >= r->top && clip.right <= r->right && clip.bottom <= r->bottom;
+            const bool cleared = whole && IsSystemBrush(brush, target.windowOnly)
+                && (!target.number || GlassShared::HasDelphiInputDefaultBackground(hwnd))
+                && PatBlt(dc, r->left, r->top, r->right-r->left, r->bottom-r->top, BLACKNESS);
+#if defined(_DEBUG)
+            // Every fill that came this far is reported, replaced or not: the
+            // line tells what the rectangle, the DC and the brush were.
+            static thread_local ULONGLONG epoch = 0;
+            static thread_local unsigned budget = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (!epoch || now - epoch >= 1000) { epoch = now; budget = 32; }
+            if (budget)
+            {
+                --budget;
+                const RECT rect = r ? *r : RECT{};
+                RECT client{};
+                GetClientRect(hwnd, &client);
+                LOGBRUSH lb{};
+                const bool known = GetObjectW(brush, sizeof(lb), &lb) == sizeof(lb);
+                DebugLog(DBG_NORMAL, L"[GlassCore][DelphiBackground] erase-outside hwnd=0x%p class=%s dc=0x%p rect=[%ld,%ld,%ld,%ld] client=[%ld,%ld] clip=%d[%ld,%ld,%ld,%ld] whole=%d style=%d rgb=0x%06X cleared=%d",
+                    hwnd, target.cls, dc, rect.left, rect.top, rect.right, rect.bottom, client.right, client.bottom,
+                    clipKind, clip.left, clip.top, clip.right, clip.bottom, whole ? 1 : 0,
+                    known ? static_cast<int>(lb.lbStyle) : -1,
+                    known ? static_cast<unsigned>(lb.lbColor & 0xFFFFFFu) : 0u, cleared ? 1 : 0);
+            }
+#endif
+            return cleared;
+        }
+
         int WINAPI ObserveFill(HDC dc, const RECT* r, HBRUSH brush)
         {
             decltype(&::FillRect) orig{};
             { auto lock = g_lock.lock_shared(); orig = g_dispatcher.GetOrg<0, decltype(&::FillRect)>(); }
             if (!orig) return FillRect(dc, r, brush);
-            if (g_shutdown.load(std::memory_order_acquire) || g_inside || g_sessions.empty()) return orig(dc, r, brush);
+            if (g_shutdown.load(std::memory_order_acquire) || g_inside) return orig(dc, r, brush);
+            // The checks belong to this unit, not to the application's call.
+            const DWORD entryError = GetLastError();
+            const bool erased = EraseOutside(dc, r, brush);
+            SetLastError(entryError);
+            if (erased) return 1;
+            if (g_sessions.empty()) return orig(dc, r, brush);
             const size_t slot = g_sessions.size() - 1;
             const Session s = g_sessions[slot];
             if (!s.armed || (s.list && GlassCore::DelphiListBox::IsInsideDraw()) || !IsFullClient(s.hwnd, dc, r))
@@ -261,6 +381,7 @@ namespace GlassCore::DelphiBackground
         g_shutdown.store(true, std::memory_order_release);
         auto lock = g_lock.lock_exclusive();
         g_dispatcher.DisableAllHooks();
+        g_kept.store(false, std::memory_order_release);
         g_sessions.clear();
     }
     void ClearObservedListTail(HWND hwnd, const DRAWITEMSTRUCT* dis) noexcept

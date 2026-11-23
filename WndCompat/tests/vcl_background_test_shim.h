@@ -1,8 +1,11 @@
 // Environment doubles for the complete production TBackgroundHooks translation
 // unit. They model what the module can observe: the EXE's FillRect import, the
-// order in which PaintDispatcher calls its providers around BeginPaint, and a
-// VCL window that erases itself when it receives WM_ERASEBKGND. This is not
-// Windows GDI, DWM, the update region, the real PE import table or the VCL.
+// order in which PaintDispatcher calls its providers around BeginPaint, a VCL
+// window that erases itself when it receives WM_ERASEBKGND, and what a DC tells
+// about itself (its kind, its window, its clip). There are no threads: a test
+// says which one is calling and what another one did before a lock was taken.
+// This is not Windows GDI, DWM, the update region, the real PE import table or
+// the VCL.
 #pragma once
 #include <algorithm>
 #include <array>
@@ -55,6 +58,7 @@ using LPPAINTSTRUCT = PAINTSTRUCT*;
 struct DRAWITEMSTRUCT { UINT CtlType{}, CtlID{}, itemID{}, itemAction{}, itemState{}; HWND hwndItem{}; HDC hDC{}; RECT rcItem{}; };
 inline constexpr BOOL TRUE = 1, FALSE = 0;
 inline constexpr UINT BS_SOLID = 0, BS_HATCHED = 2, OBJ_BITMAP = 7;
+inline constexpr DWORD OBJ_DC = 3, OBJ_MEMDC = 10;
 inline constexpr int COLOR_WINDOW = 5, COLOR_BTNFACE = 15;
 inline constexpr int MM_TEXT = 1, MM_ANISOTROPIC = 8;
 inline constexpr int NULLREGION = 1, SIMPLEREGION = 2;
@@ -64,7 +68,7 @@ inline constexpr UINT LB_GETTOPINDEX = 0x18e, LB_GETCOUNT = 0x18b, LB_GETITEMREC
 inline constexpr LRESULT LB_ERR = -1;
 inline constexpr int DBG_NORMAL = 1;
 
-namespace GlassShared { enum class GlassControlKind { None, ListBox, Edit, ComboBox }; }
+namespace GlassShared { enum class GlassControlKind { None, ListBox, Edit, ComboBox, RichEdit50W, ListView, TreeView }; }
 struct TestWindow
 {
     std::wstring cls = L"TListBox";
@@ -77,6 +81,7 @@ struct TestWindow
     bool erases = true, doubleBuffered = false;
     bool inputDefault = false;          // the confirmed default CTLCOLOR brush of a TNumberBox
     int top = 0, count = 3, rowHeight = 16;
+    DWORD thread = 1;                   // the thread the window belongs to
 };
 struct TestDC
 {
@@ -85,6 +90,10 @@ struct TestDC
     int map = MM_TEXT;
     POINT viewport{}, window{};
     int clipKind = SIMPLEREGION;
+    // A client DC is clipped to the client; a window DC (frame painting) is not.
+    bool frame = false;
+    RECT frameClip{};
+    bool screen = false;                // a display DC with no window behind it
 };
 struct TestModule
 {
@@ -103,6 +112,12 @@ namespace BgTest
     inline COLORREF windowColor = 0xffffff, faceColor = 0xf0f0f0;
     inline bool failBlack = false, failObject = false;
     inline int nativeFillResult = 1;
+    inline DWORD thread = 1;                            // the calling thread
+    inline int windowLookups = 0;                       // WindowFromDC calls
+    inline int classLookups = 0;                        // GetClassNameW calls
+    // Runs once, right before the next exclusive lock is taken: what another
+    // thread did between a check made without the lock and the lock itself.
+    inline std::function<void()> beforeExclusive;
 
     // Everything that reaches a surface or a window, in order.
     enum class Kind { NativeFill, DirectFill, Black, EraseMessage };
@@ -119,7 +134,7 @@ namespace BgTest
     inline std::vector<Event> events;
     inline std::function<void(HWND, HDC)> duringErase;   // runs inside the window's erase handler, before its fill
     inline std::function<void()> duringNativeFill;
-    struct Log { std::wstring format; std::vector<long long> numbers; };
+    struct Log { std::wstring format; std::vector<long long> numbers; std::vector<std::wstring> texts; };
     inline std::vector<Log> logs;
 
     inline int Count(Kind kind)
@@ -131,6 +146,7 @@ inline void SetLastError(DWORD error) { BgTest::error = error; }
 inline BOOL IsWindow(HWND w) { return w && w->valid; }
 inline int GetClassNameW(HWND w, LPWSTR text, int capacity)
 {
+    ++BgTest::classLookups;
     if (!IsWindow(w) || capacity <= static_cast<int>(w->cls.size())) return 0;
     std::wcscpy(text, w->cls.c_str()); return static_cast<int>(w->cls.size());
 }
@@ -138,12 +154,18 @@ inline BOOL GetClientRect(HWND w, RECT* rc) { if (!IsWindow(w)) return FALSE; *r
 inline BOOL IsRectEmpty(const RECT* rc) { return rc->right <= rc->left || rc->bottom <= rc->top; }
 inline BOOL EqualRect(const RECT* a, const RECT* b)
 { return a->left == b->left && a->top == b->top && a->right == b->right && a->bottom == b->bottom; }
-inline HWND WindowFromDC(HDC dc) { return dc ? dc->owner : nullptr; }
+inline HWND WindowFromDC(HDC dc) { ++BgTest::windowLookups; return dc ? dc->owner : nullptr; }
+// A DC with a window behind it is a display DC, and so is one of the screen;
+// the buffers are memory DCs. No DC is no object.
+inline DWORD GetObjectType(HDC dc) { return !dc ? 0 : dc->owner || dc->screen ? OBJ_DC : OBJ_MEMDC; }
+inline DWORD GetCurrentThreadId() { return BgTest::thread; }
+inline DWORD GetWindowThreadProcessId(HWND w, DWORD* process) { assert(!process); return IsWindow(w) ? w->thread : 0; }
 inline int GetMapMode(HDC dc) { return dc->map; }
 inline BOOL GetViewportOrgEx(HDC dc, POINT* out) { *out = dc->viewport; return TRUE; }
 inline BOOL GetWindowOrgEx(HDC dc, POINT* out) { *out = dc->window; return TRUE; }
 inline HGDIOBJ GetCurrentObject(HDC dc, UINT type) { assert(type == OBJ_BITMAP); return dc->bitmap; }
-inline int GetClipBox(HDC dc, RECT* out) { *out = dc->owner ? dc->owner->client : RECT{}; return dc->clipKind; }
+inline int GetClipBox(HDC dc, RECT* out)
+{ *out = dc->frame ? dc->frameClip : dc->owner ? dc->owner->client : RECT{}; return dc->clipKind; }
 inline COLORREF GetSysColor(int index)
 { assert(index == COLOR_WINDOW || index == COLOR_BTNFACE); return index == COLOR_WINDOW ? BgTest::windowColor : BgTest::faceColor; }
 inline int GetObjectW(HBRUSH brush, int bytes, void* out)
@@ -208,10 +230,11 @@ inline LRESULT SendMessageW(HWND w, UINT msg, WPARAM wParam, LPARAM lParam)
 }
 template <typename... Args> inline void DebugLog(int, const wchar_t* format, Args... args)
 {
-    BgTest::Log log{format, {}};
+    BgTest::Log log{format, {}, {}};
     const auto capture = [&](auto value) {
         using T = std::decay_t<decltype(value)>;
-        if constexpr (std::is_pointer_v<T>) log.numbers.push_back(static_cast<long long>(reinterpret_cast<std::intptr_t>(value)));
+        if constexpr (std::is_same_v<T, wchar_t*> || std::is_same_v<T, const wchar_t*>) log.texts.emplace_back(value);
+        else if constexpr (std::is_pointer_v<T>) log.numbers.push_back(static_cast<long long>(reinterpret_cast<std::intptr_t>(value)));
         else log.numbers.push_back(static_cast<long long>(value));
     };
     (capture(args), ...);
@@ -230,7 +253,11 @@ namespace wil
     struct srwlock
     {
         struct Guard { ~Guard() {} };
-        Guard lock_exclusive() { return {}; }
+        Guard lock_exclusive()
+        {
+            if (const auto other = std::exchange(BgTest::beforeExclusive, {})) other();
+            return {};
+        }
         Guard lock_shared() { return {}; }
     };
 }

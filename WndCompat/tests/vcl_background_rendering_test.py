@@ -2,9 +2,10 @@
 """Run the complete production TBackgroundHooks unit with Win32 doubles.
 
 Release and Debug/probe configurations exercise what the unit does with the
-EXE's FillRect around BeginPaint of a VCL list: an erase that arrives inside
-BeginPaint, an erase Windows had sent before it (window shown, restored or
-resized), the class/mode/DC gates and the import reference count.
+EXE's FillRect: around BeginPaint of a VCL list (an erase that arrives inside
+BeginPaint, an erase Windows had sent before it) and outside every session (the
+erase Windows sends on its own when a window is shown, restored or resized),
+the class/mode/DC gates and the import reference count.
 This is NOT Windows GDI/DWM, the update region, the VCL, the real PE import
 table or a Windows/MSVC build acceptance.
 """
@@ -87,6 +88,18 @@ class VclBackgroundRenderingTest(unittest.TestCase):
 
     def test_debug_line_reports_each_repeated_erase_within_a_budget(self):
         self.run_case('diagnostics')
+
+    def test_erase_sent_outside_every_session_is_replaced_where_it_is_made(self):
+        self.run_case('erase-outside')
+
+    def test_only_the_default_whole_client_fill_of_the_windows_own_erase_is_replaced(self):
+        self.run_case('outside-gates')
+
+    def test_import_stays_hooked_from_the_first_control_seen_until_shutdown(self):
+        self.run_case('kept-import')
+
+    def test_debug_line_reports_each_fill_that_reached_a_control_outside_its_sessions(self):
+        self.run_case('outside-diagnostics')
 
 
 if __name__ == '__main__':

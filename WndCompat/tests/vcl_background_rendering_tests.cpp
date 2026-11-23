@@ -25,9 +25,10 @@ namespace
     struct Fixture
     {
         TestModule exe;
-        TestWindow list, list2, other;
+        TestWindow list, list2, other, edit, tree;
         TestBitmap surface{1}, surface2{2}, buffer{3};
         TestDC paintDc, paintDc2, canvasDc, memoryDc, foreignDc;
+        TestDC eraseDc, editDc, treeDc;         // the DCs Windows brings with an erase of its own
         LOGBRUSH window{BS_SOLID, 0xffffff}, face{BS_SOLID, 0xf0f0f0}, custom{BS_SOLID, 0x00c0ff};
         LOGBRUSH hatch{BS_HATCHED, 0xffffff};
         const RECT client{0, 0, 200, 120};
@@ -38,6 +39,7 @@ namespace
             full = true; insideDraw = false; topWindow = nullptr; paintDcs.clear();
             windowColor = 0xffffff; faceColor = 0xf0f0f0; failBlack = failObject = false;
             nativeFillResult = 1; duringErase = {}; duringNativeFill = {};
+            thread = 1; windowLookups = classLookups = 0; beforeExclusive = {};
             static ULONGLONG epoch = 0;
             BgTest::clock = epoch += 1000000; // a fresh rate-limit window for every fixture
             events.clear(); logs.clear();
@@ -46,24 +48,31 @@ namespace
             GlassCore::PaintDispatcher::paintProviders.clear();
             GlassCore::PaintDispatcher::postProviders.clear();
             GlassCore::PaintDispatcher::dcProviders.clear();
-            list.brush = list2.brush = other.brush = &window;
+            list.brush = list2.brush = other.brush = edit.brush = tree.brush = &window;
             other.cls = L"TPanel"; other.kind = GlassControlKind::None;
-            paintDc.owner = canvasDc.owner = &list; paintDc2.owner = &list2; foreignDc.owner = &other;
-            paintDc.bitmap = canvasDc.bitmap = &surface; paintDc2.bitmap = &surface2; memoryDc.bitmap = &buffer;
+            edit.cls = L"TEdit"; edit.kind = GlassControlKind::Edit;
+            tree.cls = L"TResTreeView"; tree.kind = GlassControlKind::TreeView;
+            paintDc.owner = canvasDc.owner = eraseDc.owner = &list; paintDc2.owner = &list2; foreignDc.owner = &other;
+            editDc.owner = &edit; treeDc.owner = &tree;
+            paintDc.bitmap = canvasDc.bitmap = eraseDc.bitmap = &surface; paintDc2.bitmap = &surface2; memoryDc.bitmap = &buffer;
             Bg::Startup();
             CHECK(GlassCore::PaintDispatcher::paintProviders.size() == 1
                 && GlassCore::PaintDispatcher::postProviders.size() == 1
                 && GlassCore::PaintDispatcher::dcProviders.size() == 1);
-            CHECK(Idle());
+            CHECK(Idle() && !Kept() && All() == 0);
         }
         ~Fixture()
         {
-            BgTest::duringErase = {}; BgTest::duringNativeFill = {};
+            BgTest::duringErase = {}; BgTest::duringNativeFill = {}; BgTest::beforeExclusive = {};
             Bg::Shutdown();
-            assert(Bg::g_sessions.empty() && exe.hooks.empty());
+            assert(Bg::g_sessions.empty() && exe.hooks.empty() && !Bg::g_kept.load());
         }
-        bool Idle() { return exe.hooks.empty() && exe.refs["FillRect"] == 0 && Bg::g_sessions.empty() && !Bg::g_inside; }
-        int Refs() { return exe.refs["FillRect"]; }
+        // One reference outlives the sessions once a control whose erase can be
+        // replaced has been seen; `Refs` counts what the open sessions hold.
+        bool Kept() { return Bg::g_kept.load(); }
+        int All() { return exe.refs["FillRect"]; }
+        int Refs() { return All() - (Kept() ? 1 : 0); }
+        bool Idle() { return Bg::g_sessions.empty() && !Bg::g_inside && Refs() == 0 && exe.hooks.size() == (Kept() ? 1u : 0u); }
 
         // The EXE's own call through its import table: VCL erasing or painting.
         int Fill(HDC dc, const RECT& rect, HBRUSH brush) { return ExeFillRect(exe, dc, &rect, brush); }
@@ -142,8 +151,8 @@ namespace
         Fixture f;
         f.EraseOutsidePaint(f.list, f.paintDc);
         auto e = Take();
-        CHECK(e.size() == 2 && e[1].kind == Kind::NativeFill && e[1].brush == &f.window); // not seen: no session, no hook
-        CHECK(f.Idle());
+        CHECK(e.size() == 2 && e[1].kind == Kind::NativeFill && e[1].brush == &f.window); // no such control seen yet: no hook
+        CHECK(f.Idle() && !f.Kept());
 
         PAINTSTRUCT ps{&f.paintDc, FALSE, RECT{0, 0, 200, 120}};
         CHECK(f.Begin(f.list, f.paintDc, false, &ps));
@@ -243,7 +252,7 @@ namespace
             CHECK(e.size() == 2 && e[0].kind == Kind::EraseMessage && e[1].kind == Kind::Black);
             f.End(f.list, f.paintDc);
         }
-        // Not armed at all: nothing is sent, the import is not hooked.
+        // Not armed at all: nothing is sent and the session takes no reference.
         const auto untouched = [&] {
             CHECK(!f.Begin(f.list, f.paintDc, false) && f.Refs() == 0 && Take().empty());
             CHECK(Bg::g_sessions.size() == 1 && !Bg::g_sessions.back().armed);
@@ -270,12 +279,14 @@ namespace
             f.End(f.list, f.paintDc);
         }
         f.list.cls = L"TListBox"; f.list.kind = GlassControlKind::ListBox;
+        CHECK(f.Idle());
         // Without the import nothing can be replaced, so nothing is asked.
+        Bg::Shutdown(); Bg::Startup();
         f.exe.originals.clear();
         CHECK(!f.Begin(f.list, f.paintDc, false) && Take().empty() && !Bg::g_sessions.back().armed);
         f.End(f.list, f.paintDc);
+        CHECK(f.Idle() && !f.Kept() && f.All() == 0);
         f.exe.originals["FillRect"] = reinterpret_cast<void*>(&NativeFillRect);
-        CHECK(f.Idle());
     }
 
     // The repeated erase replaces one thing: the default fill of the whole
@@ -448,7 +459,9 @@ namespace
         };
         CHECK(!f.Begin(f.list, f.paintDc, false));
         e = Take();
-        CHECK(e.size() == 2 && e[1].kind == Kind::NativeFill); // the hook is gone with the session
+        // The session is gone, the kept import is not: the fill is an erase
+        // outside every session of the list now, and is replaced as one.
+        CHECK(e.size() == 2 && e[1].kind == Kind::Black && e[1].dc == &f.paintDc);
         CHECK(Bg::g_sessions.empty());
         BgTest::paintDcs.clear(); BgTest::topWindow = nullptr;
         // Even when a fill had been replaced before the session went away: a
@@ -460,7 +473,7 @@ namespace
         };
         CHECK(!f.Begin(f.list, f.paintDc, false));
         e = Take();
-        CHECK(e.size() == 3 && e[1].kind == Kind::Black && e[2].kind == Kind::NativeFill && Bg::g_sessions.empty());
+        CHECK(e.size() == 3 && e[1].kind == Kind::Black && e[2].kind == Kind::Black && Bg::g_sessions.empty());
         BgTest::paintDcs.clear(); BgTest::topWindow = nullptr;
         // ...and a session of another window that took its place, with an answer
         // of its own, is not mistaken for it.
@@ -543,6 +556,493 @@ namespace
         Take();
         CHECK(f.Idle());
     }
+
+    // The classes whose erase is replaced, with the kind the classifier marks
+    // them with; `face`: COLOR_BTNFACE counts as their default background too.
+    struct EraseRow { LPCWSTR cls; GlassControlKind kind; bool face; };
+    const EraseRow kEraseRows[] = {
+        {L"TListBox", GlassControlKind::ListBox, true}, {L"TCheckListBox", GlassControlKind::ListBox, true},
+        {L"TColorListBox", GlassControlKind::ListBox, true}, {L"TFileListBox", GlassControlKind::ListBox, true},
+        {L"TDirectoryListBox", GlassControlKind::ListBox, true},
+        {L"TEdit", GlassControlKind::Edit, true}, {L"tedit", GlassControlKind::Edit, true},
+        {L"TLabeledEdit", GlassControlKind::Edit, true}, {L"TButtonedEdit", GlassControlKind::Edit, true},
+        {L"TMaskEdit", GlassControlKind::Edit, true}, {L"TSearchBox", GlassControlKind::Edit, true},
+        {L"TNumberBox", GlassControlKind::Edit, true}, {L"TSpinEdit", GlassControlKind::Edit, true},
+        {L"THotKey", GlassControlKind::Edit, true}, {L"TInplaceEdit", GlassControlKind::Edit, true},
+        {L"TInplaceEditList", GlassControlKind::Edit, true},
+        {L"TMemo", GlassControlKind::Edit, false}, {L"TRichEdit", GlassControlKind::RichEdit50W, false},
+        {L"TListView", GlassControlKind::ListView, true}, {L"TSystemListView", GlassControlKind::ListView, true},
+        {L"TTreeView", GlassControlKind::TreeView, true}, {L"TResTreeView", GlassControlKind::TreeView, true},
+    };
+
+    // The window comes back from the taskbar. Windows erases every control at
+    // once, outside any paint, and paints them only later; until then a control
+    // shows what its erase left. VCL's default fill of the whole client is
+    // replaced where it is made, for the controls whose client Glass paints.
+    void EraseOutside()
+    {
+        Fixture f;
+        // The first paint of such a control keeps the import hooked.
+        CHECK(f.Begin(f.list, f.paintDc, true)); f.End(f.list, f.paintDc); Take();
+        CHECK(f.Kept() && f.Idle());
+
+        // Restored: the erase arrives with a DC of the system.
+        SetLastError(0x77);
+        f.EraseOutsidePaint(f.list, f.eraseDc);
+        auto e = Take();
+        CHECK(e.size() == 2 && e[0].kind == Kind::EraseMessage && e[0].hwnd == &f.list);
+        // Replaced, not followed: there is no native white in between.
+        CHECK(e[1].kind == Kind::Black && e[1].dc == &f.eraseDc && Same(e[1].rect, f.client));
+        CHECK(GetLastError() == 0x77);              // a fill that succeeded leaves the error alone
+        CHECK(Bg::g_sessions.empty() && f.Idle());  // no session is opened for it
+        // The application is told that its fill succeeded.
+        BgTest::nativeFillResult = 7;
+        CHECK(f.Fill(&f.eraseDc, f.client, &f.window) == 1);
+        CHECK(Take().size() == 1);
+        // The WM_PAINT that follows brings no erase; a list is asked again as before.
+        CHECK(f.Begin(f.list, f.paintDc, false));
+        e = Take();
+        CHECK(e.size() == 2 && e[0].kind == Kind::EraseMessage && e[1].kind == Kind::Black && e[1].dc == &f.paintDc);
+        f.End(f.list, f.paintDc);
+        // Controls that were never painted themselves are served by the same import.
+        f.EraseOutsidePaint(f.edit, f.editDc);
+        f.EraseOutsidePaint(f.tree, f.treeDc);
+        e = Take();
+        CHECK(e.size() == 4 && e[1].kind == Kind::Black && e[1].dc == &f.editDc && Same(e[1].rect, f.client));
+        CHECK(e[3].kind == Kind::Black && e[3].dc == &f.treeDc && Same(e[3].rect, f.client));
+
+        // Every class, with its own client.
+        for (const EraseRow& row : kEraseRows)
+        {
+            TestWindow w; w.cls = row.cls; w.kind = row.kind; w.brush = &f.window; w.inputDefault = true;
+            w.client = RECT{0, 0, 90, 21};
+            TestDC dc; dc.owner = &w; dc.bitmap = &f.surface;
+            f.EraseOutsidePaint(w, dc);
+            e = Take();
+            CHECK(e.size() == 2 && e[1].kind == Kind::Black && e[1].dc == &dc && Same(e[1].rect, w.client));
+            // COLOR_BTNFACE is the other default background - except where it is a
+            // colour of its own, which the edit hooks keep.
+            w.brush = &f.face;
+            f.EraseOutsidePaint(w, dc);
+            e = Take();
+            CHECK(e.size() == 2 && e[1].kind == (row.face ? Kind::Black : Kind::NativeFill) && e[1].dc == &dc);
+        }
+        // A number box only once its default background was confirmed.
+        TestWindow number; number.cls = L"TNumberBox"; number.kind = GlassControlKind::Edit; number.brush = &f.window;
+        TestDC numberDc; numberDc.owner = &number;
+        f.EraseOutsidePaint(number, numberDc);
+        e = Take();
+        CHECK(e.size() == 2 && e[1].kind == Kind::NativeFill && e[1].brush == &f.window);
+        number.inputDefault = true;
+        f.EraseOutsidePaint(number, numberDc);
+        e = Take();
+        CHECK(e.size() == 2 && e[1].kind == Kind::Black);
+        f.edit.inputDefault = false;                // ...which no other class is asked for
+        f.EraseOutsidePaint(f.edit, f.editDc);
+        CHECK(BgTest::Count(Kind::Black) == 1); Take();
+
+        // What is not the default background stays the application's: a colour
+        // it chose, a pattern, a brush that tells nothing about itself.
+        for (HBRUSH brush : {&f.custom, &f.hatch, static_cast<HBRUSH>(nullptr)})
+        {
+            f.list.brush = brush;
+            f.EraseOutsidePaint(f.list, f.eraseDc);
+            e = Take();
+            CHECK(e.size() == 2 && e[1].kind == Kind::NativeFill && e[1].dc == &f.eraseDc);
+            CHECK(e[1].brush == brush && Same(e[1].rect, f.client));
+        }
+        f.list.brush = &f.window; BgTest::failObject = true;
+        CHECK(f.Fill(&f.eraseDc, f.client, &f.window) == 7);
+        BgTest::failObject = false;
+        // The current system colours, not constants.
+        BgTest::windowColor = 0x202020; BgTest::faceColor = 0x303030;
+        CHECK(f.Fill(&f.eraseDc, f.client, &f.window) == 7);    // 0xffffff is a custom colour now
+        LOGBRUSH dark{BS_SOLID, 0x202020}, darkFace{BS_SOLID, 0x303030}, flagged{BS_SOLID, 0x01202020};
+        CHECK(f.Fill(&f.eraseDc, f.client, &dark) == 1);
+        CHECK(f.Fill(&f.eraseDc, f.client, &darkFace) == 1);
+        CHECK(f.Fill(&f.eraseDc, f.client, &flagged) == 1);     // the high byte of a COLORREF is not a colour
+        BgTest::windowColor = 0xffffff; BgTest::faceColor = 0xf0f0f0;
+        e = Take();
+        CHECK(e.size() == 5 && e[0].kind == Kind::NativeFill && e[1].kind == Kind::NativeFill);
+        CHECK(e[2].kind == Kind::Black && e[3].kind == Kind::Black && e[4].kind == Kind::Black);
+
+        // A double-buffered VCL control skips the system's erase; a control may
+        // not erase at all. Nothing is drawn for them.
+        f.list.doubleBuffered = true;
+        f.EraseOutsidePaint(f.list, f.eraseDc);
+        f.list.doubleBuffered = false; f.list.erases = false;
+        f.EraseOutsidePaint(f.list, f.eraseDc);
+        f.list.erases = true;
+        e = Take();
+        CHECK(e.size() == 2 && e[0].kind == Kind::EraseMessage && e[1].kind == Kind::EraseMessage);
+
+        // The clear itself failed: the application's fill runs instead, and sees
+        // the error its caller had, not what the checks left.
+        BgTest::failBlack = true;
+        DWORD seen = 0;
+        BgTest::duringNativeFill = [&] { seen = GetLastError(); };
+        SetLastError(0x55);
+        CHECK(f.Fill(&f.eraseDc, f.client, &f.window) == 7);
+        CHECK(seen == 0x55 && GetLastError() == 0xb102);        // ...and its own result is what remains
+        BgTest::failBlack = false; BgTest::duringNativeFill = {};
+        e = Take();
+        CHECK(e.size() == 1 && e[0].kind == Kind::NativeFill && e[0].brush == &f.window);
+
+        // Windows erases from wherever the application showed or moved the
+        // window: also from inside the paint of another one.
+        CHECK(!f.Begin(f.other, f.foreignDc, false) && Take().empty());
+        f.EraseOutsidePaint(f.edit, f.editDc);
+        e = Take();
+        CHECK(e.size() == 2 && e[1].kind == Kind::Black && e[1].dc == &f.editDc);
+        f.End(f.other, f.foreignDc);
+        CHECK(f.Begin(f.list, f.paintDc, true)); Take();
+        const auto before = Bg::g_sessions.back();
+        f.EraseOutsidePaint(f.edit, f.editDc);
+        f.EraseOutsidePaint(f.list2, f.paintDc2);
+        e = Take();
+        CHECK(e.size() == 4 && e[1].kind == Kind::Black && e[1].dc == &f.editDc);
+        CHECK(e[3].kind == Kind::Black && e[3].dc == &f.paintDc2);
+        // The open session is not theirs and learns nothing from them.
+        const auto& after = Bg::g_sessions.back();
+        CHECK(Bg::g_sessions.size() == 1 && after.serial == before.serial && after.observedDc == before.observedDc);
+        CHECK(after.defaultBrush == before.defaultBrush && after.erasedAgain == before.erasedAgain && f.Refs() == 1);
+        f.End(f.list, f.paintDc);
+        CHECK(f.Idle() && f.Kept());
+    }
+
+    // Only that fill. Everything else stays what the application made it.
+    void OutsideGates()
+    {
+        Fixture f;
+        CHECK(f.Begin(f.list, f.paintDc, true)); f.End(f.list, f.paintDc); Take();
+        BgTest::nativeFillResult = 7;
+        const auto native = [&](HDC dc, const RECT& rect, HBRUSH brush) {
+            CHECK(f.Fill(dc, rect, brush) == 7);
+            const auto e = Take();
+            CHECK(e.size() == 1 && e[0].kind == Kind::NativeFill && e[0].dc == dc);
+            CHECK(Same(e[0].rect, rect) && e[0].brush == brush);
+        };
+        const auto black = [&](HDC dc) {
+            CHECK(f.Fill(dc, f.client, &f.window) == 1);
+            const auto e = Take();
+            CHECK(e.size() == 1 && e[0].kind == Kind::Black && e[0].dc == dc && Same(e[0].rect, f.client));
+        };
+        black(&f.eraseDc);                                      // what all of the below is compared with
+
+        // A window that is not such a control; a buffer, which is not even asked
+        // for its window.
+        native(&f.foreignDc, f.client, &f.window);
+        BgTest::windowLookups = 0;
+        native(&f.memoryDc, f.client, &f.window);
+        CHECK(BgTest::windowLookups == 0);
+        black(&f.eraseDc);
+        CHECK(BgTest::windowLookups == 1);
+        // Not the whole client.
+        for (const RECT& rect : {RECT{0, 0, 200, 119}, RECT{1, 0, 200, 120}, RECT{0, 1, 200, 120}, RECT{0, 0, 199, 120},
+                                 RECT{0, 16, 200, 32}, RECT{0, 0, 0, 0}})
+            native(&f.eraseDc, rect, &f.window);
+        // A mapped or shifted DC: the rectangle is not the client there.
+        f.eraseDc.map = MM_ANISOTROPIC; native(&f.eraseDc, f.client, &f.window); f.eraseDc.map = MM_TEXT;
+        f.eraseDc.viewport = POINT{0, 4}; native(&f.eraseDc, f.client, &f.window); f.eraseDc.viewport = POINT{};
+        f.eraseDc.window = POINT{2, 0}; native(&f.eraseDc, f.client, &f.window); f.eraseDc.window = POINT{};
+        // A window DC of the same control - its frame is being painted: the clip
+        // leaves the client on some side.
+        f.eraseDc.frame = true;
+        for (const RECT& clip : {RECT{0, 0, 204, 124}, RECT{-2, -2, 200, 120}, RECT{-1, 0, 200, 120}, RECT{0, -1, 200, 120},
+                                 RECT{0, 0, 201, 120}, RECT{0, 0, 200, 121}})
+        { f.eraseDc.frameClip = clip; native(&f.eraseDc, f.client, &f.window); }
+        // A clip inside the client is the erase of a part of it.
+        for (const RECT& clip : {RECT{0, 0, 200, 120}, RECT{10, 20, 60, 40}, RECT{199, 119, 200, 120}})
+        { f.eraseDc.frameClip = clip; black(&f.eraseDc); }
+        f.eraseDc.frame = false;
+        // Nothing of the client is to be erased, or the DC cannot tell.
+        for (int kind : {NULLREGION, 0, -1})
+        { f.eraseDc.clipKind = kind; native(&f.eraseDc, f.client, &f.window); }
+        f.eraseDc.clipKind = 3; black(&f.eraseDc);              // a complex region is a region
+        f.eraseDc.clipKind = SIMPLEREGION;
+        // A fill from another thread is not an erase: a window is erased by its own.
+        BgTest::thread = 2; native(&f.eraseDc, f.client, &f.window); BgTest::thread = 1;
+        f.list.thread = 2; native(&f.eraseDc, f.client, &f.window); f.list.thread = 1;
+        // Glass does not paint the control: another mode, no glass on its root.
+        BgTest::full = false; native(&f.eraseDc, f.client, &f.window); BgTest::full = true;
+        f.list.backdrop = false; native(&f.eraseDc, f.client, &f.window); f.list.backdrop = true;
+        // The exact class under the kind the classifier gives it; nothing else.
+        struct Pair { LPCWSTR cls; GlassControlKind kind; };
+        for (const Pair& x : {Pair{L"TListBox", GlassControlKind::None}, Pair{L"TListBox", GlassControlKind::Edit},
+                              Pair{L"TEdit", GlassControlKind::ListBox}, Pair{L"TEdit", GlassControlKind::None},
+                              Pair{L"TEdit", GlassControlKind::ComboBox}, Pair{L"TMemo", GlassControlKind::RichEdit50W},
+                              Pair{L"TRichEdit", GlassControlKind::Edit}, Pair{L"TListView", GlassControlKind::TreeView},
+                              Pair{L"TTreeView", GlassControlKind::ListView},
+                              Pair{L"Edit", GlassControlKind::Edit}, Pair{L"ListBox", GlassControlKind::ListBox},
+                              Pair{L"SysListView32", GlassControlKind::ListView}, Pair{L"SysTreeView32", GlassControlKind::TreeView},
+                              Pair{L"RICHEDIT50W", GlassControlKind::RichEdit50W},
+                              Pair{L"TEdit2", GlassControlKind::Edit}, Pair{L"MyTEdit", GlassControlKind::Edit},
+                              Pair{L"TEdi", GlassControlKind::Edit}, Pair{L"", GlassControlKind::Edit},
+                              Pair{L"TComboBox", GlassControlKind::ComboBox}, Pair{L"TPanel", GlassControlKind::None}})
+        {
+            f.list.cls = x.cls; f.list.kind = x.kind;
+            native(&f.eraseDc, f.client, &f.window);
+        }
+        f.list.cls = L"TListBox"; f.list.kind = GlassControlKind::ListBox;
+        f.list.valid = false; native(&f.eraseDc, f.client, &f.window); f.list.valid = true;
+        // Most windows are of another kind, and every fill of the EXE comes
+        // through here: such a window is not asked for its class.
+        for (const GlassControlKind kind : {GlassControlKind::None, GlassControlKind::ComboBox})
+        {
+            f.list.kind = kind; BgTest::classLookups = 0;
+            native(&f.eraseDc, f.client, &f.window);
+            CHECK(BgTest::classLookups == 0);
+        }
+        f.list.kind = GlassControlKind::ListBox;
+        black(&f.eraseDc);
+        CHECK(BgTest::classLookups == 1);
+
+        // A session of this very window is open: the DC is BeginPaint's or
+        // GetDC's, and the fill belongs to the rules of a session.
+        f.BeginDc(f.edit);
+        native(&f.editDc, f.client, &f.window);
+        f.EndDc(f.edit);
+        black(&f.editDc);
+        using namespace GlassCore::PaintDispatcher;
+        paintProviders.front().onBegin(&f.edit, &f.exe);
+        native(&f.editDc, f.client, &f.window);                 // an erase inside BeginPaint
+        PAINTSTRUCT ps{&f.editDc, FALSE, f.client};
+        CHECK(!postProviders.front().onAfterBeginPaint(&f.edit, &f.editDc, &ps, &f.exe));
+        native(&f.editDc, f.client, &f.window);
+        // ...also when it is not the innermost one.
+        CHECK(!f.Begin(f.other, f.foreignDc, false));
+        native(&f.editDc, f.client, &f.window);
+        f.End(f.other, f.foreignDc);
+        paintProviders.front().onEnd(&f.edit, &f.exe);
+        black(&f.editDc);
+
+        // The screen has no window behind its DC.
+        TestDC screen; screen.screen = true;
+        native(&screen, f.client, &f.window);
+        // Nothing to look at.
+        CHECK(ExeFillRect(f.exe, &f.eraseDc, nullptr, &f.window) == 7);
+        CHECK(ExeFillRect(f.exe, nullptr, &f.client, &f.window) == 7);
+        auto e = Take();
+        CHECK(e.size() == 2 && e[0].kind == Kind::NativeFill && e[0].dc == &f.eraseDc && e[1].kind == Kind::NativeFill && !e[1].dc);
+        // The unit's own drawing is in progress.
+        Bg::g_inside = true; native(&f.eraseDc, f.client, &f.window); Bg::g_inside = false;
+        black(&f.eraseDc);
+        CHECK(f.Idle() && f.Kept());
+    }
+
+    // The import is hooked for good when the first control of such a class is
+    // seen in a paint or a GetDC, and is released by shutdown only.
+    void KeptImport()
+    {
+        Fixture f;
+        // Nothing seen: nothing hooked, and the erase is the application's.
+        CHECK(!f.Kept() && f.exe.hooks.empty());
+        f.EraseOutsidePaint(f.list, f.eraseDc);
+        auto e = Take();
+        CHECK(e.size() == 2 && e[1].kind == Kind::NativeFill);
+        // Windows that are not such controls do not hook it.
+        CHECK(!f.Begin(f.other, f.foreignDc, true)); f.End(f.other, f.foreignDc); Take();
+        f.BeginDc(f.other); f.EndDc(f.other);
+        CHECK(!f.Kept() && f.exe.hooks.empty() && f.All() == 0);
+        // ...nor does a control Glass does not paint.
+        const auto unseen = [&] { f.BeginDc(f.edit); CHECK(!f.Kept() && f.All() == 0); f.EndDc(f.edit); };
+        BgTest::full = false; unseen(); BgTest::full = true;
+        f.edit.backdrop = false; unseen(); f.edit.backdrop = true;
+        f.edit.kind = GlassControlKind::None; unseen(); f.edit.kind = GlassControlKind::ListBox; unseen();
+        f.edit.kind = GlassControlKind::Edit;
+        f.edit.cls = L"Edit"; unseen(); f.edit.cls = L"TEdit2"; unseen(); f.edit.cls = L"TEdit";
+        f.edit.valid = false; unseen(); f.edit.valid = true;
+        // The themed frame of an edit is painted through GetDC right before its
+        // first erase: seeing the control there is enough.
+        f.BeginDc(f.edit);
+        CHECK(f.Kept() && f.All() == 1 && f.Refs() == 0);       // an edit's session takes no reference of its own
+        f.EraseOutsidePaint(f.list, f.eraseDc);                 // already while that session is open
+        f.EndDc(f.edit);
+        CHECK(f.Kept() && f.exe.hooks.size() == 1 && f.All() == 1 && f.Idle());
+        f.EraseOutsidePaint(f.list, f.eraseDc);
+        e = Take();
+        CHECK(e.size() == 4 && e[1].kind == Kind::Black && e[3].kind == Kind::Black);
+        // Kept once: further controls and sessions add only their own references.
+        CHECK(f.Begin(f.list, f.paintDc, false) && f.All() == 2 && f.Refs() == 1);
+        f.BeginDc(f.tree);
+        CHECK(f.Begin(f.list2, f.paintDc2, false) && f.All() == 3 && f.exe.hooks.size() == 1);
+        f.End(f.list2, f.paintDc2); f.EndDc(f.tree); f.End(f.list, f.paintDc);
+        CHECK(f.All() == 1 && f.Idle() && f.Kept());
+        Take();
+        // ...and a session no longer asks whether its window is such a control.
+        BgTest::classLookups = 0;
+        f.BeginDc(f.edit); f.EndDc(f.edit);
+        CHECK(BgTest::classLookups == 1);           // the session's own question, as before
+        // Shutdown releases it; after a restart nothing is hooked until a control
+        // is seen again.
+        Bg::Shutdown();
+        CHECK(!f.Kept() && f.exe.hooks.empty() && f.All() == 0);
+        Bg::Startup();
+        CHECK(!f.Kept() && f.exe.hooks.empty());
+        f.EraseOutsidePaint(f.list, f.eraseDc);
+        e = Take();
+        CHECK(e.size() == 2 && e[1].kind == Kind::NativeFill);
+        // Every class is such a control, in a paint as well as in a GetDC.
+        using namespace GlassCore::PaintDispatcher;
+        for (const EraseRow& row : kEraseRows)
+            for (const bool paint : {true, false})
+            {
+                TestWindow w; w.cls = row.cls; w.kind = row.kind; w.brush = &f.window;
+                auto& provider = paint ? paintProviders.front() : dcProviders.front();
+                provider.onBegin(&w, &f.exe);
+                CHECK(f.Kept() && f.exe.hooks.size() == 1);
+                provider.onEnd(&w, &f.exe);
+                CHECK(f.Kept() && f.All() == 1 && f.Idle());
+                Bg::Shutdown(); Bg::Startup();
+                CHECK(!f.Kept() && f.exe.hooks.empty());
+            }
+        // Shutdown while sessions are open: their ends release nothing twice.
+        CHECK(f.Begin(f.list, f.paintDc, false) && f.All() == 2); Take();
+        Bg::Shutdown();
+        CHECK(!f.Kept() && f.exe.hooks.empty() && f.All() == 0 && Bg::g_sessions.empty());
+        f.End(f.list, f.paintDc);
+        CHECK(f.All() == 0 && f.exe.hooks.empty());
+        Bg::Startup();
+        // Without the import, or without the EXE, nothing can be kept.
+        f.exe.originals.clear();
+        f.BeginDc(f.edit); f.EndDc(f.edit);
+        CHECK(!f.Kept() && f.exe.hooks.empty() && f.All() == 0);
+        f.EraseOutsidePaint(f.edit, f.editDc);
+        e = Take();
+        CHECK(e.size() == 2 && e[1].kind == Kind::NativeFill);
+        f.exe.originals["FillRect"] = reinterpret_cast<void*>(&NativeFillRect);
+        GlassCore::ModuleHandler::g_entryPointModule = nullptr;
+        f.BeginDc(f.edit); f.EndDc(f.edit);
+        CHECK(!f.Kept() && f.exe.hooks.empty());
+        GlassCore::ModuleHandler::g_entryPointModule = &f.exe;
+        // ...and it is tried again the next time such a control is seen.
+        f.BeginDc(f.edit); f.EndDc(f.edit);
+        CHECK(f.Kept() && f.All() == 1 && f.Idle());
+        // Two threads see their first control at the same moment. The one that
+        // comes second to the lock finds the import kept and adds nothing.
+        Bg::Shutdown(); Bg::Startup();
+        int raced = 0;
+        BgTest::beforeExclusive = [&] {
+            ++raced;
+            f.BeginDc(f.tree); f.EndDc(f.tree);     // the other thread got there first
+            CHECK(f.Kept() && f.All() == 1);
+        };
+        f.BeginDc(f.edit);
+        CHECK(raced == 1 && f.Kept() && f.All() == 1);
+        f.EndDc(f.edit);
+        CHECK(f.Kept() && f.All() == 1 && f.Idle());
+        // Shutdown comes between a session's first look and the lock: nothing
+        // is hooked behind its back, neither for good nor for the session.
+        for (const bool kept : {false, true})
+        {
+            Bg::Shutdown(); Bg::Startup();
+            if (kept) { f.BeginDc(f.edit); f.EndDc(f.edit); CHECK(f.Kept()); }
+            BgTest::beforeExclusive = [] { Bg::Shutdown(); };
+            CHECK(!f.Begin(f.list, f.paintDc, false));
+            CHECK(!BgTest::beforeExclusive && !f.Kept() && f.exe.hooks.empty() && f.All() == 0);
+            f.End(f.list, f.paintDc);
+            CHECK(Bg::g_sessions.empty() && Take().empty());
+        }
+        // ...and after it a session asks nothing about its window.
+        BgTest::classLookups = 0;
+        CHECK(!f.Begin(f.list, f.paintDc, false)); f.End(f.list, f.paintDc);
+        f.BeginDc(f.edit); f.EndDc(f.edit);
+        CHECK(BgTest::classLookups == 0 && !f.Kept() && f.exe.hooks.empty() && Take().empty());
+    }
+
+    // One line per fill that reached such a control outside its sessions: the
+    // window, its class, the DC, the rectangle against the client and the clip,
+    // the brush, and whether the fill was replaced. Debug builds only, 32 a
+    // second.
+    void OutsideDiagnostics()
+    {
+        Fixture f;
+        CHECK(f.Begin(f.list, f.paintDc, true)); f.End(f.list, f.paintDc); Take();
+        BgTest::clock += 1000; BgTest::logs.clear();
+        f.EraseOutsidePaint(f.list, f.eraseDc);
+        f.list.brush = &f.custom; f.EraseOutsidePaint(f.list, f.eraseDc);
+        f.list.brush = nullptr; f.EraseOutsidePaint(f.list, f.eraseDc);
+        f.list.brush = &f.hatch; f.EraseOutsidePaint(f.list, f.eraseDc);
+        f.list.brush = &f.window;
+        f.tree.client = RECT{0, 0, 285, 568};
+        f.EraseOutsidePaint(f.tree, f.treeDc);
+        LOGBRUSH flagged{BS_SOLID, 0x02ffffff};     // the high byte of a COLORREF is not a colour
+        f.tree.brush = &flagged; f.EraseOutsidePaint(f.tree, f.treeDc); f.tree.brush = &f.window;
+        BgTest::failObject = true;                  // a brush that tells nothing about itself
+        f.EraseOutsidePaint(f.tree, f.treeDc);
+        BgTest::failObject = false;
+        // The erase of a part: the clip is the update region.
+        f.treeDc.frame = true; f.treeDc.frameClip = RECT{10, 20, 60, 40}; f.treeDc.clipKind = 3;
+        f.EraseOutsidePaint(f.tree, f.treeDc);
+        f.treeDc.frame = false; f.treeDc.clipKind = SIMPLEREGION;
+        [[maybe_unused]] auto lines = Logs(L"] erase-outside ");
+#if defined(_DEBUG)
+        // hwnd, dc, the rectangle, the client's size, the clip, whole, the brush, cleared
+        const auto line = [](HWND w, HDC dc, const RECT& rect, int clipKind, const RECT& clip, int whole,
+                             int style, long long rgb, int cleared) {
+            return std::vector<long long>{Number(w), Number(dc), rect.left, rect.top, rect.right, rect.bottom,
+                w->client.right, w->client.bottom, clipKind, clip.left, clip.top, clip.right, clip.bottom,
+                whole, style, rgb, cleared};
+        };
+        const RECT big = f.tree.client;
+        CHECK(lines.size() == 8);
+        CHECK(lines[0].format == L"[GlassCore][DelphiBackground] erase-outside hwnd=0x%p class=%s dc=0x%p rect=[%ld,%ld,%ld,%ld] "
+                                 L"client=[%ld,%ld] clip=%d[%ld,%ld,%ld,%ld] whole=%d style=%d rgb=0x%06X cleared=%d");
+        CHECK(lines[0].texts == std::vector<std::wstring>{L"TListBox"});
+        CHECK(lines[0].numbers == line(&f.list, &f.eraseDc, f.client, SIMPLEREGION, f.client, 1, 0, 0xffffff, 1));
+        CHECK(lines[1].numbers == line(&f.list, &f.eraseDc, f.client, SIMPLEREGION, f.client, 1, 0, 0x00c0ff, 0));
+        CHECK(lines[2].numbers == line(&f.list, &f.eraseDc, f.client, SIMPLEREGION, f.client, 1, -1, 0, 0));
+        CHECK(lines[3].numbers == line(&f.list, &f.eraseDc, f.client, SIMPLEREGION, f.client, 1, 2, 0xffffff, 0));
+        CHECK(lines[4].texts == std::vector<std::wstring>{L"TResTreeView"});
+        CHECK(lines[4].numbers == line(&f.tree, &f.treeDc, big, SIMPLEREGION, big, 1, 0, 0xffffff, 1));
+        CHECK(lines[5].numbers == line(&f.tree, &f.treeDc, big, SIMPLEREGION, big, 1, 0, 0xffffff, 1));
+        CHECK(lines[6].numbers == line(&f.tree, &f.treeDc, big, SIMPLEREGION, big, 1, -1, 0, 0));
+        CHECK(lines[7].numbers == line(&f.tree, &f.treeDc, big, 3, RECT{10, 20, 60, 40}, 1, 0, 0xffffff, 1));
+        CHECK(BgTest::logs.size() == 8);            // nothing else is written for them
+        // A fill that is not the erase is reported too, and says why: a part
+        // of the client, a window DC of the frame, nothing to erase, no rectangle.
+        BgTest::clock += 1000; BgTest::logs.clear();
+        CHECK(f.Fill(&f.eraseDc, RECT{0, 16, 200, 32}, &f.window) == 1);
+        f.eraseDc.frame = true; f.eraseDc.frameClip = RECT{-2, -2, 202, 122};
+        CHECK(f.Fill(&f.eraseDc, f.client, &f.window) == 1);
+        f.eraseDc.frame = false; f.eraseDc.clipKind = NULLREGION;
+        CHECK(f.Fill(&f.eraseDc, f.client, &f.window) == 1);
+        f.eraseDc.clipKind = SIMPLEREGION;
+        CHECK(ExeFillRect(f.exe, &f.eraseDc, nullptr, &f.window) == 1);
+        lines = Logs(L"] erase-outside ");
+        CHECK(lines.size() == 4 && BgTest::logs.size() == 4);
+        CHECK(lines[0].numbers == line(&f.list, &f.eraseDc, RECT{0, 16, 200, 32}, SIMPLEREGION, f.client, 0, 0, 0xffffff, 0));
+        CHECK(lines[1].numbers == line(&f.list, &f.eraseDc, f.client, SIMPLEREGION, RECT{-2, -2, 202, 122}, 0, 0, 0xffffff, 0));
+        CHECK(lines[2].numbers == line(&f.list, &f.eraseDc, f.client, NULLREGION, f.client, 0, 0, 0xffffff, 0));
+        CHECK(lines[3].numbers == line(&f.list, &f.eraseDc, RECT{}, SIMPLEREGION, f.client, 0, 0, 0xffffff, 0));
+        // Not reported: another window, a buffer, another thread, and a fill
+        // inside a session of the window.
+        BgTest::clock += 1000; BgTest::logs.clear();
+        CHECK(f.Fill(&f.foreignDc, f.client, &f.window) == 1);
+        CHECK(f.Fill(&f.memoryDc, f.client, &f.window) == 1);
+        BgTest::thread = 2; CHECK(f.Fill(&f.eraseDc, f.client, &f.window) == 1); BgTest::thread = 1;
+        f.BeginDc(f.edit); CHECK(f.Fill(&f.editDc, f.client, &f.window) == 1); f.EndDc(f.edit);
+        CHECK(Logs(L"] erase-outside ").empty());
+        // The repeated erase of a paint is another line.
+        CHECK(f.Begin(f.list, f.paintDc, false)); f.End(f.list, f.paintDc);
+        CHECK(Logs(L"] erase-outside ").empty() && Logs(L"] erase-again ").size() == 1);
+        // 32 a second.
+        BgTest::clock += 1000; BgTest::logs.clear(); Take();
+        for (int i = 0; i < 50; ++i) f.EraseOutsidePaint(f.list, f.eraseDc);
+        CHECK(Logs(L"] erase-outside ").size() == 32);
+        CHECK(BgTest::Count(Kind::Black) == 50);    // the budget is the line's, not the fill's
+        BgTest::clock += 999;
+        f.EraseOutsidePaint(f.list, f.eraseDc);
+        CHECK(Logs(L"] erase-outside ").size() == 32);
+        BgTest::clock += 1;
+        f.EraseOutsidePaint(f.list, f.eraseDc);
+        CHECK(Logs(L"] erase-outside ").size() == 33);
+#else
+        CHECK(lines.empty() && BgTest::logs.empty());
+#endif
+        Take();
+        CHECK(f.Idle() && f.Kept());
+    }
 }
 
 int main(int argc, char** argv)
@@ -560,6 +1060,10 @@ int main(int argc, char** argv)
         else if (name == "reentry") Reentry();
         else if (name == "lifecycle") Lifecycle();
         else if (name == "diagnostics") Diagnostics();
+        else if (name == "erase-outside") EraseOutside();
+        else if (name == "outside-gates") OutsideGates();
+        else if (name == "kept-import") KeptImport();
+        else if (name == "outside-diagnostics") OutsideDiagnostics();
         else throw std::runtime_error("unknown case");
         std::cout << "PASS " << name << '\n';
     }
