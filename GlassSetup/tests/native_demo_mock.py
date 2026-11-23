@@ -32,7 +32,8 @@ void KillTimer(int,int){} namespace InstallLog {void Line(const wchar_t*){}}
 enum class Page {Welcome,Checking,Conflicts,License,Components,Certificate,Installing,ModulesBusy,ProcessesStuck,ConfirmCancel,Cancelling,Cancelled,Launching,Complete,Error};
 struct Wizard {
  bool debugDemoPending_=true,debugDemoStarted_=false,debugDemoActive_=false,debugNativeDemo_=false;
- bool webReady_=false,webBridgeReady_=false,accepted_=true,webInitSent_=true;
+ bool webReady_=false,webBridgeReady_=false,accepted_=true;
+ struct WebState {bool sent=true; void Reset(){sent=false;}} webState_;
  size_t debugDemoStep_=0;int accept_=1,window=1,finishes=0,changes=0;Page page=Page::Welcome;
  void SetPage(Page p){page=p;++changes;}void SetDebugDemoPage(Page p){SetPage(p);}
  void FinishDebugDemo(){++finishes;debugDemoActive_=false;}
@@ -43,7 +44,7 @@ int main(){
  web.webReady_=true;web.MaybeStartDebugDemo();assert(!web.debugDemoActive_);
  web.webBridgeReady_=true;web.MaybeStartDebugDemo();assert(web.debugDemoActive_&&timerMs==1800);
  Wizard native; native.debugNativeDemo_=true;native.MaybeStartDebugDemo();
- assert(native.debugDemoActive_&&!native.debugDemoPending_&&!native.accepted_&&!native.webInitSent_&&timerMs==4000);
+ assert(native.debugDemoActive_&&!native.debugDemoPending_&&!native.accepted_&&!native.webState_.sent&&timerMs==4000);
  for(int i=0;i<34;++i)native.TickDebugDemo();
  assert(native.debugDemoActive_&&native.finishes==0&&native.debugDemoStep_==0&&native.page==Page::Welcome);
  for(int i=0;i<17;++i){web.TickDebugDemo();}

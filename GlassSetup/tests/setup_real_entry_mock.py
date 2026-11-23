@@ -20,7 +20,7 @@ assert 'installEngine_.Start(' in start and 'RequestCancel()' in s
 assert 'HasCommandLineSwitch(L"--demo-tour")' in s
 assert 'RemoveOrphanUninstallEntry' not in fn(s,'void StartupWorker(')
 finish=fn(s,'void FinishDebugDemo()')
-for reset in ('webInitSent_=false','certQueried_=false','certSigner_={}','selection_.trustSigner=false','finishWarnings_.clear()'):
+for reset in ('webState_.Reset()','certQueried_=false','certSigner_={}','selection_.trustSigner=false','finishWarnings_.clear()'):
  assert reset in finish,reset
 harness=r'''
 #include "GlassProducts.h"

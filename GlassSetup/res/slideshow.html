@@ -200,6 +200,12 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 .error-reason{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;margin-top:18px;width:430px;padding:11px 14px 12px;border:1px solid #ff829a38;border-left:2px solid #ff829a;border-radius:12px;background:linear-gradient(110deg,#70283c46,#2d1e3238);box-shadow:inset 0 1px #ffffff08}
 .error-reason-label{color:#ffb6c1;font-size:9px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase}
 .error-detail{flex:1 1 auto;min-height:0;margin:7px 0 0;padding-right:6px;max-height:168px;overflow:auto;color:#f3e6e9;font-size:12px;line-height:1.52;white-space:pre-wrap;overflow-wrap:anywhere;scrollbar-color:#8d6472 #2d1e32;scrollbar-width:thin}
+.error-reason[hidden],#error-copy-menu[hidden]{display:none}
+.error-detail{-webkit-user-select:text;user-select:text;cursor:text}
+.error-detail:focus-visible{outline:1px solid #f8b9cb;outline-offset:2px}
+#error-copy-menu{position:fixed;z-index:1000;padding:4px;border:1px solid #8d6472;border-radius:6px;background:#291f35;color:#fff;box-shadow:0 3px 12px #0009}
+#error-copy-command{display:block;padding:6px 16px;border:0;border-radius:3px;background:transparent;color:inherit;font:inherit;cursor:pointer}
+#error-copy-command:hover,#error-copy-command:focus-visible{background:#694457}
 .error-detail::-webkit-scrollbar{width:9px}.error-detail::-webkit-scrollbar-track{background:#2d1e32;border-radius:8px}.error-detail::-webkit-scrollbar-thumb{background:#8d6472;border:2px solid #2d1e32;border-radius:8px}
 .error-note{flex-shrink:0;max-height:52px;overflow:auto;overflow-wrap:anywhere;pointer-events:auto;margin:12px 0 0;max-width:420px;color:#aaa6b6;font-size:11px;line-height:1.55;white-space:pre-wrap}
 .error-visual{position:absolute;right:52px;top:64px;width:435px;height:435px;z-index:4;display:grid;place-items:center;opacity:0;transform:scale(.92);animation:complete-pop .92s .13s cubic-bezier(.18,.8,.25,1) forwards;pointer-events:none}
@@ -860,7 +866,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 <section id="error-panel" class="mode-panel error-scene" role="alert" aria-live="assertive">
 <img id="error-banner" class="banner-portrait" alt="" aria-hidden="true"><div class="error-ambient" aria-hidden="true"></div><div class="complete-sheen error-sheen" aria-hidden="true"></div><div class="native-brand">GlassPlatform</div>
 <div class="error-copy"><div id="error-tag" class="error-tag"></div><h1 id="error-title" class="error-title"></h1><p id="error-body" class="error-body"></p>
-<div class="error-reason"><div id="error-reason-label" class="error-reason-label"></div><p id="error-detail" class="error-detail"></p></div><p id="error-note" class="error-note"></p></div>
+<div class="error-reason" hidden><div id="error-reason-label" class="error-reason-label"></div><p id="error-detail" class="error-detail" tabindex="0" aria-labelledby="error-reason-label"></p></div><p id="error-note" class="error-note"></p></div>
 <div class="error-visual" aria-hidden="true"><svg class="error-svg" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg"><defs>
 <radialGradient id="errorGlow"><stop offset="0" stop-color="#ff829a" stop-opacity=".34"/><stop offset=".62" stop-color="#b94b69" stop-opacity=".15"/><stop offset="1" stop-color="#b94b69" stop-opacity="0"/></radialGradient>
 <linearGradient id="errorRingGradient" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ffb7c4"/><stop offset=".54" stop-color="#ffc1c8"/><stop offset="1" stop-color="#ef6d8a"/></linearGradient>
@@ -939,6 +945,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 <circle cx="200" cy="200" r="86" fill="#181b30de" stroke="#c1b4ff" stroke-width="2.2"/><circle cx="200" cy="200" r="71" fill="#c1b4ff12" stroke="#ffffff20" stroke-width="1.2"/>
 <path d="M180 190h30a18 18 0 1 1 0 36h-22M190 178l-14 12 14 12" fill="none" stroke="#e6e1ff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div></section>
 </div></main>
+<div id="error-copy-menu" role="menu" hidden><button id="error-copy-command" type="button" role="menuitem"></button></div>
 <script>
 'use strict';
 const images={start:'https://glassplatform.invalid/assets/slide_start.jpg',taskbar:'https://glassplatform.invalid/assets/slide_taskbar.jpg',notification:'https://glassplatform.invalid/assets/slide_notification.png',context_menu:'https://glassplatform.invalid/assets/slide_context_menu.jpg',explorer:'https://glassplatform.invalid/assets/slide_explorer.jpg'};
@@ -1787,6 +1794,53 @@ function renderCertificatePanel(){
  }
  setModeText('certificate-subject',cert.subject||'');setModeText('certificate-thumbprint',cert.thumbprint||'');setModeText('certificate-validity',cert.validity||'');setModeText('certificate-store',hostUi.certStore||'LocalMachine\\TrustedPeople');
 }
+const errorDetail=document.getElementById('error-detail');
+const errorCopyMenu=document.getElementById('error-copy-menu');
+const errorCopyCommand=document.getElementById('error-copy-command');
+function selectedErrorText(){
+ const selection=window.getSelection();
+ return mode==='error'&&selection&&!selection.isCollapsed&&
+  errorDetail.contains(selection.anchorNode)&&errorDetail.contains(selection.focusNode)?selection.toString():'';
+}
+function closeErrorCopyMenu(){errorCopyMenu.hidden=true;}
+function syncErrorDetail(text){
+ if(errorDetail.textContent!==text){closeErrorCopyMenu();errorDetail.textContent=text;}
+ errorDetail.parentElement.hidden=!text.trim();
+ errorCopyCommand.textContent=locale==='ru'?'Копировать':'Copy';
+ if(mode!=='error'||errorDetail.parentElement.hidden)closeErrorCopyMenu();
+}
+function openErrorCopyMenu(x,y){
+ errorCopyMenu.hidden=false;
+ errorCopyCommand.disabled=!selectedErrorText();
+ errorCopyMenu.style.left=Math.max(0,Math.min(x,window.innerWidth-errorCopyMenu.offsetWidth))+'px';
+ errorCopyMenu.style.top=Math.max(0,Math.min(y,window.innerHeight-errorCopyMenu.offsetHeight))+'px';
+}
+document.addEventListener('contextmenu',e=>{
+ e.preventDefault();
+ closeErrorCopyMenu();
+ if(mode!=='error'||errorDetail.parentElement.hidden||!errorDetail.contains(e.target))return;
+ openErrorCopyMenu(e.clientX,e.clientY);
+});
+// Не переносим фокус мышью: иначе Chromium может снять выделение до Copy.
+errorCopyCommand.addEventListener('mousedown',e=>e.preventDefault());
+errorCopyCommand.addEventListener('click',()=>{
+ if(selectedErrorText())document.execCommand('copy');
+ closeErrorCopyMenu();
+});
+document.addEventListener('pointerdown',e=>{if(!errorCopyMenu.contains(e.target))closeErrorCopyMenu();});
+window.addEventListener('blur',closeErrorCopyMenu);
+document.addEventListener('keydown',e=>{
+ if(mode==='error'&&!errorDetail.parentElement.hidden&&e.target===errorDetail&&
+    (e.key==='ContextMenu'||(e.shiftKey&&e.key==='F10'))){
+  e.preventDefault();
+  const bounds=errorDetail.getBoundingClientRect();
+  openErrorCopyMenu(bounds.left,bounds.bottom);
+ }else if(!errorCopyMenu.hidden&&(e.key==='Escape'||e.key==='Enter'||e.key===' ')){
+  e.preventDefault();e.stopImmediatePropagation();
+  if(e.key==='Escape')closeErrorCopyMenu();
+  else if(!errorCopyCommand.disabled)errorCopyCommand.click();
+ }
+},true);
 function syncModeText(){const x=uiResources[locale],hostUi=hostState.ui||{},done=completionText||hostUi||x,failed=errorText||hostUi||x;
  for(const id of ['checking-banner','unlock-banner','complete-banner','error-banner','license-banner','conflicts-banner']){const el=document.getElementById(id);if(el&&el.getAttribute('src')!==bannerImage)el.src=bannerImage;}for(const id of ['components-banner','certificate-banner','launch-banner','uninstalling-banner','confirm-banner','cancelling-banner','cancelled-banner']){const el=document.getElementById(id);if(el&&el.getAttribute('src')!==bannerImage)el.src=bannerImage;}
  const inspecting=!!hostState.checkingProducts;document.getElementById('checking-kicker').textContent=inspecting?x.inspectionKicker:x.checkingKicker;document.getElementById('checking-title').textContent=inspecting?x.inspectionTitle:x.checkingTitle;document.getElementById('checking-copy').textContent=inspecting?x.inspectionCopy:x.checkingCopy;document.getElementById('checking-status').textContent=hostState.checkingStatus||(inspecting?x.inspectionStatus:x.checkingStatus);document.getElementById('checking-sub').textContent=x.checkingSub;document.getElementById('checking-source').textContent=inspecting?x.inspectionSource:x.checkingSource;
@@ -1795,7 +1849,7 @@ function syncModeText(){const x=uiResources[locale],hostUi=hostState.ui||{},done
  const finishWarnings=Array.isArray(hostState.finishWarnings)?hostState.finishWarnings.filter(w=>w&&typeof w.title==='string'&&w.title):[],hasWarnings=finishWarnings.length>0;document.getElementById('complete-panel').classList.toggle('has-warnings',hasWarnings);
  document.getElementById('complete-tag').textContent=hasWarnings?(hostUi.doneWarnTag||x.doneWarnTag):(done.doneTag||x.doneTag);document.getElementById('complete-title').textContent=hasWarnings?(hostUi.doneWarnTitle||x.doneWarnTitle):(done.doneTitle||x.doneTitle);document.getElementById('complete-body').textContent=hasWarnings?(hostUi.doneWarnBody||x.doneWarnBody):(done.doneBody||x.doneBody);document.getElementById('complete-ready-text').textContent=done.doneReady||x.doneReady;document.getElementById('complete-note').textContent=done.doneNote||x.doneNote;
  document.getElementById('complete-warn-label').textContent=hostUi.doneWarnLabel||x.doneWarnLabel;const warnList=document.getElementById('complete-warn-list');warnList.replaceChildren();for(const w of finishWarnings){const li=document.createElement('li');li.className='complete-warn-item';li.append(document.createTextNode(w.title));if(typeof w.detail==='string'&&w.detail){const d=document.createElement('span');d.className='complete-warn-detail';d.textContent=w.detail;li.append(d);}warnList.append(li);}
- document.getElementById('error-tag').textContent=failed.errorTag||x.errorTag;document.getElementById('error-title').textContent=failed.errorTitle||x.errorTitle;document.getElementById('error-body').textContent=failed.errorBody||x.errorBody;document.getElementById('error-reason-label').textContent=failed.errorDetails||x.errorDetails;document.getElementById('error-detail').textContent=hostState.errorReason||failed.errorReason||x.errorReason;document.getElementById('error-note').textContent=(hostState.page==='error'&&hostState.status)?(hostState.status+'\n'+(failed.errorNote||x.errorNote)):(failed.errorNote||x.errorNote);
+ document.getElementById('error-tag').textContent=failed.errorTag||x.errorTag;document.getElementById('error-title').textContent=failed.errorTitle||x.errorTitle;document.getElementById('error-body').textContent=failed.errorBody||x.errorBody;document.getElementById('error-reason-label').textContent=failed.errorDetails||x.errorDetails;syncErrorDetail(String(hostState.errorReason??failed.errorReason??x.errorReason??''));document.getElementById('error-note').textContent=(hostState.page==='error'&&hostState.status)?(hostState.status+'\n'+(failed.errorNote||x.errorNote)):(failed.errorNote||x.errorNote);
  setModeText('conflicts-kicker',hostUi.conflictsTag);setModeText('conflicts-title',hostUi.conflictsTitle);setModeText('conflicts-body',hostUi.conflictsBody);setModeText('conflicts-instructions',hostUi.conflictsInstructions);
  const conflictList=document.getElementById('conflict-list');conflictList.replaceChildren();for(const item of Array.isArray(hostState.conflicts)?hostState.conflicts:[]){if(!item||typeof item.name!=='string'||typeof item.detail!=='string')continue;const li=document.createElement('li');li.className='conflict-item';const dot=document.createElement('span');dot.className='conflict-dot';dot.setAttribute('aria-hidden','true');const copy=document.createElement('div');copy.className='conflict-copy';const name=document.createElement('strong');name.className='conflict-name';name.textContent=item.name;const detail=document.createElement('span');detail.className='conflict-detail';detail.textContent=item.detail;copy.append(name,detail);li.append(dot,copy);conflictList.append(li)}
  setModeText('license-brand',hostUi.brand||'GlassPlatform');setModeText('license-title',hostUi.licenseTitle);setModeText('license-intro',hostUi.licenseIntro);setModeText('license-accept-text',hostUi.licenseAccept);setModeText('eula-content',hostState.eula);

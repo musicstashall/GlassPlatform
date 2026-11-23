@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="$(MSBuildThisFileDirectory)WebHost.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)Window.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\WizardTheme.cpp" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)WebHost.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Window.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\WizardTheme.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\WizardAssets.h" />
+  </ItemGroup>
+</Project>

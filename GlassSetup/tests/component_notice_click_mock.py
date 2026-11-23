@@ -16,27 +16,27 @@ constexpr UINT WM_LBUTTONDOWN=10,WM_LBUTTONUP=11,WM_RBUTTONDOWN=12,WM_RBUTTONUP=
 constexpr int SM_CXDRAG=1,SM_CYDRAG=2;
 bool IsChild(HWND parent,HWND child){return parent==1&&(child==2||child==3);}
 int GetSystemMetrics(int){return 4;}
-struct Web{int clicks=0;int PostWebMessageAsJson(const wchar_t* text){assert(std::wstring(text)==L"{\"type\":\"component-notice-click\"}"||std::wstring(text)==L"{\"type\":\"component-notice-scroll\"}");++clicks;return 0;}};
+struct Web{int clicks=0;int PostJson(const wchar_t* text){assert(std::wstring(text)==L"{\"type\":\"component-notice-click\"}"||std::wstring(text)==L"{\"type\":\"component-notice-scroll\"}");++clicks;return 0;}};
 struct Observer{
  HWND window=1,webHost_=3;POINT nativeNoticePress_{};UINT nativeNoticeButton_=0;
  bool nativeComponentNoticeActivity_=false,webReady_=true;
- std::wstring nativeComponentNotice_=L"notice";Web web;Web* web_=&web;
+ std::wstring nativeComponentNotice_=L"notice";Web web_;
 // METHOD
 };
 int main(){
  for(HWND hwnd:{1,2,3,4})for(UINT msg:{WM_MOUSEWHEEL,WM_MOUSEHWHEEL,WM_VSCROLL,WM_HSCROLL}){
-  Observer o;o.ObserveComponentNoticeClick({hwnd,msg,{0,0}});assert(o.nativeComponentNoticeActivity_==(hwnd!=4));assert(o.web.clicks==((hwnd==1||hwnd==2)?1:0));
+  Observer o;o.ObserveComponentNoticeClick({hwnd,msg,{0,0}});assert(o.nativeComponentNoticeActivity_==(hwnd!=4));assert(o.web_.clicks==((hwnd==1||hwnd==2)?1:0));
  }
 
  for(UINT type:{WM_MOUSEMOVE,WM_NCMOUSEMOVE,WM_KEYDOWN,WM_COMMAND,WM_LBUTTONUP}){
-  Observer o;o.ObserveComponentNoticeClick({1,type,{0,0}});assert(!o.nativeComponentNoticeActivity_&&o.web.clicks==0);
+  Observer o;o.ObserveComponentNoticeClick({1,type,{0,0}});assert(!o.nativeComponentNoticeActivity_&&o.web_.clicks==0);
  }
  for(HWND hwnd:{1,2,3,4})for(UINT down:{WM_LBUTTONDOWN,WM_RBUTTONDOWN,WM_MBUTTONDOWN,WM_XBUTTONDOWN,WM_NCLBUTTONDOWN,WM_NCRBUTTONDOWN,WM_NCMBUTTONDOWN,WM_NCXBUTTONDOWN}){
   Observer o;o.ObserveComponentNoticeClick({hwnd,down,{10,10}});assert(!o.nativeComponentNoticeActivity_);
-  o.ObserveComponentNoticeClick({hwnd,down+1,{10,10}});assert(o.nativeComponentNoticeActivity_==(hwnd!=4));assert(o.web.clicks==((hwnd==1||hwnd==2)?1:0));
+  o.ObserveComponentNoticeClick({hwnd,down+1,{10,10}});assert(o.nativeComponentNoticeActivity_==(hwnd!=4));assert(o.web_.clicks==((hwnd==1||hwnd==2)?1:0));
  }
- {Observer o;o.ObserveComponentNoticeClick({1,WM_LBUTTONDOWN,{0,0}});o.ObserveComponentNoticeClick({1,WM_MOUSEMOVE,{20,0}});o.ObserveComponentNoticeClick({1,WM_LBUTTONUP,{0,0}});assert(!o.nativeComponentNoticeActivity_&&o.web.clicks==0);}
- {Observer o;o.ObserveComponentNoticeClick({1,WM_LBUTTONDOWN,{0,0}});o.ObserveComponentNoticeClick({1,WM_RBUTTONUP,{0,0}});assert(!o.nativeComponentNoticeActivity_&&o.web.clicks==0);}
+ {Observer o;o.ObserveComponentNoticeClick({1,WM_LBUTTONDOWN,{0,0}});o.ObserveComponentNoticeClick({1,WM_MOUSEMOVE,{20,0}});o.ObserveComponentNoticeClick({1,WM_LBUTTONUP,{0,0}});assert(!o.nativeComponentNoticeActivity_&&o.web_.clicks==0);}
+ {Observer o;o.ObserveComponentNoticeClick({1,WM_LBUTTONDOWN,{0,0}});o.ObserveComponentNoticeClick({1,WM_RBUTTONUP,{0,0}});assert(!o.nativeComponentNoticeActivity_&&o.web_.clicks==0);}
  std::cout<<"PASS: actual native notice observer: completed client/child/nonclient clicks + scrolling, footer bridge, no WebView duplicate, no hover/keyboard/commands/drag/foreign-window\n";
 }
 '''.replace('// METHOD',method)

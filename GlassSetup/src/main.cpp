@@ -26,7 +26,8 @@
 #include <Helpers/ThemeHelper.h>
 #include <GlassShellMenuConstants.h>
 #include "WizardTheme.h"
-#include "WizardAssets.h"
+#include "WizardUi/WebHost.h"
+#include "WizardUi/Window.h"
 #include "WizardProgress.h"
 #include "GlassProductPlan.h"
 #include "GlassProductDownloads.h"
@@ -70,7 +71,6 @@
 #include "InstallLog.h"
 
 using Microsoft::WRL::ComPtr;
-using Microsoft::WRL::Callback;
 namespace {
 // 1000×600 total client area: 540 px content, 4 px progress strip, 56 px footer.
 constexpr int kWidth = 1000, kHtmlHeight = 540, kProgressHeight = 4;
@@ -98,7 +98,6 @@ constexpr COLORREF kDark = RGB(16,18,37), kLicensePanel = RGB(27,29,52);
 constexpr COLORREF kFooterTop = RGB(26,27,50), kFooterBottom = RGB(17,18,35);
 constexpr COLORREF kButtonBase = RGB(24,25,47);
 constexpr COLORREF kLicenseText = RGB(215,217,232);
-constexpr wchar_t kDocumentUrl[] = L"https://glassplatform.invalid/index.html";
 constexpr wchar_t kWebView2BootstrapperUrl[] = L"https://go.microsoft.com/fwlink/p/?LinkId=2124703";
 #ifdef _DEBUG
 constexpr UINT_PTR kDebugDemoTimer = 4;
@@ -1247,8 +1246,8 @@ public:
         const UINT msg=message.message;
         if(msg==WM_MOUSEWHEEL||msg==WM_MOUSEHWHEEL||msg==WM_VSCROLL||msg==WM_HSCROLL) {
             if(!nativeComponentNotice_.empty())nativeComponentNoticeActivity_=true;
-            if(webReady_&&web_&&message.hwnd!=webHost_&&!IsChild(webHost_,message.hwnd))
-                (void)web_->PostWebMessageAsJson(L"{\"type\":\"component-notice-scroll\"}");
+            if(webReady_&&message.hwnd!=webHost_&&!IsChild(webHost_,message.hwnd))
+                (void)web_.PostJson(L"{\"type\":\"component-notice-scroll\"}");
             return;
         }
         const bool down=msg==WM_LBUTTONDOWN||msg==WM_RBUTTONDOWN||msg==WM_MBUTTONDOWN||msg==WM_XBUTTONDOWN||
@@ -1266,8 +1265,8 @@ public:
                 if(msg==nativeNoticeButton_+1) {
                     if(!nativeComponentNotice_.empty())nativeComponentNoticeActivity_=true;
                     // Footer/title-bar clicks lie outside the WebView document.
-                    if(webReady_&&web_&&message.hwnd!=webHost_&&!IsChild(webHost_,message.hwnd))
-                        (void)web_->PostWebMessageAsJson(L"{\"type\":\"component-notice-click\"}");
+                    if(webReady_&&message.hwnd!=webHost_&&!IsChild(webHost_,message.hwnd))
+                        (void)web_.PostJson(L"{\"type\":\"component-notice-click\"}");
                 }
                 nativeNoticeButton_=0;
             }
@@ -1291,13 +1290,11 @@ private:
     ComPtr<IStream> bannerStream_;
     std::unique_ptr<Gdiplus::Bitmap> banner_;
     bool bannerLoaded_ = false;
-    ComPtr<ICoreWebView2Environment> environment_;
-    ComPtr<ICoreWebView2Controller> controller_;
-    ComPtr<ICoreWebView2> web_;
+    WizardUi::WebHost web_;
+    WizardUi::ErrorDetails errorDetails_;
     bool accepted_ = false, closing_ = false, webReady_ = false, webBridgeReady_ = false;
     bool webStartupExpected_ = false;
-    bool webInitSent_ = false;
-    std::wstring lastWebState_;
+    WizardUi::WebState webState_;
     InstallEngine::ComponentSelection selection_{};
     InstallEngine::ComponentSelection installedSelection_{};
     std::wstring secureUxRemovalCode_;
@@ -1376,8 +1373,6 @@ private:
     bool transitioning_ = false;
     ULONGLONG fadeStarted_ = 0;
     Surface frame_, fadeFrame_;
-    RECT webBounds_{};
-    bool haveWebBounds_ = false;
     HRESULT webError_ = S_OK;
     int percent_ = 0, progressValue_ = 0, progressTarget_ = 0, displayProgress_ = 0;
     WizardProgress::VisibleProgress visibleProgress_;
@@ -1417,14 +1412,8 @@ private:
     SelfSignerInfo certSigner_;
     std::wstring holdReport_;
     InstallEngine installEngine_;
-    std::wstring userDataFolder_;
-    EventRegistrationToken requestToken_{}, navigationToken_{}, completeToken_{},
-                           popupToken_{}, permissionToken_{}, webMessageToken_{};
-
-    int Scale(int n) const { return MulDiv(n, static_cast<int>(dpi_), 96); }
-    RECT Box(int x, int y, int w, int h) const {
-        return {Scale(x), Scale(y), Scale(x+w), Scale(y+h)};
-    }
+    int Scale(int n) const noexcept { return WizardUi::Scale(dpi_, n); }
+    RECT Box(int x, int y, int w, int h) const noexcept { return WizardUi::Box(dpi_, x, y, w, h); }
     HWND Control(const wchar_t* cls, const std::wstring& text, DWORD style, int id, DWORD exStyle=0) {
         return CreateWindowExW(exStyle, cls, text.c_str(), WS_CHILD | style,
             0,0,0,0, window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), gInstance, nullptr);
@@ -1437,14 +1426,8 @@ private:
         for (HWND button:{back_,next_,cancel_})
             if (button && IsWindow(button)) InvalidateRect(button,nullptr,FALSE);
     }
-    void Move(HWND control, int x, int y, int w, int h) {
-        if (!control) return;
-        RECT current{}; GetWindowRect(control,&current);
-        MapWindowPoints(nullptr,window,reinterpret_cast<POINT*>(&current),2);
-        RECT wanted=Box(x,y,w,h);
-        if (EqualRect(&current,&wanted)) return;
-        SetWindowPos(control,nullptr,wanted.left,wanted.top,wanted.right-wanted.left,
-                     wanted.bottom-wanted.top,SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+    void Move(HWND control, int x, int y, int w, int h) noexcept {
+        WizardUi::Move(window,control,Box(x,y,w,h),false);
     }
     void CreateFonts() {
         for (HFONT* f : {&font_, &heading_, &small_, &title_, &footerFont_}) {
@@ -1459,7 +1442,7 @@ private:
         font_ = create(14,FW_NORMAL); small_ = create(12,FW_NORMAL);
         footerFont_ = create(8.5,FW_NORMAL);
         heading_ = create(28,FW_NORMAL); title_ = create(39,FW_LIGHT);
-        for (HWND c : {back_,next_,cancel_,eula_,accept_,cleanupOg_,component64_,component32_,componentSettings_,componentSettings32_,componentOpenGlass_,componentSecureUxTheme_,componentResources_,certInstall_,certSkip_})
+        for (HWND c : {back_,next_,cancel_,eula_,accept_,cleanupOg_,component64_,component32_,componentSettings_,componentSettings32_,componentOpenGlass_,componentSecureUxTheme_,componentResources_,certInstall_,certSkip_,errorDetails_.Get()})
             if (c) SendMessageW(c,WM_SETFONT,reinterpret_cast<WPARAM>(font_),FALSE);
     }
     void InitializeLoading() {
@@ -1500,6 +1483,7 @@ private:
         // A hidden native parent prevents the asynchronously created WebView
         // from ever appearing above Welcome during its first initialization.
         webHost_ = Control(L"STATIC",L"",WS_CLIPCHILDREN | WS_CLIPSIBLINGS,IDC_WEBHOST,WS_EX_CONTROLPARENT);
+        errorDetails_.Create(window,gInstance,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN);
         SetWindowTheme(eula_,L"",nullptr);
         SendMessageW(window,DM_SETDEFID,IDC_NEXT,0);
         CreateFonts();
@@ -1745,36 +1729,25 @@ private:
         }
     }
     void Layout() {
-        Move(back_,page_==Page::ModulesBusy?510:644,kContentHeight+12,page_==Page::ModulesBusy?230:96,32);
-        // Complete uses the exact rectangle previously occupied by Cancel.
-        const bool unlock = page_==Page::ProcessesStuck || page_==Page::SettingsBusy;
-        const bool conflictCheck = page_==Page::Conflicts;
+        const bool modules=page_==Page::ModulesBusy;
+        const bool wideNext=page_==Page::ProcessesStuck || page_==Page::SettingsBusy || page_==Page::Conflicts;
         const bool confirm=page_==Page::ConfirmCancel;
         const bool terminal=page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error;
-        if (confirm) Move(back_,568,kContentHeight+12,190,32);
-        const int nextWidth=confirm?190:(unlock || conflictCheck)?160:104;
-        const int nextX=confirm?778:terminal?864:
-            (unlock || conflictCheck)?694:750;
-        Move(next_,nextX,kContentHeight+12,nextWidth,32);
-        Move(cancel_,864,kContentHeight+12,104,32);
+        WizardUi::LayoutFooter(window,dpi_,kContentHeight,
+            {back_,confirm?568:modules?510:644,confirm?190:modules?230:96},
+            {next_,confirm?778:wideNext?694:750,confirm?190:wideNext?160:104},cancel_,terminal,false);
         Move(eula_,48,142,904,285);
         Move(accept_,48,page_==Page::FullCleanup?360:447,904,32);
         Move(cleanupOg_,48,405,904,32);
         Move(progress_,0,kHtmlHeight,kWidth,kProgressHeight);
-        Move(webHost_,0,0,kWidth,kHtmlHeight);
+        WizardUi::LayoutWebSurface(window,webHost_,web_,Box(0,0,kWidth,kHtmlHeight),false);
+        Move(errorDetails_.Get(),48,362,520,92);
         // Leave room outside each platform checkbox for the separate mandatory lock.
         Move(component64_,60,203,360,32); Move(component32_,510,203,360,32);
         Move(componentSettings_,60,273,400,32); Move(componentSettings32_,510,273,400,32); Move(componentOpenGlass_,60,343,400,32);
         Move(componentSecureUxTheme_,510,343,420,28);
         Move(componentResources_,60,410,870,28);
         Move(certInstall_,60,318,560,28); Move(certSkip_,60,386,560,28);
-        if (controller_) {
-            RECT bounds=Box(0,0,kWidth,kHtmlHeight);
-            if (!haveWebBounds_ || !EqualRect(&bounds,&webBounds_)) {
-                controller_->put_Bounds(bounds);
-                webBounds_=bounds; haveWebBounds_=true;
-            }
-        }
     }
     void InvalidateContent() {
         RECT content=Box(0,0,kWidth,kContentHeight);
@@ -1790,6 +1763,7 @@ private:
     }
     void ShowContentControls() {
         if(WaitingForWebUi()) {
+            errorDetails_.Update(false,{});
             EnableWindow(next_,FALSE);EnableWindow(back_,FALSE);
             for(HWND control:{back_,next_,eula_,accept_,cleanupOg_,component64_,component32_,componentSettings_,
                 componentSettings32_,componentOpenGlass_,componentSecureUxTheme_,componentResources_,certInstall_,certSkip_,progress_,webHost_})
@@ -1797,6 +1771,7 @@ private:
             return;
         }
         const bool webVisible = SlidesVisible();
+        errorDetails_.Update(!webVisible && !transitioning_ && page_==Page::Error,errorReason_);
         const bool nativeLicense = !webVisible && page_==Page::License && !transitioning_;
         ShowWindow(eula_,nativeLicense?SW_SHOWNA:SW_HIDE);
         ShowWindow(accept_,(nativeLicense||(!webVisible&&page_==Page::FullCleanup&&cleanupPlatformEligible_))?SW_SHOWNA:SW_HIDE);
@@ -1809,7 +1784,7 @@ private:
         const bool showProgress = !transitioning_ && (page_==Page::Installing || page_==Page::Cancelling || page_==Page::Launching ||
             (page_==Page::Components&&downloadContinuePending_) || (page_==Page::Checking&&setupDownloadActive_));
         ShowWindow(progress_, showProgress ? SW_SHOWNA : SW_HIDE);
-        if (controller_) controller_->put_IsVisible(webVisible ? TRUE : FALSE);
+        web_.SetVisible(webVisible);
         ShowWindow(webHost_,webVisible?SW_SHOWNA:SW_HIDE);
         const bool nativeComponents=!webVisible && page_==Page::Components && !transitioning_;
         const bool os64=GlassInstallUtil::IsOs64Bit();
@@ -2537,8 +2512,8 @@ private:
     }
     void SyncWebViewState() {
         ReconcileDownloads();
-        if (!web_ || !webReady_ || !webBridgeReady_) return;
-        if (!webInitSent_) {
+        if (!webReady_ || !webBridgeReady_) return;
+        if (webState_.NeedsInit()) {
             const UINT doneBodyId=SimulationBuild()?IDS_DONE_BODY_DEMO:IDS_DONE_BODY;
             const UINT doneNoteId=SimulationBuild()?IDS_DONE_NOTE_DEMO:IDS_DONE_NOTE;
             std::wstring labels=L"{\"brand\":"+JsStringLiteral(Text(IDS_BRAND))+
@@ -2598,8 +2573,7 @@ private:
             const std::wstring init=L"{\"type\":\"init\",\"locale\":"+
                 JsStringLiteral(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"ru":L"en")+
                 L",\"eula\":"+JsStringLiteral(eulaText_)+L",\"ui\":"+labels+L"}";
-            if (FAILED(web_->PostWebMessageAsJson(init.c_str()))) return;
-            webInitSent_=true;
+            if (!webState_.SendInit(web_,init)) return;
         }
         const auto unlock=installEngine_.ActiveUnlock();
         std::wstring json=L"{\"type\":\"state\",\"page\":"+JsStringLiteral(WebPageName(unlock))+
@@ -2638,10 +2612,7 @@ private:
             L",\"componentsWarning\":"+JsStringLiteral(ComponentWarnings())+
             L",\"certificate\":"+CertificateJson()+
             L",\"launchCards\":"+LaunchCardsJson()+L"}";
-        if (json==lastWebState_) return;
-        const HRESULT hr=web_->PostWebMessageAsJson(json.c_str());
-        if (SUCCEEDED(hr)) lastWebState_=std::move(json);
-        else InstallLog::LineFormat(L"WebView2 state message failed: 0x%08X",static_cast<unsigned>(hr));
+        webState_.SendState(web_,std::move(json));
     }
     void FocusPage() {
         if (page_==Page::ConfirmCancel) { SetFocus(back_); return; }
@@ -3380,7 +3351,7 @@ private:
         SendMessageW(accept_,BM_SETCHECK,BST_UNCHECKED,0);
 
 
-        webInitSent_=false;
+        webState_.Reset();
         InstallLog::Line(L"Debug page tour started; no update or installation actions will run");
         debugDemoHold_=0;
         SetDebugDemoPage(kDebugDemoSequence[0]);
@@ -3477,7 +3448,7 @@ private:
         finishWarnings_.clear();
         accepted_=false;
         SendMessageW(accept_,BM_SETCHECK,BST_UNCHECKED,0);
-        webInitSent_=false;
+        webState_.Reset();
         errorReason_.clear();
         holdReport_.clear();
         conflicts_.clear();
@@ -3689,7 +3660,7 @@ private:
     void WebFailure(HRESULT hr) {
         webError_ = FAILED(hr) ? hr : E_FAIL;
         webReady_ = false;
-        webBridgeReady_ = false; webInitSent_=false; lastWebState_.clear();
+        webBridgeReady_ = false; webState_.Reset();
 #ifdef _DEBUG
         if (debugDemoPending_) {
             debugDemoPending_=false;
@@ -3697,26 +3668,14 @@ private:
             EnableWindow(next_,page_!=Page::License || accepted_);
         }
 #endif
-        if (controller_) controller_->put_IsVisible(FALSE);
+        web_.SetVisible(false);
         ShowWindow(webHost_,SW_HIDE);
         if (page_==Page::Welcome) KillTimer(window,kHeroTimer);
         SetPage(page_); // Restore controls only after a confirmed WebView failure.
         InvalidateContent();
     }
-    HRESULT HandleWebMessage(ICoreWebView2WebMessageReceivedEventArgs* args) {
-        if (closing_ || !args) return S_OK;
-        LPWSTR source=nullptr;
-        if (FAILED(args->get_Source(&source))) return S_OK;
-        const std::wstring url=source?source:L"";
-        CoTaskMemFree(source);
-        if (url!=std::wstring(kDocumentUrl)+L"?lang=ru-RU" &&
-            url!=std::wstring(kDocumentUrl)+L"?lang=en-US") return S_OK;
-        LPWSTR raw=nullptr;
-        const HRESULT get=args->TryGetWebMessageAsString(&raw);
-        if (FAILED(get) || !raw) { CoTaskMemFree(raw); return S_OK; }
-        const std::wstring message(raw);
-        CoTaskMemFree(raw);
-        if (message.size()>64) return S_OK;
+    HRESULT HandleWebMessage(const std::wstring& message) {
+        if (closing_) return S_OK;
         if (message==L"cancel") { RequestClose(); return S_OK; }
 #ifdef _DEBUG
         if (message==L"demo-hold") { SetDebugDemoHold(1,true); return S_OK; }
@@ -3849,132 +3808,24 @@ private:
     }
     void InitializeWebView() {
         if (NativeDemo()) return;
-        PWSTR local = nullptr;
-        HRESULT folderResult = SHGetKnownFolderPath(FOLDERID_LocalAppData,0,nullptr,&local);
-        if (FAILED(folderResult)) { WebFailure(folderResult); return; }
-        userDataFolder_ = std::wstring(local) + L"\\GlassPlatform\\InstallerWebView2";
-        CoTaskMemFree(local);
-        int directoryResult = SHCreateDirectoryExW(window,userDataFolder_.c_str(),nullptr);
-        if (directoryResult != ERROR_SUCCESS && directoryResult != ERROR_ALREADY_EXISTS &&
-            directoryResult != ERROR_FILE_EXISTS) { WebFailure(HRESULT_FROM_WIN32(directoryResult)); return; }
-        HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(nullptr,userDataFolder_.c_str(),nullptr,
-            Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
-            [this](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
-                if (closing_ || !IsWindow(window)) return S_OK;
-                if (FAILED(result) || !env) { WebFailure(result); return S_OK; }
-                environment_ = env;
-                HRESULT create = environment_->CreateCoreWebView2Controller(webHost_,
-                    Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
-                    [this](HRESULT result2, ICoreWebView2Controller* ctrl) -> HRESULT {
-                        if (closing_ || !IsWindow(window)) { if (ctrl) ctrl->Close(); return S_OK; }
-                        if (FAILED(result2) || !ctrl) { WebFailure(result2); return S_OK; }
-                        controller_ = ctrl;
-                        HRESULT get = controller_->get_CoreWebView2(web_.ReleaseAndGetAddressOf());
-                        if (FAILED(get) || !web_) { WebFailure(get); return S_OK; }
-                        ConfigureWebView();
-                        return S_OK;
-                    }).Get());
-                if (FAILED(create)) WebFailure(create);
-                return S_OK;
-            }).Get());
-        if (FAILED(hr)) WebFailure(hr);
+        web_.Start(window,webHost_,gInstance,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,L"InstallerWebView2",true,{
+            this,
+            [](void* context) { static_cast<Installer*>(context)->OnWebReady(); },
+            [](void* context,HRESULT hr) { static_cast<Installer*>(context)->WebFailure(hr); },
+            [](void* context,const std::wstring& message) { static_cast<Installer*>(context)->HandleWebMessage(message); }
+        });
     }
-    void ConfigureWebView() {
-        controller_->put_IsVisible(FALSE);
-        ComPtr<ICoreWebView2Controller2> coloredController;
-        if (SUCCEEDED(controller_.As(&coloredController))) {
-            COREWEBVIEW2_COLOR background{255,16,18,37};
-            coloredController->put_DefaultBackgroundColor(background);
-        }
-        Layout();
-        ComPtr<ICoreWebView2Settings> settings;
-        if (SUCCEEDED(web_->get_Settings(&settings))) {
-            settings->put_AreDevToolsEnabled(FALSE);
-            settings->put_AreDefaultContextMenusEnabled(FALSE);
-            settings->put_IsStatusBarEnabled(FALSE);
-            settings->put_IsZoomControlEnabled(FALSE);
-            settings->put_AreDefaultScriptDialogsEnabled(FALSE);
-            ComPtr<ICoreWebView2Settings3> extended;
-            if (SUCCEEDED(settings.As(&extended))) extended->put_AreBrowserAcceleratorKeysEnabled(FALSE);
-        }
-        // Exact in-memory response. No extraction, HTTP server or NavigateToString size limit.
-        HRESULT filter = web_->AddWebResourceRequestedFilter(L"*",COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL);
-        if (FAILED(filter)) { WebFailure(filter); return; }
-        HRESULT request = web_->add_WebResourceRequested(
-            Callback<ICoreWebView2WebResourceRequestedEventHandler>(
-            [this](ICoreWebView2*, ICoreWebView2WebResourceRequestedEventArgs* args) -> HRESULT {
-                if (closing_) return S_OK;
-                ComPtr<ICoreWebView2WebResourceRequest> req;
-                if (FAILED(args->get_Request(&req))) return E_FAIL;
-                LPWSTR uri = nullptr; req->get_Uri(&uri);
-                std::wstring url = uri ? uri : L"";
-                CoTaskMemFree(uri);
-                const auto asset=WizardAssets::Resolve(url);
-                const bool allowed=asset.id!=0;
-                ComPtr<IStream> body;
-                if (allowed) {
-                    const auto blob=Resource(asset.id);
-                    if (!blob.data || !blob.size) return E_FAIL;
-                    body.Attach(SHCreateMemStream(blob.data,blob.size));
-                    if (!body) return E_OUTOFMEMORY;
-                }
-                std::wstring headers=L"Content-Type: ";
-                headers+=allowed?asset.contentType:L"text/plain; charset=utf-8";
-                headers+=L"\r\nCache-Control: no-store\r\n";
-                if (asset.document) headers+=
-                    L"Content-Security-Policy: default-src 'none'; img-src https://glassplatform.invalid data:; "
-                    L"font-src https://glassplatform.invalid; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
-                    L"connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'\r\n";
-                ComPtr<ICoreWebView2WebResourceResponse> response;
-                HRESULT hr=environment_->CreateWebResourceResponse(body.Get(),allowed?200:403,
-                    allowed?L"OK":L"Forbidden",headers.c_str(),&response);
-                return FAILED(hr) ? hr : args->put_Response(response.Get());
-            }).Get(),&requestToken_);
-        if (FAILED(request)) { WebFailure(request); return; }
-        web_->add_NavigationStarting(Callback<ICoreWebView2NavigationStartingEventHandler>(
-            [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs* args) -> HRESULT {
-                LPWSTR uri = nullptr; args->get_Uri(&uri);
-                std::wstring url = uri ? uri : L""; CoTaskMemFree(uri);
-                if (url != std::wstring(kDocumentUrl)+L"?lang=ru-RU" &&
-                    url != std::wstring(kDocumentUrl)+L"?lang=en-US") args->put_Cancel(TRUE);
-                return S_OK;
-            }).Get(),&navigationToken_);
-        web_->add_NewWindowRequested(Callback<ICoreWebView2NewWindowRequestedEventHandler>(
-            [](ICoreWebView2*, ICoreWebView2NewWindowRequestedEventArgs* args) -> HRESULT {
-                return args->put_Handled(TRUE);
-            }).Get(),&popupToken_);
-        web_->add_PermissionRequested(Callback<ICoreWebView2PermissionRequestedEventHandler>(
-            [](ICoreWebView2*, ICoreWebView2PermissionRequestedEventArgs* args) -> HRESULT {
-                return args->put_State(COREWEBVIEW2_PERMISSION_STATE_DENY);
-            }).Get(),&permissionToken_);
-        HRESULT messageResult=web_->add_WebMessageReceived(
-            Callback<ICoreWebView2WebMessageReceivedEventHandler>(
-            [this](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
-                return HandleWebMessage(args);
-            }).Get(),&webMessageToken_);
-        if (FAILED(messageResult)) { WebFailure(messageResult); return; }
-        web_->add_NavigationCompleted(Callback<ICoreWebView2NavigationCompletedEventHandler>(
-            [this](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT {
-                if (closing_) return S_OK;
-                BOOL success = FALSE; args->get_IsSuccess(&success);
-                if (!success) { WebFailure(E_FAIL); return S_OK; }
-                KillTimer(window,kFadeTimer);
-                transitioning_=false;
-                webReady_ = true; webError_ = S_OK;
-                KillTimer(window,kHeroTimer);
-                SetPage(page_);
-                SyncWebViewState();
+    void OnWebReady() {
+        KillTimer(window,kFadeTimer);
+        transitioning_=false;
+        webReady_=true; webError_=S_OK;
+        KillTimer(window,kHeroTimer);
+        SetPage(page_);
+        SyncWebViewState();
 #ifdef _DEBUG
-                MaybeStartDebugDemo();
+        MaybeStartDebugDemo();
 #endif
-                InvalidateContent();
-                return S_OK;
-            }).Get(),&completeToken_);
-        // C++ chooses the language BEFORE navigation / the first rendered HTML frame.
-        std::wstring url = std::wstring(kDocumentUrl) +
-            (PRIMARYLANGID(gLanguage)==LANG_RUSSIAN ? L"?lang=ru-RU" : L"?lang=en-US");
-        HRESULT nav = web_->Navigate(url.c_str());
-        if (FAILED(nav)) WebFailure(nav);
+        InvalidateContent();
     }
     void DrawLabel(HDC dc, const std::wstring& s, RECT rect, HFONT font, COLORREF color,
                    UINT format = DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX) {
@@ -4162,19 +4013,7 @@ private:
         g.FillEllipse(&spark,GdiReal(cx+Scale(119)),GdiReal(cy-Scale(73)),GdiReal(Scale(7)),GdiReal(Scale(7)));
         g.FillEllipse(&spark,GdiReal(cx-Scale(127)),GdiReal(cy+Scale(81)),GdiReal(Scale(5)),GdiReal(Scale(5)));
     }
-    void DrawLoadingScreen(HDC dc) {
-        const double phase=loadingAnimationsEnabled_ ? static_cast<double>(GetTickCount64()%1200)/1200.0 : 0.0;
-        const Gdiplus::REAL x=static_cast<Gdiplus::REAL>(Scale(473));
-        const Gdiplus::REAL y=static_cast<Gdiplus::REAL>(Scale(243));
-        const Gdiplus::REAL diameter=static_cast<Gdiplus::REAL>(Scale(54));
-        Gdiplus::Graphics g(dc);
-        g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
-        Gdiplus::Pen track(Gdiplus::Color(140,77,79,111),static_cast<Gdiplus::REAL>(Scale(3)));
-        Gdiplus::Pen arc(Gdiplus::Color(255,193,180,255),static_cast<Gdiplus::REAL>(Scale(3)));
-        arc.SetStartCap(Gdiplus::LineCapRound); arc.SetEndCap(Gdiplus::LineCapRound);
-        g.DrawEllipse(&track,x,y,diameter,diameter);
-        g.DrawArc(&arc,x,y,diameter,diameter,GdiReal(-90.0+phase*360.0),GdiReal(268.0));
-    }
+    void DrawLoadingScreen(HDC dc) { WizardUi::DrawLoadingSpinner(dc,dpi_,loadingAnimationsEnabled_); }
     void EnsureBanner() {
         if (bannerLoaded_) return;
         bannerLoaded_=true;
@@ -4327,7 +4166,7 @@ private:
             DrawLabel(dc,Text(IDS_ERROR_TAG),Box(48,139,400,25),small_,RGB(255,142,163));
             DrawLabel(dc,Text(IDS_ERROR_TITLE),Box(48,177,440,104),title_,white);
             DrawLabel(dc,Text(IDS_ERROR_BODY),Box(48,301,390,54),font_,muted);
-            DrawLabel(dc,errorReason_,Box(48,362,520,92),font_,white,DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
+            if (!errorDetails_.Get()) DrawLabel(dc,errorReason_,Box(48,362,520,92),font_,white,DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
             DrawLabel(dc,Text(IDS_ERROR_LOG_HINT),Box(48,476,450,50),small_,muted);
             DrawFailureIllustration(dc);
         } else if (page_ == Page::Installing && !webReady_) {
@@ -4481,10 +4320,7 @@ private:
         if (versionCheckThread_.joinable()) versionCheckThread_.join();
         if(!versionCheckResult_.workspace.empty())GlassMaintenanceCache::RemoveFlat(versionCheckResult_.workspace);
         frame_.Reset(); fadeFrame_.Reset();
-        if (web_ && webMessageToken_.value) web_->remove_WebMessageReceived(webMessageToken_);
-        if (controller_) controller_->Close();
-        web_.Reset(); controller_.Reset(); environment_.Reset();
-        banner_.reset(); bannerStream_.Reset();
+        web_.Close();
         for (HWND button : {back_,next_,cancel_})
             if (button && IsWindow(button)) WizardTheme::DetachButtonScope(button);
         WizardTheme::ResetButtonCache();
@@ -4540,7 +4376,7 @@ private:
         case kRuntimeComplete: CompleteRuntimeInstallation(); return 0;
         case WM_PAINT: Paint(); return 0;
         case WM_SIZE: Layout(); return 0;
-        case WM_MOVE: if (controller_) controller_->NotifyParentWindowPositionChanged(); return 0;
+        case WM_MOVE: web_.NotifyParentMoved(); return 0;
         case WM_ACTIVATE:
         case WM_ACTIVATEAPP:
         case WM_SETFOCUS:
@@ -4560,7 +4396,7 @@ private:
             break;
         case WM_DPICHANGED: {
             EndTransition();
-            frame_.Reset(); fadeFrame_.Reset(); haveWebBounds_=false;
+            frame_.Reset(); fadeFrame_.Reset();
             dpi_ = HIWORD(w);
             auto suggested = reinterpret_cast<RECT*>(l);
             RECT size{0,0,Scale(kWidth),Scale(kHeight)};

@@ -9,6 +9,9 @@
 // WebView2 never has to contact a network host for the wizard UI.
 namespace WizardAssets {
 inline constexpr wchar_t kDocumentUrl[] = L"https://glassplatform.invalid/index.html";
+inline std::wstring DocumentUrl(bool russian) {
+    return std::wstring(kDocumentUrl) + (russian ? L"?lang=ru-RU" : L"?lang=en-US");
+}
 struct Asset { UINT id; const wchar_t* contentType; bool document; };
 
 inline Asset Resolve(const std::wstring& url) noexcept {
