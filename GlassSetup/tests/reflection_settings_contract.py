@@ -75,7 +75,11 @@ assert 'blue / (double)weight' not in effects and 'weight += a' not in effects
 print('PASS: bipolar luminance grain independent of source RGB, Gaussian film samples')
 assert 'bool Enabled = true' in state
 assert 'if (!settings.Enabled) settings = new ReflectionRenderSettings();' in service
-assert 'enabled.IsOn' in dialog and 'groups.IsEnabled = pickerRail.IsEnabled = enabled.IsOn' in dialog
+for control in ('groups', 'picker', 'darkPreset', 'lightPreset'):
+    assert f'{control}.IsEnabled = enabled.IsOn;' in dialog
+assert 'pickerRail.IsEnabled' not in dialog
+assert 'void SyncProcessingControls()' in dialog
+assert dialog.count('SyncProcessingControls();') == 2
 assert 'new Pivot' in dialog and 'Reflection_GroupImage' in dialog and 'Reflection_GroupNoise' in dialog
 assert 'GlassSettingsPivotHeaderItemStyle' in dialog
 desktop_preview = (root / 'GlassSettings/Controls/ReflectionDesktopPreview.cs').read_text()

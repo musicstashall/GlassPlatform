@@ -88,7 +88,6 @@ public static class ReflectionSettingsDialog
             if (trackingGroup && groups.IsLoaded && groups.SelectedIndex >= 0)
                 _selectedGroupIndex = restoredGroupIndex = groups.SelectedIndex;
         };
-        groups.IsEnabled = enabled.IsOn;
         body.Children.Add(groups);
         body.Children.Add(error);
         var pickerRail = new StackPanel { Spacing = 12, MaxWidth = 330 };
@@ -169,13 +168,19 @@ public static class ReflectionSettingsDialog
             noiseDensity.IsEnabled = hasNoise;
         }
         noiseType.SelectionChanged += (_, _) => { SyncNoiseControls(); _ = RefreshAsync(); };
+        void SyncProcessingControls()
+        {
+            groups.IsEnabled = enabled.IsOn;
+            picker.IsEnabled = enabled.IsOn;
+            darkPreset.IsEnabled = enabled.IsOn;
+            lightPreset.IsEnabled = enabled.IsOn;
+            SyncNoiseControls();
+        }
         enabled.Toggled += (_, _) =>
         {
-            groups.IsEnabled = pickerRail.IsEnabled = enabled.IsOn;
-            SyncNoiseControls(); _ = RefreshAsync();
+            SyncProcessingControls(); _ = RefreshAsync();
         };
-        pickerRail.IsEnabled = enabled.IsOn;
-        SyncNoiseControls();
+        SyncProcessingControls();
         reset.Click += (_, _) => { enabled.IsOn = true; scale.Value = 100; picker.SetColor(0xFF000000u); softness.Value = 0; noise.Value = 0; noiseDensity.Value = 50; noiseType.SelectedIndex = 0; };
         _ = RefreshAsync();
         try
