@@ -975,7 +975,7 @@ of deliberately skipping it, and detects failure to post the initialization.
 Page coverage audit:
 - Setup: all 23 Page enum values have explicit mappings. Welcome, Checking,
   Conflicts, Downgrade, VersionInvalid, License, Components, Certificate,
-  FullCleanup, SettingsRemovalRisk, Installing, ModulesBusy, ProcessesStuck,
+  FullCleanup, Installing, ModulesBusy, ProcessesStuck,
   ConfirmCancel, Cancelling, Cancelled, Launching, Complete and Error have WebView
   states. Installing preserves its dynamic unlock routing.
 - A missing WebView2 runtime stays on the loading indicator while the bootstrapper

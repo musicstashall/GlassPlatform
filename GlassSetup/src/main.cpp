@@ -104,7 +104,7 @@ constexpr wchar_t kWebView2BootstrapperUrl[] = L"https://go.microsoft.com/fwlink
 constexpr UINT_PTR kDebugDemoTimer = 4;
 constexpr UINT kDebugDemoPageMs = 1800;
 #endif
-enum class Page { Welcome, Checking, Conflicts, License, Components, Certificate, FullCleanup, SettingsRemovalRisk, Installing, SettingsBusy, ModulesBusy, ProcessesStuck, ConfirmCancel, Cancelling, Cancelled, Launching, Complete, Error };
+enum class Page { Welcome, Checking, Conflicts, License, Components, Certificate, FullCleanup, Installing, SettingsBusy, ModulesBusy, ProcessesStuck, ConfirmCancel, Cancelling, Cancelled, Launching, Complete, Error };
 HINSTANCE gInstance = nullptr;
 HBRUSH gWindowClassBrush = nullptr;
 bool gWindowClassRegistered = false;
@@ -1344,8 +1344,6 @@ private:
     std::wstring vendorMetadataRetry_;
     std::atomic_bool inspectReady_{false};
     bool inspectionApplied_=false;
-    unsigned pendingSettingsRemovalRisk_=0;
-    Page beforeSettingsRemovalRisk_=Page::Components;
     std::atomic_bool inspectStop_{false};
     mutable std::mutex inspectMutex_;
     std::wstring footerSetupVersion_; // Actual running EXE FileVersion; not catalog/bundle.
@@ -1751,11 +1749,11 @@ private:
         // Complete uses the exact rectangle previously occupied by Cancel.
         const bool unlock = page_==Page::ProcessesStuck || page_==Page::SettingsBusy;
         const bool conflictCheck = page_==Page::Conflicts;
-        const bool confirm=page_==Page::ConfirmCancel || page_==Page::SettingsRemovalRisk;
+        const bool confirm=page_==Page::ConfirmCancel;
         const bool terminal=page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error;
-        if (confirm) Move(back_,page_==Page::SettingsRemovalRisk?518:568,kContentHeight+12,190,32);
-        const int nextWidth=page_==Page::SettingsRemovalRisk?240:confirm?190:(unlock || conflictCheck)?160:104;
-        const int nextX=page_==Page::SettingsRemovalRisk?728:confirm?778:terminal?864:
+        if (confirm) Move(back_,568,kContentHeight+12,190,32);
+        const int nextWidth=confirm?190:(unlock || conflictCheck)?160:104;
+        const int nextX=confirm?778:terminal?864:
             (unlock || conflictCheck)?694:750;
         Move(next_,nextX,kContentHeight+12,nextWidth,32);
         Move(cancel_,864,kContentHeight+12,104,32);
@@ -1841,13 +1839,13 @@ private:
                 if(sutInstalled)sutVersion=inspect_.secureUxTheme.installedPackageVersion;
                 // MSI рядом с установщиком. Копия в Current — уже установленный пакет, не локальное предложение.
                 else if(!offer.attachedVersion.empty()&&(offer.releaseVersion.empty()||!VersionOlder(offer.attachedVersion,offer.releaseVersion)))
-                    sutVersion=L"MSI "+offer.attachedVersion;
+                    sutVersion=(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"версия ":L"version ")+offer.attachedVersion;
                 else if(!offer.releaseTag.empty())sutVersion=(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"релиз ":L"release ")+offer.releaseTag;
-                else if(offer.localVerified)sutVersion=L"MSI "+offer.localVersion;
+                else if(offer.localVerified)sutVersion=(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"версия ":L"version ")+offer.localVersion;
             }
             if(sutVersion.empty())sutVersion=L"—";
             const auto sutLabel=Text(IDS_COMP_SUT_TITLE)+L" — "+sutVersion+(sutCanRemove?
-                (PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L" — удалить MSI":L" — remove MSI"):L"");
+                (PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L" — удалить":L" — remove"):L"");
             SetWindowTextW(componentSecureUxTheme_,sutLabel.c_str());
             ClampSecureUxThemeSelection();
             EnableWindow(componentSecureUxTheme_,(!SecureUxThemeSelectionBlocked()||sutCanRemove)&&(!sutInstalled||sutCanRemove||selection_.secureUxThemeRemove));
@@ -1901,7 +1899,6 @@ private:
         case Page::Components: return L"components";
         case Page::Certificate: return L"certificate";
         case Page::FullCleanup: return L"full-cleanup";
-        case Page::SettingsRemovalRisk: return L"settings-removal-risk";
         case Page::ConfirmCancel: return L"confirm-cancel";
         case Page::Cancelling: return L"cancelling";
         case Page::Cancelled: return L"cancelled";
@@ -2022,12 +2019,12 @@ private:
     [[nodiscard]] const wchar_t* SecureUxThemeRemovalBlockReasonLocked() const noexcept {
         const bool ru=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN;
         if(!inspectReady_.load(std::memory_order_acquire))return ru?
-            L"Проверка установки ещё не завершена.":L"Installation inspection has not finished.";
+            L"Проверка установленных продуктов ещё не завершена.":L"Checking installed products hasn't finished yet.";
         if(!inspect_.secureUxTheme.installed)return ru?
-            L"Установленный MSI SecureUxTheme не обнаружен.":L"No installed SecureUxTheme MSI was found.";
+            L"SecureUxTheme не найден среди установленных программ.":L"SecureUxTheme was not found among installed programs.";
         if(inspect_.officialSecureUxThemeCode.empty())return ru?
-            L"Не удалось однозначно подтвердить оригинальный MSI SecureUxTheme. Удаление заблокировано, чтобы не затронуть другую установку.":
-            L"The original SecureUxTheme MSI could not be uniquely verified. Removal is blocked to protect another installation.";
+            L"Не удалось точно определить установленный SecureUxTheme. Удаление отключено, чтобы не повредить другую программу.":
+            L"The installed SecureUxTheme couldn't be identified reliably. Removal is disabled to avoid damaging another program.";
         // Missing Settings is an explicit manual-risk path, not a fake runtime
         // query success. A planned update may provide a previously missing query.
         if(secureUxThemeState_!=GlassInstallUtil::SecureUxThemeState::External&&
@@ -2038,14 +2035,14 @@ private:
         // at Apply. The card creates an intent, not permission to run MSI.
         case S::Inactive:case S::ActivationPending:case S::Active:case S::DeactivationPending:return nullptr;
         case S::External:return ru?
-            L"Обнаружена сторонняя или неподдерживаемая установка SecureUxTheme. Setup не будет изменять её автоматически.":
-            L"A foreign or unsupported SecureUxTheme installation was detected. Setup will not modify it automatically.";
+            L"SecureUxTheme установлен не из официального пакета или в неподдерживаемом виде. Установщик не будет его изменять.":
+            L"SecureUxTheme was installed from an unofficial package or in an unsupported way. Setup won't change it.";
         case S::Conflict:return ru?
-            L"Состояние SecureUxTheme не подтверждено или содержит конфликт. Удаление заблокировано; подробности находятся в журнале.":
-            L"SecureUxTheme state could not be verified or is conflicting. Removal is blocked; see the log for diagnostic details.";
+            L"Не удалось определить состояние SecureUxTheme. Удаление отключено; подробности — в журнале установки.":
+            L"SecureUxTheme's state couldn't be determined. Removal is disabled; details are in the setup log.";
         default:return ru?
-            L"MSI SecureUxTheme зарегистрирован, но состояние компонента не подтверждено. Удаление заблокировано; подробности находятся в журнале.":
-            L"SecureUxTheme MSI is registered, but component state could not be verified. Removal is blocked; see the log for diagnostic details.";
+            L"SecureUxTheme установлен, но проверить его состояние не удалось. Удаление отключено; подробности — в журнале установки.":
+            L"SecureUxTheme is installed, but its state couldn't be checked. Removal is disabled; details are in the setup log.";
         }
     }
     [[nodiscard]] bool SecureUxThemeRemovalSupportedLocked() const noexcept {
@@ -2084,48 +2081,50 @@ private:
     std::wstring ComponentPlanBlockReason() const {
         const bool ru=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN;
         if(!OpenGlassApplyPlanSupported())return ru?
-            L"Этот план OpenGlass не поддерживается: его нельзя совмещать с удалением других продуктов или очисткой. Resources можно выбрать вместе с установкой OpenGlass.":
-            L"This OpenGlass plan is not supported: it cannot be combined with removal of other products or cleanup. Resources can be selected together with an OpenGlass installation.";
+            L"Установку OpenGlass нельзя совмещать с удалением других продуктов или их настроек — выполните эти действия по отдельности. OpenGlass Resources можно установить вместе с OpenGlass.":
+            L"Installing OpenGlass can't be combined with removing other products or their settings — do these separately. OpenGlass Resources can be installed together with OpenGlass.";
         return {};
     }
     std::wstring ComponentWarnings() const {
-        auto text=GlassProductUiPolicy::WarningText(SelectionPreview().warnings,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN,GlassInstallUtil::IsOs64Bit());
+        const bool ru=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN;
+        auto text=GlassProductUiPolicy::WarningText(SelectionPreview().warnings,ru,GlassInstallUtil::IsOs64Bit());
+        // Разделитель только между непустыми абзацами: без ведущего перевода строки.
+        const auto add=[&](const std::wstring& line){if(line.empty())return;if(!text.empty())text+=L"\n";text+=line;};
         if(selection_.openGlass&&!selection_.Removes(3)) {
             std::lock_guard<std::mutex> lock(inspectMutex_);
             const unsigned build=GlassInstallUtil::WindowsBuildNumber();
-            const bool ru=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN;
-            std::wstring offer;
             if(GlassOpenGlassRelease::ApplyRisk(build,inspect_.og.remotePayloadVersion))
-                offer=GlassOpenGlassRelease::KnownPublishedReleaseRiskText(ru,build);
+                add(GlassOpenGlassRelease::KnownPublishedReleaseRiskText(ru,build));
             else if(GlassOpenGlassRelease::OlderThan23H2(build))
-                offer=GlassOpenGlassRelease::OlderThan23H2RiskText(ru);
-            if(!offer.empty()){if(!text.empty())text+=L"\n";text+=offer;}
+                add(GlassOpenGlassRelease::OlderThan23H2RiskText(ru));
         }
         if(selection_.secureUxThemeRemove) {
+            // Один абзац о порядке: обновление GlassSettings → удаление SecureUxTheme → удаление остальных.
             const bool os64=GlassInstallUtil::IsOs64Bit();
-            if(os64?selection_.Settings64(true):selection_.Settings32(false))
-                text+=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"\n1. Обновление GlassSettings. 2. Удаление SecureUxTheme.":L"\n1. Update GlassSettings. 2. Remove SecureUxTheme.";
+            const bool settingsFirst=os64?selection_.Settings64(true):selection_.Settings32(false);
+            const bool removeAfter=selection_.removeMask!=0;
+            if(settingsFirst&&removeAfter)
+                add(ru?L"Порядок действий: обновление GlassSettings, затем удаление SecureUxTheme, затем удаление остальных выбранных продуктов.":
+                    L"Order of actions: update GlassSettings, then remove SecureUxTheme, then remove the other selected products.");
+            else if(settingsFirst)
+                add(ru?L"Сначала будет обновлён GlassSettings, затем удалён SecureUxTheme.":
+                    L"GlassSettings will be updated first, then SecureUxTheme will be removed.");
+            else if(removeAfter)
+                add(ru?L"Сначала будет удалён SecureUxTheme, затем остальные выбранные продукты.":
+                    L"SecureUxTheme will be removed first, then the other selected products.");
+            if(removeAfter)
+                add(ru?L"Если на следующем шаге произойдёт ошибка, SecureUxTheme не будет установлен обратно автоматически.":
+                    L"If a later step fails, SecureUxTheme will not be reinstalled automatically.");
             if(selection_.secureUxRemovalWithoutSettings)
-                text+=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"\nБез GlassSettings: верните штатную тему вручную. Ответственность за последствия удаления принимаете вы. Перезагрузите Windows.":L"\nWithout GlassSettings: restore a stock theme yourself. You accept responsibility for removal consequences. Restart Windows.";
+                add(ru?L"GlassSettings не установлен: перед удалением SecureUxTheme сами верните стандартную тему Windows, а после удаления перезагрузите компьютер. Ответственность за возможные последствия лежит на вас.":
+                    L"GlassSettings is not installed: before SecureUxTheme is removed, switch back to the standard Windows theme yourself, and restart the computer afterwards. You take responsibility for any consequences.");
         }
-        if(selection_.removeMask && selection_.secureUxThemeRemove) {
-            if(!text.empty())text+=L"\n";
-            text+=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
-                L"Сначала удаляется SecureUxTheme с проверкой штатного стиля, затем выбранные продукты Glass. При последующей ошибке SecureUxTheme автоматически не восстанавливается.":
-                L"SecureUxTheme is removed first with stock-style safety checks, then selected Glass products. A later failure does not automatically restore SecureUxTheme.";
-        }
-        if(selection_.removeMask && selection_.secureUxTheme) {
-            if(!text.empty())text+=L"\n";
-            text+=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
-                L"Операцию с оригинальным SecureUxTheme выполните отдельно от удаления продуктов Glass.":
-                L"Perform the original SecureUxTheme operation separately from Glass product removal.";
-        }
-        if(!GlassProducts::ResourcesPlanReady(selection_,GlassInstallUtil::IsOs64Bit(),resourcesPrerequisiteReady_)) {
-            if(!text.empty())text+=L"\n";
-            text+=Text((selection_.openGlass||selection_.Removes(3)||resourcesPrerequisiteReady_)?IDS_COMP_OGR_SEPARATE:IDS_COMP_OGR_NEEDS_OG);
-        }
-        const auto block=ComponentPlanBlockReason();
-        if(!block.empty()){if(!text.empty())text+=L"\n";text+=block;}
+        if(selection_.removeMask && selection_.secureUxTheme)
+            add(ru?L"Установку или обновление SecureUxTheme нельзя совмещать с удалением других продуктов — выполните эти действия по отдельности.":
+                L"Installing or updating SecureUxTheme can't be combined with removing other products — do these separately.");
+        if(!GlassProducts::ResourcesPlanReady(selection_,GlassInstallUtil::IsOs64Bit(),resourcesPrerequisiteReady_))
+            add(Text((selection_.openGlass||selection_.Removes(3)||resourcesPrerequisiteReady_)?IDS_COMP_OGR_SEPARATE:IDS_COMP_OGR_NEEDS_OG));
+        add(ComponentPlanBlockReason());
         return text;
     }
     std::wstring ComponentsJson() const {
@@ -2197,8 +2196,8 @@ private:
             bool firstReason=true;
             if(openGlass&&remotePayloadVersion.empty()) {
                 reasons+=JsStringLiteral(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
-                    L"Версия upstream пока не получена. Продукт можно добавить в план; после «Далее» установщик повторит запрос и проверит пакет до любых изменений.":
-                    L"The upstream version is not available yet. You can plan this product; Next retries discovery and verifies the package before any changes.");
+                    L"Пока не удалось узнать последнюю версию OpenGlass. Продукт всё равно можно выбрать: после «Далее» установщик повторит попытку и проверит файл до начала установки.":
+                    L"The latest OpenGlass version couldn't be determined yet. You can still select it: after Next, Setup will try again and check the file before installing.");
                 firstReason=false;
             }
             if (condition==GlassProducts::ProductCondition::UpdateAvailable) {
@@ -2214,11 +2213,11 @@ private:
             } else if (rep && rep->residual) {
                 if(!firstReason)reasons+=L",";
                 reasons+=JsStringLiteral(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
-                    L"MSI не зарегистрирован; осталась служба или задача OpenGlass. Можно переустановить продукт или удалить проверенные остатки.":
-                    L"MSI is not registered; an OpenGlass service or task remains. Reinstall the product or remove verified remnants.");
+                    L"OpenGlass удалён не полностью: в системе осталась его служба или задача. Можно установить OpenGlass заново или удалить эти остатки.":
+                    L"OpenGlass wasn't removed completely: its service or task is still in the system. You can reinstall OpenGlass or remove these leftovers.");
                 if(!rep->residualSafe)reasons+=L","+JsStringLiteral(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
-                    L"Принадлежность остатков каталогу не подтверждена; автоматическое удаление заблокировано.":
-                    L"The remnants could not be verified against the installation directory; automatic removal is blocked.");
+                    L"Не удалось подтвердить, что эти остатки принадлежат OpenGlass, поэтому удалить их автоматически нельзя.":
+                    L"These leftovers couldn't be confirmed as belonging to OpenGlass, so they can't be removed automatically.");
                 firstReason=false;
             } else if (rep) for (auto reason : rep->reasons) {
                 const UINT reasonId=InspectReasonId(reason);
@@ -2233,8 +2232,8 @@ private:
             if(rep&&rep->nativeSourceDiffers) {
                 if(!firstReason)reasons+=L",";
                 reasons+=JsStringLiteral(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
-                    L"Доступен изменённый Native. Для использующих его операций запланируйте обновление или переустановку GlassSettings, даже если версия MSI совпадает.":
-                    L"A changed Native helper is available. Plan a GlassSettings update or reinstall for dependent operations, even when the MSI version is unchanged.");
+                    L"Доступно исправление GlassSettings без смены номера версии. Рекомендуем переустановить GlassSettings.":
+                    L"A GlassSettings fix is available without a version number change. We recommend reinstalling GlassSettings.");
             }
             if(resources&&!resourcesReady) {
                 if(!firstReason)reasons+=L",";
@@ -2243,7 +2242,6 @@ private:
             reasons+=L"]";
             std::wstring description=(desc==IDS_COMP_P64_DESC||desc==IDS_COMP_P32_DESC)?
                 GlassProductUiPolicy::PlatformDescription(Text(desc),desc==IDS_COMP_P64_DESC,os64,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN):Text(desc);
-            if(resources&&!resourcesReady)description+=L" "+Text((selection_.openGlass||selection_.Removes(3)||resourcesPrerequisiteReady_)?IDS_COMP_OGR_SEPARATE:IDS_COMP_OGR_NEEDS_OG);
             json+=L"{\"id\":"+JsStringLiteral(id)+L",\"title\":"+JsStringLiteral(Text(title))+
                 L",\"description\":"+JsStringLiteral(description)+L",\"warning\":"+JsStringLiteral(warning)+L",\"badge\":"+JsStringLiteral(badgeId?Text(badgeId):L"")+
                 L",\"installed\":"+((rep&&(rep->installed||rep->residual))?L"true":L"false")+
@@ -2264,9 +2262,9 @@ private:
                 L",\"pairedApplySupported\":"+(pairedApply?L"true":L"false")+
                 L",\"applySupported\":"+(applySupported?L"true":L"false")+
                 L",\"applyHint\":"+JsStringLiteral(!applySupported&&!openGlass&&(!resources||resourcesReady)?
-                    (targetVersion.empty()?(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"Нет подходящего источника MSI. Проверка завершена: проверьте version.json и журналы отклонения локальных пакетов; повторный запуск с доступным источником выполнит новую проверку.":L"No eligible MSI source. Inspection has finished: check version.json and local-package rejection logs; restart with an available source to check again."):
-                    (PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"Источник не подходит для установленной версии: понижение версии или неизвестная версия установленного MSI.":L"The source is not eligible for the installed version: downgrade or unknown installed MSI version.")):resources&&!resourcesReady?
-                    (PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"Выберите OpenGlass в этом плане или установите его заранее":L"Select OpenGlass in this plan or install it first"):L"")+
+                    (targetVersion.empty()?(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"Нет подходящего источника установки: установочный файл этого продукта недоступен. Проверьте подключение к интернету и запустите установщик снова.":L"No eligible installation source: this product's installation file is unavailable. Check your internet connection and run Setup again."):
+                    (PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"Доступная версия старше установленной или версию установленного продукта не удалось определить, поэтому установка недоступна.":L"The available version is older than the installed one, or the installed version couldn't be determined, so installation is unavailable.")):resources&&!resourcesReady?
+                    Text((selection_.openGlass||selection_.Removes(3)||resourcesPrerequisiteReady_)?IDS_COMP_OGR_SEPARATE:IDS_COMP_OGR_NEEDS_OG):L"")+
                 L",\"broken\":"+((rep&&rep->damaged)?L"true":L"false")+
                 L",\"installedVersion\":"+JsStringLiteral(rep?rep->installedPackageVersion:L"")+
                 L",\"installedPackageVersion\":"+JsStringLiteral(rep?rep->installedPackageVersion:L"")+
@@ -2372,8 +2370,8 @@ private:
             L",\"removeBlockedReason\":"+JsStringLiteral(inspect_.secureUxTheme.installed&&sutRemoveReason?sutRemoveReason:L"")+
             L",\"operation\":"+JsStringLiteral(selection_.secureUxThemeRemove?L"remove":sutCondition==GlassProducts::ProductCondition::NotInstalled?L"install":sutUpdate?L"update":L"repair")+
             L",\"state\":"+JsStringLiteral(selection_.secureUxThemeRemove?(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
-                L"Будет удалён оригинальный MSI. Постоянные файлы автора сохранятся.":
-                L"The original MSI will be removed. Author-owned permanent files are retained."):Text(sutStateId))+L",\"reasons\":"+sutReasons+
+                L"Будет удалён. Некоторые файлы SecureUxTheme останутся в системе — так задумано его разработчиком.":
+                L"Will be removed. Some SecureUxTheme files stay in the system by its developer's design."):Text(sutStateId))+L",\"reasons\":"+sutReasons+
             L",\"checked\":"+(sutChecked?L"true":L"false")+
             L",\"locked\":false,\"disabled\":"+(sutDisabled?L"true":L"false")+L",\"hidden\":false}";
         return json+L"]";
@@ -2635,7 +2633,6 @@ private:
             L",\"cleanupOpenGlassConfig\":"+(selection_.cleanupOpenGlassConfig?L"true":L"false")+
             L",\"cleanupPlatformEligible\":"+(cleanupPlatformEligible_?L"true":L"false")+
             L",\"cleanupOgEligible\":"+(cleanupOgEligible_?L"true":L"false")+
-            L",\"settingsRiskBody\":"+JsStringLiteral(SettingsRemovalRiskText())+
             L",\"componentsLoading\":"+(inspectReady_.load(std::memory_order_acquire)?L"false":L"true")+
             L",\"components\":"+ComponentsJson()+
             L",\"componentsWarning\":"+JsStringLiteral(ComponentWarnings())+
@@ -2647,7 +2644,7 @@ private:
         else InstallLog::LineFormat(L"WebView2 state message failed: 0x%08X",static_cast<unsigned>(hr));
     }
     void FocusPage() {
-        if (page_==Page::ConfirmCancel || page_==Page::SettingsRemovalRisk) { SetFocus(back_); return; }
+        if (page_==Page::ConfirmCancel) { SetFocus(back_); return; }
         if (webReady_ && (page_==Page::License || page_==Page::Components || page_==Page::Certificate)) { SetFocus(webHost_); return; }
         SetFocus(page_==Page::ModulesBusy || page_==Page::ProcessesStuck || page_==Page::SettingsBusy || page_==Page::Conflicts ? next_ :
                  page_==Page::Checking ? cancel_ :
@@ -2778,7 +2775,6 @@ private:
         const bool inProgress=page_==Page::Checking || page_==Page::Installing || page_==Page::Cancelling ||
             page_==Page::Launching;
         const UINT nextId = page_==Page::FullCleanup?IDS_APPLY:
-            page_==Page::SettingsRemovalRisk?IDS_CONTINUE_RISK:
             page_==Page::ConfirmCancel?IDS_CONFIRM_ABORT:
             page_==Page::Conflicts?IDS_RECHECK_CONFLICTS:
             page_==Page::Components?(CertificatePageApplies()?IDS_NEXT:ProductApplyTextId()):
@@ -2789,7 +2785,7 @@ private:
         SetWindowTextW(next_,Text(nextId).c_str());
         SetWindowTextW(back_,Text(page_==Page::ModulesBusy?IDS_CONTINUE_RISK:page_==Page::ConfirmCancel?IDS_CONFIRM_RESUME:IDS_BACK).c_str());
         SetWindowTextW(cancel_,Text(IDS_CANCEL).c_str());
-        const bool confirm=page_==Page::ConfirmCancel || page_==Page::SettingsRemovalRisk;
+        const bool confirm=page_==Page::ConfirmCancel;
         const bool backVisible=(page_==Page::License || page_==Page::Components || page_==Page::Certificate || page_==Page::FullCleanup || page_==Page::ModulesBusy || confirm)
             && !(MaintenanceUi() && (page_==Page::Components || (page_==Page::License && !accepted_)));
         const bool nextVisible=!inProgress;
@@ -2960,26 +2956,6 @@ private:
             UpdateWindow(progress_);
         }
     }
-    unsigned ManagedSettingsRemovalRisk() const noexcept {
-        return GlassProductPlan::SettingsRemovalRiskMask(selection_.Removes(2),selection_.Removes(5),
-            installedSelection_.platform64,installedSelection_.platform32,selection_.Removes(0),selection_.Removes(1));
-    }
-    std::wstring SettingsRemovalRiskText() const {
-        const bool ru=PRIMARYLANGID(gLanguage)==LANG_RUSSIAN;
-        std::wstring text=ru?L"После удаления GlassSettings соответствующая Platform останется без helper и контроля модулей для последующей выгрузки. Это может привести к падению процессов.\n\n":
-            L"Removing GlassSettings leaves the matching Platform without its helper and module monitoring for subsequent unloading. Processes may crash.\n\n";
-        if(pendingSettingsRemovalRisk_&1u)text+=L"GlassSettings x64 ↔ Platform x64\n";
-        if(pendingSettingsRemovalRisk_&2u)text+=L"GlassSettings x86 ↔ Platform x86\n";
-        text+=ru?L"\nДругие продукты автоматически не удаляются. Вернитесь к плану или явно подтвердите риск.":
-            L"\nOther products are not removed automatically. Return to the plan or explicitly accept the risk.";
-        return text;
-    }
-    bool ConfirmManagedSettingsRemoval() {
-        const auto risk=ManagedSettingsRemovalRisk();
-        if(!(risk & ~selection_.confirmedSettingsRemovalRisk))return true;
-        pendingSettingsRemovalRisk_=risk;beforeSettingsRemovalRisk_=page_;
-        SetPage(Page::SettingsRemovalRisk);return false;
-    }
     bool ConfirmFullRemovalCleanup() {
         unsigned installed=0;bool vendor=false;
         {std::lock_guard<std::mutex> lock(inspectMutex_);
@@ -3027,7 +3003,6 @@ private:
         }
         if (!RunPreflightChecks()) return;
         if(!ConfirmFullRemovalCleanup())return;
-        if(!ConfirmManagedSettingsRemoval())return;
         finishWarnings_.clear();
         percent_ = 0;
         progressValue_ = 0;
@@ -3486,9 +3461,6 @@ private:
             cleanupPlatformEligible_=true;
             cleanupOgEligible_=true;
             break;
-        case Page::SettingsRemovalRisk:
-            pendingSettingsRemovalRisk_=3u;
-            break;
         default:
             break;
         }
@@ -3511,7 +3483,6 @@ private:
         conflicts_.clear();
         cleanupPlatformEligible_=false;
         cleanupOgEligible_=false;
-        pendingSettingsRemovalRisk_=0;
         runtimeStatus_.clear();
         runtimeError_.clear();
         progressReverse_=false;
@@ -3527,7 +3498,7 @@ private:
     }
     static constexpr Page kDebugDemoSequence[]={
         Page::Welcome,Page::Checking,Page::Conflicts,Page::License,
-        Page::Components,Page::Certificate,Page::FullCleanup,Page::SettingsRemovalRisk,Page::Installing,
+        Page::Components,Page::Certificate,Page::FullCleanup,Page::Installing,
         Page::SettingsBusy,Page::ModulesBusy,Page::ProcessesStuck,Page::ConfirmCancel,Page::Cancelling,
         Page::Cancelled,Page::Launching,Page::Complete,Page::Error};
     void TickDebugDemo() {
@@ -3786,7 +3757,6 @@ private:
                    message==L"component:"+std::wstring(entry.first)+L":0" ||
                    message==L"component:"+std::wstring(entry.first)+L":1")managedRow=entry.second;
             if(managedRow<7) {
-                selection_.confirmedSettingsRemovalRisk=0;
                 if(message==L"component:"+std::wstring(managedRow==0?L"x64":managedRow==1?L"x86":managedRow==2?L"settings64":managedRow==3?L"openglass":managedRow==6?L"openglassResources":L"settings32")+L":remove") {
                     bool present=false;
                     {std::lock_guard<std::mutex> lock(inspectMutex_);
@@ -3804,7 +3774,7 @@ private:
                 }else if(message.back()==L'0'||message.back()==L'1')selection_.removeMask&=~(1u<<managedRow);
             }
             if(message==L"components:select-all") {
-                selection_.removeMask=0;selection_.confirmedSettingsRemovalRisk=0;
+                selection_.removeMask=0;
                 selection_.platform64=os64;selection_.platform32=true;selection_.settings64=os64;selection_.settings32=true;selection_.SyncSettings(os64); // Fresh OG/Resources stay manual; installed updates are page recommendations.
                 std::lock_guard<std::mutex> lock(inspectMutex_);
                 if(!selection_.secureUxThemeRemove)selection_.secureUxTheme=(!sutMetadataBlocked_||sutMetadataLocal_) && !inspect_.secureUxTheme.installed && !SecureUxThemeSelectionBlocked();
@@ -4297,7 +4267,7 @@ private:
                 secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::Active?IDS_COMP_SUT_STATE_ACTIVE:
                 sutChecked?IDS_COMP_SUT_STATE_ENABLE:IDS_COMP_SUT_STATE_OFF;
             DrawLabel(dc,selection_.secureUxThemeRemove?(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
-                L"Будет удалён MSI; постоянные файлы сохранятся":L"MSI will be removed; permanent files are retained"):Text(sutStateId),Box(510,377,380,38),small_,accent);
+                L"Будет удалён; часть файлов останется":L"Will be removed; some files stay"):Text(sutStateId),Box(510,377,380,38),small_,accent);
 
             const auto warnings=ComponentWarnings();
             if(!warnings.empty())DrawLabel(dc,warnings,Box(48,448,840,72),font_,white);
@@ -4305,9 +4275,6 @@ private:
         } else if(page_==Page::FullCleanup) {
             DrawLabel(dc,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"Полное удаление: данные":L"Full removal: data",Box(48,70,900,48),title_,RGB(242,239,255));
             DrawLabel(dc,FullCleanupText(),Box(48,140,900,285),font_,RGB(215,211,231));
-        } else if(page_==Page::SettingsRemovalRisk) {
-            DrawLabel(dc,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?L"Риск для Platform":L"Platform risk",Box(48,70,900,48),title_,RGB(242,239,255));
-            DrawLabel(dc,SettingsRemovalRiskText(),Box(48,140,900,285),font_,RGB(215,211,231));
         } else if (page_==Page::ConfirmCancel || page_==Page::Cancelled || page_==Page::Cancelling || page_==Page::Launching) {
             DrawBanner(dc,true);
             const UINT title=page_==Page::ConfirmCancel?IDS_CONFIRM_CANCEL_TITLE:page_==Page::Cancelled?IDS_CANCELLED_TITLE:
@@ -4670,7 +4637,6 @@ private:
             case IDC_COMPONENT64: case IDC_COMPONENT32: case IDC_COMPONENT_SETTINGS32: case IDC_COMPONENT_SETTINGS: case IDC_COMPONENT_OG: case IDC_COMPONENT_SUT: case IDC_COMPONENT_OGR:
                 if (page_==Page::Components && HIWORD(w)==BN_CLICKED && !webReady_ && !DebugDemoLocksControls()) {
                     const bool os64=GlassInstallUtil::IsOs64Bit();
-                    selection_.confirmedSettingsRemovalRisk=0;
                     fullCleanupReviewed_=false;selection_.cleanupUserData=selection_.cleanupOpenGlassConfig=false;
                     if(LOWORD(w)==IDC_COMPONENT64)selection_.removeMask&=~1u;
                     if(LOWORD(w)==IDC_COMPONENT32)selection_.removeMask&=~2u;
@@ -4694,12 +4660,12 @@ private:
                             selection_.secureUxRemovalWithoutSettings=NoSettingsInstalledLocked()&&!(os64?selection_.Settings64(true):selection_.Settings32(false));
                             selection_.secureUxThemeRemove=true;secureUxRemovalCode_=inspect_.officialSecureUxThemeCode;
                             if(selection_.secureUxRemovalWithoutSettings)SetNativeComponentNotice(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
-                                L"GlassSettings не установлен. Автоматическая подготовка штатной темы и проверка активности недоступны. Верните штатную тему вручную; ответственность за последствия удаления принимаете вы. Может потребоваться перезагрузка.":
-                                L"GlassSettings is not installed. Automatic stock-theme preparation and runtime verification are unavailable. Restore a stock theme yourself; you accept responsibility for removal consequences. A restart may be required.",true);
+                                L"GlassSettings не установлен: перед удалением SecureUxTheme сами верните стандартную тему Windows, а после удаления перезагрузите компьютер. Ответственность за возможные последствия лежит на вас.":
+                                L"GlassSettings is not installed: before SecureUxTheme is removed, switch back to the standard Windows theme yourself, and restart the computer afterwards. You take responsibility for any consequences.",true);
                         }else if(checked&&inspect_.secureUxTheme.installed&&!SecureUxRemovalDependencySatisfiedLocked()) {
                             SetNativeComponentNotice(PRIMARYLANGID(gLanguage)==LANG_RUSSIAN?
-                                L"Для удаления SecureUxTheme сначала запланируйте обновление GlassSettings разрядности ОС.":
-                                L"To remove SecureUxTheme, first plan an update of GlassSettings matching the OS architecture.",false);
+                                L"Чтобы удалить SecureUxTheme, отметьте также обновление GlassSettings (x64 для 64-битной Windows, x86 — для 32-битной).":
+                                L"To remove SecureUxTheme, also select the GlassSettings update (x64 on 64-bit Windows, x86 on 32-bit).",false);
                         }
 
                     } else {
@@ -4727,7 +4693,6 @@ private:
                 if(MaintenanceUi()&&page_==Page::Components)return 0;
                 if(MaintenanceUi()&&page_==Page::License&&!accepted_)return 0;
                 if(page_==Page::FullCleanup){fullCleanupReviewed_=false;selection_.cleanupUserData=selection_.cleanupOpenGlassConfig=false;SetPage(Page::Components);return 0;}
-                if(page_==Page::SettingsRemovalRisk){SetPage(beforeSettingsRemovalRisk_);return 0;}
                 if(page_==Page::ModulesBusy && !DebugDemoLocksControls()) {
                     installEngine_.SignalHold(InstallEngine::HoldAction::ContinueRisk);
                     SetPage(Page::Installing);return 0;
@@ -4756,10 +4721,6 @@ private:
 #endif
                 if (transitioning_) return 0;
                 if(page_==Page::FullCleanup){fullCleanupReviewed_=true;SetPage(Page::Components);StartInstallation();return 0;}
-                if(page_==Page::SettingsRemovalRisk) {
-                    selection_.confirmedSettingsRemovalRisk|=pendingSettingsRemovalRisk_;
-                    SetPage(beforeSettingsRemovalRisk_);StartInstallation();return 0;
-                }
                 if (page_==Page::ConfirmCancel) {
 #ifdef _DEBUG
                     if (simulateInstall_) {

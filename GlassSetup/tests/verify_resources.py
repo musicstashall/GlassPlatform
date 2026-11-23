@@ -766,7 +766,7 @@ assert 'ProductStrings.rcinc' in read("res/GlassSetup.rc") and 'ProductStrings.r
 assert "platform64==os64" in read("src/GlassProductUiPolicy.h")
 assert "PlatformDescription" in setup and "PlatformDescription" in unins
 assert "ManualOpenGlass" in read("src/GlassProductPlan.h")
-assert "Средство для использования неподписанных визуальных стилей. Установка в System32." in rc
+assert "Позволяет Windows использовать сторонние темы оформления. Устанавливается в системную папку Windows." in rc
 
 # Fixed clean build order: Release x64 -> Release x86. First-pass Unins
 # must not consume a Native DLL that is produced only by the second pass.
