@@ -246,7 +246,9 @@ internal static class DesktopWallpaperImageCache
 
     private static async Task<ImageSource?> LoadMonitorSourceAsync(DispatcherQueue dispatcherQueue, string path)
     {
+        System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] wallpaper bitmap: read file begin");
         var bytes = await Task.Run(() => ReadWallpaperBytes(path));
+        System.Diagnostics.Debug.WriteLine($"[ReflectionConfigure] wallpaper bitmap: read file complete, bytes={bytes?.Length ?? 0}");
         return bytes is { Length: > 0 } ? await DecodeDisplayBitmapAsync(dispatcherQueue, bytes) : null;
     }
 
@@ -322,11 +324,14 @@ internal static class DesktopWallpaperImageCache
     {
         try
         {
+            System.Diagnostics.Debug.WriteLine($"[ReflectionConfigure] shared wallpaper decode: begin, bytes={bytes.Length}");
             var image = new BitmapImage { DecodePixelWidth = DisplayDecodeWidth };
             using var stream = new InMemoryRandomAccessStream();
             await stream.WriteAsync(bytes.AsBuffer());
             stream.Seek(0);
+            System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] shared wallpaper decode: SetSourceAsync begin");
             await image.SetSourceAsync(stream);
+            System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] shared wallpaper decode: SetSourceAsync complete");
             tcs.TrySetResult(image);
         }
         catch

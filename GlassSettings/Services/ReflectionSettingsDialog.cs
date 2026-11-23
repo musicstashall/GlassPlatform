@@ -134,18 +134,23 @@ public static class ReflectionSettingsDialog
             try
             {
                 if (closed || current != revision) return;
+                System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] reflection render: begin");
                 var png = await ReflectionTextureService.RenderConfiguredAsync(
                     source, preview.DesktopWidth, preview.DesktopHeight, Values());
                 if (closed || current != revision) return;
+                System.Diagnostics.Debug.WriteLine($"[ReflectionConfigure] reflection render: complete, bytes={png.Length}");
                 using var stream = new MemoryStream(png);
                 using var random = stream.AsRandomAccessStream();
                 var bitmap = new BitmapImage();
+                System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] reflection decode: SetSourceAsync begin");
                 await bitmap.SetSourceAsync(random);
+                System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] reflection decode: SetSourceAsync complete");
                 if (closed || current != revision) return;
                 preview.SetReflection(bitmap); error.Text = ""; error.Visibility = Visibility.Collapsed;
             }
             catch (Exception exception)
             {
+                System.Diagnostics.Debug.WriteLine($"[ReflectionConfigure] reflection render/decode failed: {exception}");
                 if (!closed && current == revision)
                 {
                     error.Text = exception.Message;
