@@ -192,12 +192,12 @@ assert '_wallpaperReady || !_reflectionReady' in desktop_preview
 assert '_desktopView.Opacity = 1' in desktop_preview and 'Opacity = 0' in desktop_preview
 print('PASS: shared checked swatches, standard flyout picker, pixel-scale texture vs desktop-scale SVG, loading readiness gate')
 
-assert 'GetMonitorInfo(monitor, ref info)' in dialog and 'MonitorFromWindow' in dialog
-assert 'Math.Clamp(available - 48, 480, 1120)' in dialog
+assert 'GetDialogWidth(preview.DesktopWidth, preview.DesktopHeight)' in dialog
+assert 'Math.Clamp(previewWidth + 64, 480, 1120)' in dialog
 assert 'bool inline = width >= 960' in dialog
 assert 'colorFlyout.Content = null' in dialog and 'colorFlyout.Content = picker' in dialog
 assert 'inlinePicker.Children.Add(picker)' in dialog and 'inlinePicker.Children.Clear()' in dialog
-assert 'presets.Orientation = inline ? Orientation.Vertical' in dialog
+assert 'presets.Orientation = vertical ? Orientation.Vertical' in dialog
 assert 'ReadUserAccentColor()' in dialog and 'accentPreset.Clicked +=' in dialog
 assert 'watcher.Changed += OnDesktopChanged' in dialog and 'watcher.Changed -= OnDesktopChanged' in dialog
 assert 'ReflectionColorHistory.Read()' in dialog and 'ReflectionColorHistory.Save' in dialog
@@ -215,3 +215,12 @@ assert 'customColor = color;' in dialog and 'recentValues.Insert(0, previous)' i
 assert 'ReflectionColorHistory.Save(recentValues, customColor)' in dialog
 assert 'ReadCustom()' in history and '"CustomColor"' in history
 print('PASS: fourth custom preset, previous custom enters history, all preset duplicates excluded, no imported Windows colors')
+
+assert 'Themes_Colors_RecentColors' not in dialog
+assert '280.0 * desktopWidth / Math.Max(1, desktopHeight)' in dialog
+assert 'MonitorFromWindow' not in dialog and 'XamlRoot?.Size.Width' not in dialog
+assert 'bool vertical = inline || width < 620' in dialog
+assert 'bool stacked = width < 480' in dialog
+assert 'Grid.SetRow(pickerRail, stacked ? 1 : 0)' in dialog
+assert 'int columns = vertical ? 1 : 3' in dialog
+print('PASS: preview-aspect dialog width, vertical narrow palettes/history, stacked fallback and no detached history heading')

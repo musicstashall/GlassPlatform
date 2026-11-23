@@ -7,7 +7,6 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
-using System.Runtime.InteropServices;
 
 public static class ReflectionSettingsDialog
 {
@@ -117,16 +116,13 @@ public static class ReflectionSettingsDialog
         var recentColors = new Grid { ColumnSpacing = 4, RowSpacing = 4 };
         for (int i = 0; i < 3; i++) recentColors.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         for (int i = 0; i < 3; i++) recentColors.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        pickerRail.Children.Add(new TextBlock
-        {
-            Text = GlassSettingsResources.Get("Themes_Colors_RecentColors"),
-            TextWrapping = TextWrapping.Wrap, Opacity = .7
-        });
         pickerRail.Children.Add(recentColors);
         var recentSwatches = new List<AccentRecentColorSwatch>();
         var recentValues = ReflectionColorHistory.Read().ToList();
         // Preview spans the dialog; all editing controls live below it.
-        var editors = new Grid { ColumnSpacing = 24 };
+        var editors = new Grid { ColumnSpacing = 16, RowSpacing = 16 };
+        editors.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        editors.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         editors.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         editors.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         Grid.SetColumn(pickerRail, 1);
@@ -149,13 +145,31 @@ public static class ReflectionSettingsDialog
             }
             inlinePicker.Visibility = inline ? Visibility.Visible : Visibility.Collapsed;
             setColor.Visibility = inline ? Visibility.Collapsed : Visibility.Visible;
-            presets.Orientation = inline ? Orientation.Vertical : Orientation.Horizontal;
-            pickerRail.Width = inline ? 170 : 224;
-            groups.Width = Math.Clamp(width - pickerRail.Width - 24, 260, 340);
+            bool stacked = width < 480;
+            bool vertical = inline || width < 620;
+            presets.Orientation = vertical ? Orientation.Vertical : Orientation.Horizontal;
+            pickerRail.Width = vertical ? 164 : 224;
+            Grid.SetColumn(pickerRail, stacked ? 0 : 1);
+            Grid.SetRow(pickerRail, stacked ? 1 : 0);
+            groups.Width = Math.Max(1, Math.Min(340, stacked ? width : width - pickerRail.Width - 16));
+            int columns = vertical ? 1 : 3;
+            recentColors.ColumnDefinitions.Clear();
+            recentColors.RowDefinitions.Clear();
+            for (int i = 0; i < columns; i++)
+                recentColors.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            for (int i = 0; i < 8; i++)
+                recentColors.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            for (int i = 0; i < recentColors.Children.Count; i++)
+            {
+                Grid.SetRow((FrameworkElement)recentColors.Children[i], i / columns);
+                Grid.SetColumn((FrameworkElement)recentColors.Children[i], i % columns);
+            }
         }
         editors.SizeChanged += (_, args) => UpdateEditorLayout(args.NewSize.Width);
         var layout = new StackPanel { Spacing = 12 };
         layout.Children.Add(body); layout.Children.Add(editors);
+        double editorWidth = 0;
+        editors.SizeChanged += (_, args) => editorWidth = args.NewSize.Width;
         int revision = 0;
         bool closed = false;
         ReflectionRenderSettings Values() => new(
@@ -253,6 +267,7 @@ public static class ReflectionSettingsDialog
                 Grid.SetRow(swatch, i / 3); Grid.SetColumn(swatch, i % 3);
                 recentColors.Children.Add(swatch); recentSwatches.Add(swatch);
             }
+            if (editorWidth > 0) UpdateEditorLayout(editorWidth);
             SyncColorSelection();
         }
         void RememberLocalColor()
@@ -320,14 +335,14 @@ public static class ReflectionSettingsDialog
         preview.SizeChanged += (_, _) => _ = RefreshAsync();
         System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] dialog: start reflection render");
         _ = RefreshAsync();
-        double dialogWidth = GetDialogWidth();
+        double dialogWidth = GetDialogWidth(preview.DesktopWidth, preview.DesktopHeight);
         try
         {
             System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] dialog: show hosted dialog");
             var result = await HostedDialogService.ShowAsync(new HostedDialogSpec
             {
                 Title = GlassSettingsResources.Get("Reflection_Configure"), Body = HostedDialogLayout.WrapBodyWithContentPadding(layout),
-                MinWidth = Math.Min(620, dialogWidth), MaxWidth = dialogWidth, MaxHeight = 820,
+                MinWidth = Math.Min(480, dialogWidth), MaxWidth = dialogWidth, MaxHeight = 820,
                 Footer = HostedConfirmationDialogService.CreateCancelConfirmFooter(GlassSettingsResources.Get("CmdApply"))
             });
             if (result == HostedDialogResult.Primary)
@@ -345,29 +360,13 @@ public static class ReflectionSettingsDialog
         }
     }
 
-    private static double GetDialogWidth()
+    private static double GetDialogWidth(int desktopWidth, int desktopHeight)
     {
-        double available = (App.ShellWindow?.Content as FrameworkElement)?.XamlRoot?.Size.Width ?? 900;
-        double dpi = (App.ShellWindow?.Content as FrameworkElement)?.XamlRoot?.RasterizationScale ?? 1;
-        if (App.ShellWindow is { } window)
-        {
-            var monitor = MonitorFromWindow(WinRT.Interop.WindowNative.GetWindowHandle(window), 2);
-            var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
-            if (GetMonitorInfo(monitor, ref info))
-                available = Math.Min(available, (info.Work.Right - info.Work.Left) / dpi);
-        }
-        return Math.Clamp(available - 48, 480, 1120);
+        // Match the preview's 280 DIP height and physical desktop aspect ratio.
+        // The hosted shell still clamps this preferred width to available space.
+        double previewWidth = 280.0 * desktopWidth / Math.Max(1, desktopHeight);
+        return Math.Clamp(previewWidth + 64, 480, 1120);
     }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct NativeRect { public int Left, Top, Right, Bottom; }
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MonitorInfo { public int Size; public NativeRect Monitor, Work; public uint Flags; }
-    [DllImport("user32.dll")]
-    private static extern IntPtr MonitorFromWindow(IntPtr window, uint flags);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
 
     private static NumberBox Number(string label, double minimum, double maximum, double value)
     {
