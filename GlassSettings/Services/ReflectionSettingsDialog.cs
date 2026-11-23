@@ -21,7 +21,7 @@ public static class ReflectionSettingsDialog
         System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] dialog: create picker");
         var picker = new GlassAlphaColorPicker { IsAlphaVisible = true };
         picker.SetColor(((uint)Math.Round(initial.OpacityPercent * 255.0 / 100) << 24) | initial.ColorRgb);
-        var presets = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var presets = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Left };
         var darkPreset = new AccentRecentColorSwatch { SwatchColor = Windows.UI.Color.FromArgb(255, 0, 0, 0) };
         var lightPreset = new AccentRecentColorSwatch { SwatchColor = Windows.UI.Color.FromArgb(255, 160, 160, 160) };
         GlassSettingsToolTipService.SetToolTip(darkPreset, GlassSettingsResources.Get("Reflection_PresetDark"));
@@ -31,18 +31,17 @@ public static class ReflectionSettingsDialog
         var accentPreset = new AccentRecentColorSwatch { SwatchColor = WindowsPersonalizationService.ReadUserAccentColor() };
         GlassSettingsToolTipService.SetToolTip(accentPreset, GlassSettingsResources.Get("Reflection_PresetAccent"));
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(accentPreset, GlassSettingsResources.Get("Reflection_PresetAccent"));
-        uint? customColor = ReflectionColorHistory.ReadCustom();
+        var savedColors = ReflectionColorHistory.Read();
+        uint? customColor = ReflectionColorHistory.ReadCustom()
+            ?? (savedColors.Count > 0 ? savedColors[0] : picker.GetColorArgb());
         bool IsBuiltInColor(uint color) => color == 0xFF000000u || color == 0xFFA0A0A0u
             || color == ThemeAccentColorHelper.ToArgbDword(accentPreset.SwatchColor);
         if (!IsBuiltInColor(picker.GetColorArgb())) customColor = picker.GetColorArgb();
-        if (customColor is { } saved && IsBuiltInColor(saved)) customColor = null;
         var customPreset = new AccentRecentColorSwatch();
         GlassSettingsToolTipService.SetToolTip(customPreset, GlassSettingsResources.Get("Reflection_PresetCustom"));
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(customPreset, GlassSettingsResources.Get("Reflection_PresetCustom"));
         presets.Children.Add(darkPreset); presets.Children.Add(lightPreset); presets.Children.Add(accentPreset); presets.Children.Add(customPreset);
-        var setColor = new Button { Content = GlassSettingsResources.Get("Reflection_SetColor") };
         var colorFlyout = new Flyout { Content = picker, Placement = FlyoutPlacementMode.Top };
-        setColor.Flyout = colorFlyout;
         var softness = Number("Reflection_SettingSoftness", 0, 20, initial.Softness);
         var noise = Number("Reflection_SettingNoise", 0, 100, initial.NoisePercent);
         var noiseDensity = Number("Reflection_SettingNoiseDensity", 0, 100, initial.NoiseDensity);
@@ -104,7 +103,7 @@ public static class ReflectionSettingsDialog
         body.Children.Add(error);
         var pickerRail = new StackPanel
         {
-            Spacing = 8, Width = 224, VerticalAlignment = VerticalAlignment.Top
+            Spacing = 8, Width = 216, VerticalAlignment = VerticalAlignment.Top
         };
         pickerRail.Children.Add(new TextBlock
         {
@@ -112,7 +111,6 @@ public static class ReflectionSettingsDialog
             Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"]
         });
         pickerRail.Children.Add(presets);
-        pickerRail.Children.Add(setColor);
         var recentColors = new Grid { ColumnSpacing = 4, RowSpacing = 4 };
         for (int i = 0; i < 3; i++) recentColors.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         for (int i = 0; i < 3; i++) recentColors.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -144,11 +142,10 @@ public static class ReflectionSettingsDialog
                 inlinePicker.Children.Clear(); colorFlyout.Content = picker;
             }
             inlinePicker.Visibility = inline ? Visibility.Visible : Visibility.Collapsed;
-            setColor.Visibility = inline ? Visibility.Collapsed : Visibility.Visible;
             bool stacked = width < 480;
             bool vertical = inline || width < 620;
             presets.Orientation = vertical ? Orientation.Vertical : Orientation.Horizontal;
-            pickerRail.Width = vertical ? 164 : 224;
+            pickerRail.Width = vertical ? 56 : 216;
             Grid.SetColumn(pickerRail, stacked ? 0 : 1);
             Grid.SetRow(pickerRail, stacked ? 1 : 0);
             groups.Width = Math.Max(1, Math.Min(340, stacked ? width : width - pickerRail.Width - 16));
@@ -239,9 +236,7 @@ public static class ReflectionSettingsDialog
             darkPreset.IsSelected = argb == 0xFF000000u;
             lightPreset.IsSelected = argb == 0xFFA0A0A0u;
             accentPreset.IsSelected = argb == ThemeAccentColorHelper.ToArgbDword(accentPreset.SwatchColor);
-            customPreset.IsEnabled = customColor.HasValue;
-            customPreset.Opacity = customColor.HasValue ? 1 : .35;
-            customPreset.IsSelected = customColor is { } custom && argb == custom;
+            customPreset.IsSelected = !IsBuiltInColor(argb) && customColor is { } custom && argb == custom;
             if (customColor is { } value)
                 customPreset.SwatchColor = Windows.UI.Color.FromArgb((byte)(value >> 24), (byte)(value >> 16), (byte)(value >> 8), (byte)value);
             foreach (var swatch in recentSwatches)
@@ -297,13 +292,19 @@ public static class ReflectionSettingsDialog
         darkPreset.Clicked += (_, _) => ApplyPreset(0xFF000000u);
         lightPreset.Clicked += (_, _) => ApplyPreset(0xFFA0A0A0u);
         accentPreset.Clicked += (_, _) => ApplyPreset(ThemeAccentColorHelper.ToArgbDword(accentPreset.SwatchColor));
-        customPreset.Clicked += (_, _) => { if (customColor is { } color) ApplyPreset(color); };
+        customPreset.Clicked += (_, _) =>
+        {
+            enabled.IsOn = true;
+            if (customColor is { } color) picker.SetColor(color);
+            SyncColorSelection(); _ = RefreshAsync();
+            if (inlinePicker.Children.Count != 0) picker.Focus(FocusState.Programmatic);
+            else colorFlyout.ShowAt(customPreset);
+        };
         var watcher = DesktopEnvironmentWatcher.Current;
         void OnDesktopChanged(object? sender, DesktopEnvironmentChangedEventArgs args)
         {
             if (closed || (!args.AccentChanged && !args.ThemeChanged)) return;
             accentPreset.SwatchColor = WindowsPersonalizationService.ReadUserAccentColor();
-            if (customColor is { } color && IsBuiltInColor(color)) customColor = null;
             PopulateRecentColors();
         }
         if (watcher is not null) watcher.Changed += OnDesktopChanged;
@@ -322,7 +323,6 @@ public static class ReflectionSettingsDialog
         {
             groups.IsEnabled = enabled.IsOn;
             picker.IsEnabled = enabled.IsOn;
-            setColor.IsEnabled = enabled.IsOn;
             foreach (var swatch in recentSwatches) swatch.IsEnabled = enabled.IsOn;
             SyncNoiseControls();
         }

@@ -186,8 +186,8 @@ assert 'ResizeSpectrum' not in picker_code
 assert 'new AccentRecentColorSwatch' in dialog
 assert 'darkPreset.IsSelected = argb == 0xFF000000u' in dialog
 assert 'lightPreset.IsSelected = argb == 0xFFA0A0A0u' in dialog
-assert 'new Flyout { Content = picker' in dialog and 'setColor.Flyout = colorFlyout' in dialog
-assert 'pickerRail.Children.Add(setColor)' in dialog
+assert 'new Flyout { Content = picker' in dialog and 'colorFlyout.ShowAt(customPreset)' in dialog
+assert 'setColor' not in dialog
 assert '_wallpaperReady || !_reflectionReady' in desktop_preview
 assert '_desktopView.Opacity = 1' in desktop_preview and 'Opacity = 0' in desktop_preview
 print('PASS: shared checked swatches, standard flyout picker, pixel-scale texture vs desktop-scale SVG, loading readiness gate')
@@ -224,3 +224,9 @@ assert 'bool stacked = width < 480' in dialog
 assert 'Grid.SetRow(pickerRail, stacked ? 1 : 0)' in dialog
 assert 'int columns = vertical ? 1 : 3' in dialog
 print('PASS: preview-aspect dialog width, vertical narrow palettes/history, stacked fallback and no detached history heading')
+
+assert 'customPreset.IsEnabled = customColor.HasValue' not in dialog
+assert 'HorizontalAlignment = HorizontalAlignment.Left' in dialog
+assert 'pickerRail.Width = vertical ? 56 : 216' in dialog
+assert 'savedColors.Count > 0 ? savedColors[0] : picker.GetColorArgb()' in dialog
+print('PASS: always-visible custom picker launcher, no redundant button, left-aligned compact swatch column')
