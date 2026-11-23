@@ -70,6 +70,30 @@ public sealed partial class GlassAlphaColorPicker : UserControl
         AddPointerHandlers(this);
     }
 
+    /// <summary>Compact spectrum for the reflection editor; other picker consumers are unchanged.</summary>
+    public void UseCompactLayout()
+    {
+        Picker.IsMoreButtonVisible = false;
+        Picker.IsColorChannelTextInputVisible = false;
+        Picker.IsHexInputVisible = true;
+        Picker.HorizontalAlignment = HorizontalAlignment.Stretch;
+        Picker.MinWidth = 0;
+        Picker.Loaded += (_, _) => ResizeSpectrum(Picker);
+    }
+
+    private static void ResizeSpectrum(DependencyObject root)
+    {
+        if (root is ColorSpectrum spectrum)
+        {
+            spectrum.MinHeight = 0;
+            spectrum.MaxHeight = 140;
+            spectrum.Height = 140;
+            return;
+        }
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+            ResizeSpectrum(VisualTreeHelper.GetChild(root, i));
+    }
+
     public void SetColor(uint argb)
     {
         _lock = true;
