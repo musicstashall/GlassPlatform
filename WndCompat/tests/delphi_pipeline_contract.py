@@ -3127,5 +3127,220 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertEqual(len(cases), 9)
         self.assertEqual(sorted(cases), sorted(re.findall(r"self\.run_case\('([a-z-]+)'\)", runner)))
 
+    def test_res_version_editor_is_registered_and_bracketed_by_the_paint_dispatcher_lifetime(self):
+        for project in ('GlassCore/GlassCore.vcxproj', 'GlassCore/GlassCore.vcxproj.filters'):
+            text = read(project)
+            self.assertEqual(text.count(r'src\Hooks\delphi\TResVersionEditorDraw.cpp'), 1)
+            self.assertEqual(text.count(r'Include\Hooks\delphi\TResVersionEditorDraw.h'), 1)
+            ET.fromstring(text.encode('utf-8'))
+        engine = read('GlassCore/src/Core/Engine.cpp')
+        self.assertIn('#include <Hooks/delphi/TResVersionEditorDraw.h>', engine)
+        self.assertEqual(engine.count('GlassCore::DelphiResVersionEditor::Startup();'), 1)
+        self.assertEqual(engine.count('GlassCore::DelphiResVersionEditor::Shutdown();'), 1)
+        # The text renderer is up before the first cell can be drawn; providers register before the dispatcher.
+        self.assertLess(engine.index('GlassCore::Text::Startup();'),
+                        engine.index('GlassCore::DelphiResVersionEditor::Startup();'))
+        self.assertLess(engine.index('GlassCore::DelphiResVersionEditor::Startup();'),
+                        engine.index('GlassCore::PaintDispatcher::Startup();'))
+        self.assertLess(engine.index('GlassCore::DelphiResVersionEditor::Shutdown();'),
+                        engine.index('GlassCore::PaintDispatcher::Shutdown();'))
+        header = read('GlassCore/Include/Hooks/delphi/TResVersionEditorDraw.h')
+        self.assertIn('namespace GlassCore::DelphiResVersionEditor', header)
+        self.assertEqual(re.findall(r'\bvoid (\w+)\(\) noexcept;', header), ['Startup', 'Shutdown'])
+        # A separate module: the accepted neighbours do not know about it and it does not reach into them.
+        # THexDump keeps its two export detours; this class takes imports of the EXE, so that no second detour
+        # is stacked on the same export.
+        for neighbour in ('GlassCore/src/Hooks/delphi/RestoratorImages.cpp', 'GlassCore/src/Hooks/delphi/TPanelDraw.cpp',
+                          'GlassCore/src/Hooks/delphi/BomeMemoDraw.cpp', 'GlassCore/src/Hooks/delphi/THexDumpDraw.cpp',
+                          'GlassCore/src/Hooks/delphi/TBackgroundHooks.cpp', 'GlassCore/src/Hooks/RootWindowHooks.cpp',
+                          'GlassCore/src/Subsystems/RenderText.cpp', 'GlassCore/src/Subsystems/PaintDispatcher.cpp'):
+            self.assertNotIn('ResVersionEditor', read(neighbour))
+        code = read('GlassCore/src/Hooks/delphi/TResVersionEditorDraw.cpp')
+        for foreign in ('RestoratorImages', 'DelphiPanel', 'BomeMemo', 'DelphiHexDump', 'OpaqueBitmapSource',
+                        'Detours::', 'DetourGetContainingModule', 'GetProcAddress', 'IATRegistry', 'GetRootOrg'):
+            self.assertNotIn(foreign, code)
+        # The opt-in draw probe knows the class, so that a log can show what the control really calls.
+        gdi = read('GlassCore/src/Hooks/RootGdiHooks.cpp')
+        self.assertEqual(gdi.count('TResVersionEditor'), 1)
+        begin = gdi.split('void BeginVclDrawProbe(HWND hwnd, bool paint)', 1)[1].split('void EndVclDrawProbe(', 1)[0]
+        self.assertIn('&& _wcsicmp(cls, L"TPage") != 0 && _wcsicmp(cls, L"TResVersionEditor") != 0))', begin)
+        self.assertIn('L"TResVersionEditor", L"tresversioneditor"}', read('WndCompat/tests/vcl_draw_probe_tests.cpp'))
+
+    def test_res_version_editor_gate_is_exact_class_exe_caller_and_instance(self):
+        code = read('GlassCore/src/Hooks/delphi/TResVersionEditorDraw.cpp')
+        self.assertIn('&& _wcsicmp(name, L"TResVersionEditor") == 0;', code)
+        self.assertEqual(code.count('L"TResVersionEditor"'), 1)
+        for forbidden in ('wcsstr', '_wcsnicmp', 'StrStrI', 'L"THexDump"', 'L"TStringGrid"', 'L"TBomeMemo"'):
+            self.assertNotIn(forbidden, code)
+        begin = code.split('void OnBegin(HWND hwnd, HMODULE caller) noexcept', 1)[1].split('void OnEnd(', 1)[0]
+        for marker in ('if (g_shutdown.load(std::memory_order_acquire) || !IsVersionEditor(hwnd)) return;',
+                       'const bool eligible = exe && caller == exe && GlassCore::Root::IsFullInjectionMode()',
+                       '&& GlassShared::GlassIsBackdropAllowedForHwnd(hwnd)',
+                       '&& reinterpret_cast<HMODULE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)) == exe;',
+                       'session.leased = eligible && Acquire(session.generation);',
+                       'try { g_sessions.push_back(session); }',
+                       'catch (...) { if (session.leased) Release(session.generation); return; }'):
+            self.assertIn(marker, begin)
+        # BWM enables its hook for the paint session of this class only (RestoratorPaintHandler::Paint).
+        self.assertEqual(code.count('GlassCore::PaintDispatcher::RegisterPaintProvider({OnBegin, OnEnd});'), 1)
+        for forbidden in ('RegisterGetDCProvider', 'RegisterCompatDCProvider', 'RegisterPostPaintProvider',
+                          'SetWindowSubclass', 'WM_ERASEBKGND'):
+            self.assertNotIn(forbidden, code)
+        session = code.split('HWND SessionWindow() noexcept', 1)[1].split('template <typename Native>', 1)[0]
+        for marker in ('if (g_inside || g_sessions.empty() || g_shutdown.load(std::memory_order_acquire)) return nullptr;',
+                       'const Session& top = g_sessions.back();',
+                       'return top.leased && top.generation == g_generation.load(std::memory_order_acquire) ? top.hwnd : nullptr;'):
+            self.assertIn(marker, session)
+        # The gate has no process identity in it and names no application.
+        for path in ('GlassCore/src/Hooks/delphi/TResVersionEditorDraw.cpp',
+                     'GlassCore/Include/Hooks/delphi/TResVersionEditorDraw.h',
+                     'WndCompat/tests/resversion_test_shim.h', 'WndCompat/tests/resversion_rendering_tests.cpp',
+                     'WndCompat/tests/resversion_rendering_test.py'):
+            self.assertNotIn('restorator', read(path).lower(), path)
+        for forbidden in ('GetModuleFileName', 'GetModuleBaseName', 'QueryFullProcessImageName',
+                          'GetProcessImageFileName', 'PathFindFileName', 'GetCommandLine', '.exe'):
+            self.assertNotIn(forbidden, code)
+        self.assertEqual(code.count('L"[GlassCore][DelphiResVersionEditor] '), 3)
+        self.assertEqual(code.count('[GlassCore]['), 3)
+
+    def test_res_version_editor_leases_two_private_exe_imports_together(self):
+        code = read('GlassCore/src/Hooks/delphi/TResVersionEditorDraw.cpp')
+        table = code.split('g_dep{{', 1)[1].split('}};', 1)[0]
+        self.assertEqual(re.findall(r'"([A-Za-z0-9]+)", reinterpret_cast<void\*>', table), ['ExtTextOutA', 'FillRect'])
+        for marker in ('"gdi32.dll"sv, "gdi32full.dll"sv, "ext-ms-win-gdi-desktop-l1-1-0.dll"sv',
+                       '"user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv',
+                       'reinterpret_cast<void*>(CellExtTextOutA)', 'reinterpret_cast<void*>(CellFillRect)'):
+            self.assertIn(marker, table)
+        self.assertIn('enum : size_t { TextSlot, FillSlot, Count };', code)
+        self.assertIn('HookDispatcher<Count, 3> g_dispatcher{g_dep, nullptr};', code)
+        acquire = code.split('bool Acquire(unsigned& generation) noexcept', 1)[1].split('void Release(', 1)[0]
+        # Both or neither, and a reference only when the dispatcher really took it.
+        for marker in ('auto lock = g_lock.lock_exclusive();',
+                       'if (g_shutdown.load(std::memory_order_acquire) || !exe) return false;',
+                       'g_dispatcher.moduleAddress = exe;', 'for (; taken < Count; ++taken)',
+                       'const int before = g_dispatcher.GetRef(taken);', 'g_dispatcher.EnableHook(taken, true);',
+                       'if (g_dispatcher.GetRef(taken) <= before) break;',
+                       'if (taken == Count) { generation = g_generation.load(std::memory_order_acquire); return true; }',
+                       'while (taken--) g_dispatcher.EnableHook(taken, false);'):
+            self.assertIn(marker, acquire)
+        self.assertLess(acquire.index('const int before = g_dispatcher.GetRef(taken);'),
+                        acquire.index('g_dispatcher.EnableHook(taken, true);'))
+        release = code.split('void Release(unsigned generation) noexcept', 1)[1].split('bool IsVersionEditor(', 1)[0]
+        for marker in ('auto lock = g_lock.lock_exclusive();',
+                       'if (generation != g_generation.load(std::memory_order_acquire)) return;',
+                       'for (size_t i = 0; i < Count; ++i) g_dispatcher.EnableHook(i, false);'):
+            self.assertIn(marker, release)
+        shutdown = code.split('void Shutdown() noexcept', 1)[1]
+        for marker in ('g_shutdown.store(true, std::memory_order_release);',
+                       'g_generation.fetch_add(1, std::memory_order_acq_rel);',
+                       'g_dispatcher.DisableAllHooks();', 'g_sessions.clear();'):
+            self.assertIn(marker, shutdown)
+        startup = code.split('void Startup() noexcept', 1)[1].split('void Shutdown() noexcept', 1)[0]
+        for marker in ('if (!g_shutdown.load(std::memory_order_acquire)) return;', 'g_dispatcher.CacheHookData();',
+                       'g_shutdown.store(false, std::memory_order_release);'):
+            self.assertIn(marker, startup)
+        # The hooks reach the original through the dispatcher under the shared lock, and by name without one.
+        for marker in ('original = g_dispatcher.GetOrg<TextSlot, decltype(&::ExtTextOutA)>(); }',
+                       'original = g_dispatcher.GetOrg<FillSlot, decltype(&::FillRect)>(); }',
+                       ': ::ExtTextOutA(dc, x, y, options, rect, text, count, dx);',
+                       'return original ? original(dc, rect, brush) : ::FillRect(dc, rect, brush);'):
+            self.assertIn(marker, code)
+        self.assertEqual(code.count('const HWND hwnd = SessionWindow();\n            if (!hwnd) return native();'), 2)
+        self.assertEqual(code.count('auto lock = g_lock.lock_shared();'), 2)
+
+    def test_res_version_editor_text_and_fill_need_the_windows_own_dc(self):
+        code = read('GlassCore/src/Hooks/delphi/TResVersionEditorDraw.cpp')
+        target = code.split('LPCWSTR RejectTarget(HWND hwnd, HDC dc) noexcept', 1)[1].split('bool Decode(', 1)[0]
+        # A window DC is served while an open session of its window holds it, whichever session opened last;
+        # a memory DC only when the dispatcher recorded it for this window. Never the ambient host.
+        for marker in ('if (!GlassCore::Root::IsFullInjectionMode() || !IsWindow(hwnd)',
+                       '|| !GlassShared::GlassIsBackdropAllowedForHwnd(hwnd)) return L"mode";',
+                       'const HWND owner = dc ? WindowFromDC(dc) : nullptr;',
+                       '? owner == hwnd && GlassCore::PaintDispatcher::IsPaintStackDcForHwnd(hwnd, dc)',
+                       ': GetObjectType(dc) == OBJ_MEMDC && GlassCore::PaintDispatcher::GetStackOwnerForDc(dc) == hwnd;',
+                       'if (!own) return L"dc";', 'if (GetMapMode(dc) != MM_TEXT) return L"map";'):
+            self.assertIn(marker, target)
+        for forbidden in ('IsTopWindowDrawingSession', 'GetPaintSessionHostHwnd', 'IsCurrentPaintDcForHwnd'):
+            self.assertNotIn(forbidden, code)
+        text = code.split('BOOL DrawCellText(HWND hwnd, HDC dc, int x, int y, UINT options, const RECT* rect,', 1)[1].split(
+            'int ClearOwnFill(', 1)[0]
+        gates = ('LPCWSTR reason = RejectTarget(hwnd, dc);',
+                 'if (!reason && (options & (ETO_GLYPH_INDEX | ETO_PDY))) reason = L"options";',
+                 'if (!reason && (options & (ETO_OPAQUE | ETO_CLIPPED)) && !rect) reason = L"rect";',
+                 'if (!reason && !count && !(options & ETO_OPAQUE)) reason = L"empty";',
+                 'if (!reason && count && GetTextAlign(dc) != (TA_LEFT | TA_TOP | TA_NOUPDATECP)) reason = L"align";',
+                 'if (!reason && count && !dx && GetTextCharacterExtra(dc) != 0) reason = L"spacing";',
+                 'if (!decoded) reason = L"conversion";',
+                 'else if (dx && wide.size() != count) reason = L"dx";',
+                 'try { filled = Background(dc, *rect, GetBkColor(dc)); }',
+                 'if (!filled) reason = L"background";',
+                 'hr = GlassCore::Text::ExtTextOutWithAlpha(dc, x, y, options & ~static_cast<UINT>(ETO_OPAQUE),',
+                 'rect, wide.data(), static_cast<UINT>(wide.size()), dx, &::ExtTextOutW);',
+                 'if (FAILED(hr)) reason = L"renderer";',
+                 'if (reason) { result = native(); error = GetLastError(); }',
+                 'SetLastError(error);')
+        positions = [text.index(marker) for marker in gates]
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(text.count('native()'), 1)
+        self.assertEqual(text.count('ExtTextOutWithAlpha('), 1)
+        # The caller's text is drawn where the caller put it: nothing is measured, moved or re-laid out here.
+        for forbidden in ('DrawTextWithAlpha', 'GetTextExtent', 'SetTextAlign', 'SetBkMode', 'SetBkColor',
+                          'SaveDC', 'SelectObject', 'x +', 'y +'):
+            self.assertNotIn(forbidden, text)
+        background = code.split('bool Background(HDC dc, const RECT& r, COLORREF color)', 1)[1].split(
+            'void ReportText(', 1)[0]
+        for marker in ('if (!rgb || SystemBackground(rgb))', 'return PatBlt(dc, r.left, r.top, width, height, BLACKNESS) != FALSE;',
+                       'Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(rgb, 255)',
+                       'return brush && FillRect(dc, &r, brush.get()) != 0;'):
+            self.assertIn(marker, background)
+        fill = code.split('int ClearOwnFill(HWND hwnd, HDC dc, const RECT* rect, HBRUSH brush, DWORD entryError, const Native& native)', 1)[1].split(
+            'BOOL WINAPI CellExtTextOutA(HDC dc,', 1)[0]
+        # Only a solid brush of the default window or button-face colour; black, any other colour, patterns and
+        # brushes without metadata stay the application's. This is the fill of one call, not a colour key.
+        fill_gates = ('LPCWSTR reason = RejectTarget(hwnd, dc);',
+                      'if (!reason && (!rect || !Extent(*rect, width, height))) reason = L"rect";',
+                      'if (brush && GetObjectW(brush, sizeof(lb), &lb) == sizeof(lb) && lb.lbStyle == BS_SOLID) color = lb.lbColor;',
+                      'else reason = L"brush";',
+                      'if (!reason && !SystemBackground(color)) reason = L"colour";',
+                      'if (!reason && !PatBlt(dc, rect->left, rect->top, width, height, BLACKNESS)) reason = L"clear";',
+                      'if (reason) { result = native(); error = GetLastError(); }', 'SetLastError(error);')
+        positions = [fill.index(marker) for marker in fill_gates]
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(fill.count('native()'), 1)
+        self.assertIn('return rgb == (GetSysColor(COLOR_WINDOW) & 0xFFFFFFu) || rgb == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFFu);', code)
+        # Nothing is remapped for the process or kept after the call: no colour, brush or pixel policy.
+        for forbidden in ('GetPixel', 'SetPixel', 'GetDIBits', 'CreateBrushIndirect', 'CreateSolidBrush(',
+                          'GetSysColorBrush', 'GetStockObject', 'COLOR_HIGHLIGHT', 'SetPropW', 'GetPropW'):
+            self.assertNotIn(forbidden, code)
+
+    def test_res_version_editor_suite_compiles_complete_production_over_recording_doubles(self):
+        test = read('WndCompat/tests/resversion_rendering_tests.cpp')
+        # The production unit is included as it is: nothing is renamed or redefined around it.
+        self.assertTrue(test.startswith('#include "resversion_test_shim.h"\n'
+                                        '#include "../../GlassCore/src/Hooks/delphi/TResVersionEditorDraw.cpp"\n\n'
+                                        '#define CHECK(expr)'))
+        self.assertEqual(test.count('#include "'), 2)
+        shim = read('WndCompat/tests/resversion_test_shim.h')
+        self.assertIn('#include "coolbar_test_shim.h"', shim)
+        self.assertEqual(shim.count('#include "'), 1)
+        # The EXE reaches the hooks through its import slots; the true functions record what got through.
+        for marker in ('const auto it = exe.hooks.find("ExtTextOutA");', 'const auto it = exe.hooks.find("FillRect");',
+                       'assert(dc && w > 0 && h > 0 && rop == BLACKNESS);',
+                       'e.kind = brush->lbHatch ? ResTest::Kind::Fill : ResTest::Kind::DirectFill;'):
+            self.assertIn(marker, shim)
+        for text in (test, shim):
+            for forbidden in ('Rv::Background', 'Rv::Decode', 'Rv::RejectTarget', 'Rv::SystemBackground',
+                              'Rv::DrawCellText', 'Rv::ClearOwnFill'):
+                self.assertNotIn(forbidden, text)
+        runner = read('WndCompat/tests/resversion_rendering_test.py')
+        for marker in ("'Release'", "'Debug'", "'-D_DEBUG'", "'-DGLASS_DELPHI_DRAW_PROBE'", "'-Werror'",
+                       "'-std=c++20'", "'Subsystems/RenderText.h'", "'Core/Intercept/HookDispatcher.h'"):
+            self.assertIn(marker, runner)
+        for forbidden in ('read_text', 'source.split(', 'code.split(', '-Wno-error'):
+            self.assertNotIn(forbidden, runner)
+        cases = re.findall(r'name == "([a-z-]+)"', test)
+        self.assertEqual(len(cases), 8)
+        self.assertEqual(sorted(cases), sorted(re.findall(r"self\.run_case\('([a-z-]+)'\)", runner)))
+
 if __name__ == "__main__":
     unittest.main()

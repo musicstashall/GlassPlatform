@@ -7393,3 +7393,132 @@ cleared=`, 12 в секунду.
   приходит до `BeginPaint`. Строка `erase-again … cleared=1` сразу после
   разворачивания это покажет; её отсутствие при белом хвосте — что причина
   другая.
+
+## Тест 126: TResVersionEditor — ANSI-текст с альфой и очистка системных заливок
+
+Задача 2 из сообщения пользователя (третий коммит): **«TResVersionEditor — не
+получает отрисовку. Смотри реализацию в доноре, дострой недостающие
+обработчики.»** Журнала и скриншота нет; какими вызовами контрол рисует, не
+наблюдалось.
+
+### Что делает донор
+
+| Место | Содержание |
+|-------|------------|
+| `RestoratorWinHandler.cpp`, 17304–17314 | `TResVersionEditor` получает `SetDataAttach` — его BeginPaint виден обработчику |
+| `RestoratorPaintHandler.cpp`, 17083–17086 | window, caller EXE: **только `ExtTextOutAttach`**; ни `erase`, ни `DrawTextAttach` |
+| `RestoratorWinHooks.cpp::MyExtTextOutA`, 18060–18110 | `ETO_OPAQUE`: цвет фона 0 / `COLOR_WINDOW` / `COLOR_BTNFACE` не заливается, иной — кистью с альфой 255; текст — `DrawTextWithAlpha` в `lprect` с флагами `GetTextAlign(hdc)` |
+| `17772`, `18382–18396` | `GetSysColor` → 0 для `COLOR_WINDOW` / `COLOR_BTNFACE` на всё время процесса |
+
+Второй пункт таблицы — обработчик, третий и четвёртый — то, на чём он держится.
+VCL пишет текст через `ExtTextOutA` и заливает через `FillRect` (Delphi 7,
+`Graphics.pas`: `TCanvas.TextRect` 2327–2341, `TextOut` 2316–2325, `FillRect`
+2168–2174). Кисть VCL создаётся один раз и общая для всех (`TBrush.GetHandle`,
+1910–1950: `lbColor := ColorToRGB(Brush.Color)`), а фон DC ставится при выборе
+кисти (`TCanvas.CreateBrush`, 2515–2531). У донора оба цвета чёрные с запуска
+процесса — поэтому ему хватает одного текстового перехвата.
+
+### Что было в Glass
+
+Класс неизвестен классификатору: окно получает `Root_Attach`, `WM_ERASEBKGND`
+чернится в `RootSubclass`. В paint-сессии действуют общие слоты EXE
+(`RootWindowHooks.cpp`, 634–650); из них `SetBkColor` переводит `COLOR_WINDOW`
+в 0. Для контрола, который рисует как таблица VCL, это значит: фон текстовых
+ячеек чёрный, текст GDI без альфы не виден, а заливки кэшированной белой
+кистью остаются непрозрачными.
+
+### Модуль TResVersionEditorDraw
+
+Добавлены `GlassCore/src/Hooks/delphi/TResVersionEditorDraw.cpp` и
+`Include/Hooks/delphi/TResVersionEditorDraw.h` (`Startup()` / `Shutdown()`,
+namespace `GlassCore::DelphiResVersionEditor`). В `Engine.cpp` модуль стартует
+после `DelphiHexDump`, до `PaintDispatcher::Startup()`.
+
+- **Только paint-provider**, как у донора. Аренда выдаётся, если класс окна
+  точно `TResVersionEditor`, caller BeginPaint — EXE, режим Full, backdrop
+  разрешён и `GWLP_HINSTANCE` окна — тот же EXE. Имя процесса не читается.
+- **Аренда — два импорта EXE вместе:** `gdi32!ExtTextOutA` и
+  `user32!FillRect`, через `HookDispatcher` (цепочка IATRegistry). Оба или ни
+  одного: очищенный фон под невидимым текстом хуже родного вида.
+- **Назначение — DC этого окна.** Оконный DC — пока его держит открытая
+  сессия этого окна, какая бы сессия потока ни открылась последней (вывод
+  §123); memory-DC — только записанный диспетчером за этим окном. `MM_TEXT`.
+- **ExtTextOutA** — правило THexDump (§121): строка декодируется кодовой
+  страницей шрифта; при `ETO_OPAQUE` фон прямоугольника — `BLACKNESS` для 0 /
+  `COLOR_WINDOW` / `COLOR_BTNFACE`, иначе кисть с альфой 255; глифы — общий
+  `ExtTextOutWithAlpha` с origin, прямоугольником, опциями и `lpDx` вызова.
+  Приближения донора (`lprect` как место текста, `GetTextAlign` как флаги
+  DrawText) не воспроизводятся.
+- **FillRect** — замена постоянного `GetSysColor` донора для этого окна:
+  сплошная кисть цвета `COLOR_WINDOW` / `COLOR_BTNFACE` → `BLACKNESS`. Чёрная и
+  любая другая кисть, pattern, кисть без описания — родной вызов. Перехват
+  цвета на время сессии кэшированную кисть VCL не изменил бы, а новую сделал
+  бы чёрной для всего процесса; поэтому отвечается сама заливка.
+- **Остаётся родным** (причина — в журнале): `mode`, `dc`, `map`; для текста
+  `options`, `rect`, `empty`, `align`, `spacing`, `conversion`, `dx`,
+  `background`, `renderer`; для заливки `rect`, `brush`, `colour`, `clear`.
+
+`THexDumpDraw` не изменён. Его перехват — Detours на экспорт `ExtTextOutA`;
+второй Detours на тот же экспорт из другого модуля нельзя безопасно снимать в
+произвольном порядке, поэтому новый модуль берёт импорт EXE.
+
+Диагностика, префикс `[GlassCore][DelphiResVersionEditor]`, 16 строк в секунду
+на канал, без текста ячеек: `Begin hwnd= caller= eligible= leased= depth=`;
+`text … pos= options= rect= ansiCount= … drawn= reason= result=`; `fill … rect=
+rgb= cleared= reason=`.
+
+**Зонд.** Точный класс добавлен в opt-in `GLASS_DELPHI_DRAW_PROBE`
+(`BeginVclDrawProbe`): строки `[GlassCore][DelphiDrawProbe] … class=
+TResVersionEditor` покажут, что контрол вызывает на самом деле.
+
+### Проверки
+
+- Новый harness `resversion_rendering_test.py`: **8 сценариев ×
+  Release / Debug PASS**, C++20 / `-Werror`. Компилируется полный production
+  `TResVersionEditorDraw.cpp`; shim записывает по порядку всё, что доходит до
+  поверхности. Покрыты: ячейка таблицы (заливка, `TextRect`, выделение,
+  `TextOut`, пустая ячейка, `lpDx`); правило заливок; отказы текста; кодовые
+  страницы; класс, caller, instance, режим, вложенные сессии; чужой и
+  неотслеженный DC, memory-DC, сессия другого окна сверху, другой поток,
+  reentry; аренда, Shutdown и рестарт; диагностика.
+- **ASan + UBSan + leak detection: 8×2 PASS.**
+- **65/65 мутантов отвергнуты runtime**: полный прогон,
+  затем повтор шести, затронутых последней правкой правила DC. По ходу шесть
+  выживали (правило DC — трижды, межсимвольный интервал с `lpDx`, барьер
+  неарендованной сессии, лишняя проверка оригинала): тесты уточнены, правило
+  DC переписано, две избыточные проверки убраны из production.
+- `vcl_draw_probe_test.py`: 19 PASS с новым классом в списке.
+
+### Пределы результата
+
+**MSVC-сборки и проверки в Windows нет.** Главная неопределённость — сам
+контрол:
+
+- Что он рисует именно `ExtTextOutA` и `FillRect` из EXE в DC из `BeginPaint`,
+  взято из обработчика донора и из устройства VCL, а не из наблюдения.
+  `PatBlt`, `Rectangle`, линии сетки, `DrawEdge` и `DrawTextA` не
+  перехватываются и останутся родными.
+- Выделение, залитое только `FillRect`, остаётся с альфой 0, как у донора;
+  непрозрачным его делает текстовый вызов с `ETO_OPAQUE` поверх.
+- Текст без `ETO_OPAQUE` при режиме OPAQUE рисуется без подложки ячеек;
+  выравнивание не по умолчанию остаётся родным, то есть невидимым.
+- DoubleBuffered-контрол рисует в буфер, созданный до `BeginPaint`:
+  диспетчер его не видит, вызовы останутся родными (`reason=dc`).
+- Restorator — PE32: нужен **Win32/x86 комплект DLL**.
+
+Если вид не изменился: строки `text` / `fill` с `drawn=0` / `cleared=0`
+назовут причину; при `leased=1` без таких строк контрол рисует другими
+вызовами — тогда нужен журнал со сборкой `GLASS_DELPHI_DRAW_PROBE`.
+
+### Общая сверка §124–§126
+
+**148 source contracts PASS**: 8 новых (один для §124,
+два для §125, пять для §126), 14 намеренных нарушений ими отвергнуты; прежние
+140 сохранены побайтово. Перезапущены suites, читающие изменённые файлы: Bome
+memo 16, button groups 9, panels 54 — PASS; остальные не перезапускались.
+
+Три задачи опубликованы тремя коммитами поверх **ff7bb50**. Вместе: добавлено
+**8 файлов**, изменено **10**; остальные **1799** из
+1809 tracked-файлов побайтово неизменны. Все предыдущие разделы
+документа сохранены побайтово. UTF-8 без BOM, Python AST, XML проектов и
+`git diff --check` проверены; разовые scripts удалены.

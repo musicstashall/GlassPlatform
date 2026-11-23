@@ -98,11 +98,13 @@ namespace {
     void Classes() {
         Context c;
         for (LPCWSTR name : {L"TPage", L"tpage", L"TPAGE", L"TBitBtn", L"TToggleSwitch", L"TListBox",
-                            L"TCheckListBox", L"TColorListBox", L"TNumberBox", L"THotKey", L"TRichEdit"}) {
+                            L"TCheckListBox", L"TColorListBox", L"TNumberBox", L"THotKey", L"TRichEdit",
+                            L"TResVersionEditor", L"tresversioneditor"}) {
             c.page.cls = name; c.Start(); CHECK(g_vclProbeStack.size() == 1);
             CHECK(HasLog(L"channel=paint")); EndVclDrawProbe(&c.page, true); c.Refs(0); c.ResetTrace();
         }
-        for (LPCWSTR name : {L"TPageControl", L"TPage2", L"MyTPage", L"TPanel", L"TNotebook", L"Button", L""}) {
+        for (LPCWSTR name : {L"TPageControl", L"TPage2", L"MyTPage", L"TPanel", L"TNotebook", L"Button", L"",
+                            L"TResVersionEditor2", L"TResVersion", L"THexDump"}) {
             c.page.cls = name; c.Start(); CHECK(g_vclProbeStack.empty() && Mock::logs.empty());
         }
         c.page.cls = L"TPage"; Mock::failClass = true; c.Start(); CHECK(g_vclProbeStack.empty());

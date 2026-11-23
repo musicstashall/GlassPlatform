@@ -696,7 +696,7 @@ namespace GlassCore::Root
                     && _wcsicmp(cls, L"TListBox") != 0 && _wcsicmp(cls, L"TCheckListBox") != 0
                     && _wcsicmp(cls, L"TColorListBox") != 0 && _wcsicmp(cls, L"TNumberBox") != 0
                     && _wcsicmp(cls, L"THotKey") != 0 && _wcsicmp(cls, L"TRichEdit") != 0
-                    && _wcsicmp(cls, L"TPage") != 0))
+                    && _wcsicmp(cls, L"TPage") != 0 && _wcsicmp(cls, L"TResVersionEditor") != 0))
                 return;
             HMODULE ep = GlassCore::ModuleHandler::g_entryPointModule;
             if (!ep) return;
