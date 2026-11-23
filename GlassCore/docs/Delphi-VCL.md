@@ -6721,3 +6721,190 @@ production `RestoratorImages.cpp`, shim, tests, runner, contracts, этот
 остальные **1791** из 1799 tracked-файлов побайтово неизменны. Все предыдущие
 разделы документа сохранены побайтово. UTF-8 без BOM, Python AST,
 `git diff --check` и hash BWM.txt проверены; разовые scripts удалены.
+
+## Тест 121: Restorator — текст THexDump через TabbedTextOutA и ExtTextOutA
+
+После публикации **64ea3c2** (§120) пользователь принял маску («Отлично») и
+поставил следующую задачу: **«Характерно только для Restorator. Элемент
+THexDump (таблица hex) не получает отрисовку текста в Glass. Наиболее
+вероятно, следует применить перехват того же DrawTextA, смотри реализацию в
+BWM. Если нужно, запроси журналы.»**
+
+### Что делает донор
+
+`BWM.txt` (SHA-256 тот же, что в §119):
+
+| Место | Содержание |
+|-------|------------|
+| `RestoratorPaintHandler.cpp:17071–17075`, window, caller EXE, exact THexDump | `TabbedTextOutAttach` + `ExtTextOutAttach`; ни `erase`, ни `DrawTextAttach` |
+| `17173–17186`, ветка GetDC | только TBMGutter / TBomeMemo: для THexDump хуки живут в paint-сессии |
+| `RestoratorWinHooks.cpp:17754`, `17761`, `17814–17850` | `GetProcAddress` user32 `TabbedTextOutA` и gdi32 `ExtTextOutA`; ref-counted Detours |
+| `18060–18110`, `MyExtTextOutA` | фон ETO_OPAQUE; для THexDump текст через `DrawTextWithAlpha` в `RECT{x + 80, y, lprect->right, lprect->bottom}` с флагами `GetTextAlign(hdc)` |
+| `18111–18142`, `MyTabbedTextOutA` | caller EXE и `nTabPositions != 0`: `DrawTextWithAlpha` от (x, y) с `DT_EXPANDTABS \| DT_TABSTOP \| 0x0100`, результат `MAKELONG(343, result)` |
+
+Предположение о `DrawTextA` донором **не подтверждается**: для THexDump он
+ставит другую пару API. Она совпадает с тем, как строку пишет `THexDump` из
+демо-модуля Borland `HexDump.pas` (Resource Explorer): адрес —
+`ExtTextOut(ETO_OPAQUE or ETO_CLIPPED)` на 9 символов, байты — `TabbedTextOut`
+с одним tab-расстоянием в три ячейки от начала текста, символы — снова
+`ExtTextOut(ETO_OPAQUE or ETO_CLIPPED)`, строки за концом данных —
+`ExtTextOut` с пустой строкой. Это сведения по памяти об исходнике демо, а не
+из бинарника Restorator: его копия контрола может отличаться. Журналов
+отрисовки THexDump нет: в 58 прежних журналах (§119) не встречаются ни
+`THexDump`, ни `TabbedTextOut`, ни `ExtTextOutA` (проверены ASCII и UTF-16).
+Новые не запрашивались: решение не зависит от конкретных аргументов вызова
+(см. ниже), а строка диагностики модуля покажет их при проверке.
+
+### Модуль RestoratorHexDump: маршрут и изоляция
+
+Добавлены `GlassCore/src/Hooks/delphi/RestoratorHexDump.cpp` и
+`Include/Hooks/delphi/RestoratorHexDump.h` (`Startup()` / `Shutdown()`), по
+образцу принятого `RestoratorImages` (§119). В `Engine.cpp` модуль стартует
+сразу после него, до `PaintDispatcher::Startup()`. `RestoratorImages`,
+`TPanelDraw`, `BomeMemoDraw`, root-хуки, `PaintDispatcher` и `RenderText` не
+изменены и о модуле не знают.
+
+- **Только paint-provider.** Записывается каждый BeginPaint окна с точным
+  классом `THexDump` (имя целиком, `_wcsicmp`). Аренда выдаётся, если caller
+  BeginPaint — entry-point EXE, режим Full, backdrop разрешён и
+  `GWLP_HINSTANCE` окна — тот же EXE. Неарендованная верхняя сессия этого
+  класса закрывает путь текста для внешней.
+- **Аренда — два export-Detours одной транзакцией:** `gdi32.dll!ExtTextOutA` и
+  `user32.dll!TabbedTextOutA`, разрешённые `GetProcAddress` в Startup. Счётчик,
+  generation, поведение при сбоях Attach / Detach / Commit и при Shutdown — те
+  же, что в §119. HookDispatcher и IAT-слоты EXE не затрагиваются.
+- **Detour действует** только для арендованной верхней сессии этого потока,
+  при return address в EXE и вне собственного reentry. Иначе — ровно один
+  вызов оригинала с исходными аргументами; entry- и exit-LastError сохраняются.
+- **Назначение — DC этого окна:** оконный DC с `WindowFromDC(dc) == hwnd`,
+  либо memory-DC, который диспетчер записал за этим окном (правило
+  `BomeMemoDraw`); в обоих случаях DC числится в стеке PaintDispatcher за этим
+  HWND и над сессией нет другой оконной. Только `MM_TEXT`. Full, backdrop и
+  `IsWindow` проверяются в момент вызова.
+
+### Что рисуется вместо нативного вызова
+
+Глифы рисует существующий `GlassCore::Text::ExtTextOutWithAlpha` (тот же
+renderer, что у Delphi TListBox и TCoolBar), цвет и шрифт — из DC приложения.
+Модуль не воспроизводит донорскую арифметику, а сохраняет **нативный смысл
+вызова**: тот же origin, тот же прямоугольник отсечения, те же tab-стопы.
+Поэтому ему не нужны ни `x + 80`, ни DrawText внутри `lprect`, ни tab в одну
+среднюю букву, ни константа 343: это приближения донора к нативной раскладке.
+
+**ExtTextOutA.** ANSI-строка декодируется кодовой страницей charset выбранного
+шрифта (как в §116–118). При `ETO_OPAQUE` сначала фон прямоугольника, затем
+`ExtTextOutWithAlpha(dc, x, y, options без ETO_OPAQUE, rect, …, dx)`:
+`ETO_CLIPPED` и остальные опции, указатель на `rect` и на `dx` передаются как
+есть. Пустая строка с `ETO_OPAQUE` — только фон.
+
+**TabbedTextOutA.** Принимается один вид раскладки — одно положительное
+tab-расстояние `step`, origin не правее текста, выравнивание по умолчанию.
+Строка режется по табам на отрезки; отрезок начинается там, где кончился
+предыдущий, а после n табов — на n-м стопе дальше этой точки:
+
+```
+start = origin + ((cursor − origin) div step + n) · step
+```
+
+Ширину отрезка и позиции букв в нём даёт `GetTextExtentExPointW` на DC
+приложения. Отрезки склеиваются в **одну** строку глифов без табов с явными
+advance: последней букве отрезка добавляется расстояние до следующего. Один
+вызов renderer'а с `lpDx` ставит каждую букву туда же, куда её поставил бы
+user32, вместо вызова на каждый байт. Возвращается `MAKELONG(ширина, tmHeight)`.
+В режиме OPAQUE фон рисуется под всей протяжённостью строки, как это делает
+user32 под отрезками и промежутками.
+
+**Фон** — правило ANSI-хуков донора и принятых соседей: чёрный, `COLOR_WINDOW`
+и `COLOR_BTNFACE` — собственный фон окна, на стекле он прозрачен
+(`PatBlt BLACKNESS`); любой другой цвет — выделение, заливается кистью с
+альфой 255. В `MyExtTextOutA` донора очистка системного цвета закомментирована;
+здесь она выполняется, иначе строка, перерисованная на месте, легла бы поверх
+своих прежних глифов. Это фон одного текстового вызова, не colour-key.
+
+**Остаётся нативным** (причина — в строке диагностики): `mode`, `dc`, `map`;
+для ExtTextOutA — `options` (ETO_GLYPH_INDEX, ETO_PDY), `rect` (ETO_OPAQUE без
+прямоугольника), `empty`, `align` (выравнивание не по умолчанию либо
+TA_UPDATECP), `spacing` (ненулевой `SetTextCharacterExtra` без `lpDx`), `dx`
+(байтов больше, чем символов); для TabbedTextOutA — `tabs` (нет табов в
+параметрах, несколько позиций, неположительное расстояние, текст левее
+origin), `align`, `font` (подчёркнутый или зачёркнутый шрифт, нет метрик),
+`layout`; для обоих — `conversion`, `background`, `renderer`. Выравнивание и
+межсимвольный интервал проверяются потому, что renderer рисует в собственном
+buffer-DC, который получает шрифт и цвет, но не эти атрибуты.
+
+### Диагностика (metadata-only)
+
+Префикс `[GlassCore][RestoratorHexDump]`; текст строк — содержимое файла — не
+пишется никогда. `resolve gdi32= ExtTextOutA= user32= TabbedTextOutA=` — один
+раз на Startup; остальное ограничено 16 строками в секунду на канал и поток:
+
+- `Begin hwnd= caller= eligible= leased= depth=`;
+- `detour api=ExtTextOutA+TabbedTextOutA enable= refs= attached= hr=`;
+- `text api= hwnd= dc= dcWnd= dcType= pos= options= rect= ansiCount= wideCount=
+  cp= align= bkMode= bk= color= tabs= step= origin= drawn= reason= result=` —
+  каждый вызов из EXE в арендованной сессии.
+
+Если при `leased=1` строк `text` нет, текст идёт не через эти два API либо не
+из EXE. Если есть, но с `drawn=0`, поле `reason` называет причину.
+
+### Проверки
+
+- Новый harness `restorator_hexdump_rendering_test.py`: **11 сценариев ×
+  Release / Debug PASS**, C++20/`-Werror`. Компилируется полный production
+  `RestoratorHexDump.cpp` без переименований поверх doubles; shim опирается
+  только на базовые типы и записывает всё, что доходит до поверхности, по
+  порядку: фон, запрос к renderer'у (позиция, опции, rect, строка, advance,
+  оригинал), нативные вызовы. Покрыты: строка HexDump.pas целиком; 14 раскладок
+  табов с advance, заданными самим тестом, и отдельно ширина отрезка, размер
+  ячейки, межсимвольный интервал, DBCS и границы int; все отказы раскладки;
+  фон по классам цвета и его сбои; кодовые страницы; класс, caller, instance,
+  режим, backdrop, вложенные сессии; чужой, неотслеженный и memory-DC, другой
+  поток, reentry; опции и выравнивание; аренда, транзакции, generation;
+  native-once и LastError; состав и лимит диагностики.
+- **ASan+UBSan+leak detection: 11×2 PASS**, флаги те же, что в §118–120.
+- **139 source contracts PASS**: 6 новых; прежние 133 сохранены побайтово.
+- **60/60 компилируемых мутантов отвергнуты runtime** (допуск DC 7, фон 5,
+  раскладка 7, ExtTextOutA 14, TabbedTextOutA 13, сессия и аренда 11, декодер
+  2, лимит диагностики 1). Три из них сначала выжили и три не компилировались;
+  после уточнения doubles и мутаций отвергнуты все.
+- `restorator_images_rendering_test.py`: 12×2 PASS — в принятом модуле
+  изменён только устаревший комментарий заголовка (он описывал блочную
+  политику §119). Остальные соседние suites не перезапускались: их исходники и
+  общие helper'ы не менялись.
+
+### Пределы результата и проверка в Windows
+
+**MSVC-сборки и визуальной проверки нет.** Doubles не исполняют GDI, uxtheme,
+настоящий renderer и раскладку user32. Не подтверждено и видно по строке
+`text`:
+
+- что THexDump Restorator пишет строки именно этими вызовами из EXE в оконный
+  DC из BeginPaint (`dcWnd`, `dcType`, `reason`) и именно с одним
+  tab-расстоянием (`tabs`, `step`, `origin`);
+- что правило «следующий стоп строго дальше текущей позиции» совпадает с
+  user32 попиксельно: оно взято из описания API, в Windows не сверялось;
+- что renderer с `lpDx` ставит глифы так же, как без него.
+
+Ограничения решения:
+
+- Цвет текста — цвет DC приложения. Тёмный текст на тёмной подложке останется
+  малозаметным; это свойство общего renderer'а, как у соседних контролов.
+- Если цвет контрола задан явно и не равен `COLOR_WINDOW` / `COLOR_BTNFACE`,
+  фон строк станет непрозрачным этого цвета.
+- В ExtTextOutA при режиме OPAQUE без `ETO_OPAQUE` фон ячеек текста не
+  рисуется; нестандартные раскладки табов остаются нативными, то есть
+  невидимыми, как до правки.
+- На одну перерисовку приходится по три вызова renderer'а на строку таблицы;
+  скорость прокрутки не измерялась.
+- Export-detour ставится и снимается на каждую арендованную paint-сессию без
+  приостановки других потоков — как у донора и в §119; `ExtTextOutA` —
+  горячий экспорт.
+- Restorator — PE32: нужен **Win32/x86 комплект DLL**.
+
+Финальная сверка с **64ea3c2**: добавлено **5 файлов** (production `.cpp` /
+`.h`, shim, tests, runner), изменено **6 существовавших** — `Engine.cpp`,
+`GlassCore.vcxproj`, `.filters`, contracts, этот документ и комментарий в
+`RestoratorImages.h`; остальные **1793** из 1799 tracked-файлов побайтово
+неизменны. Все предыдущие разделы документа сохранены побайтово. UTF-8 без
+BOM, Python AST, XML проектов, `git diff --check` и hash BWM.txt проверены;
+разовые scripts удалены.

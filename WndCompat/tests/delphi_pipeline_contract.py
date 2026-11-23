@@ -2703,5 +2703,241 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertEqual(len(cases), 12)
         self.assertEqual(sorted(cases), sorted(re.findall(r"self\.run_case\('([a-z-]+)'\)", runner)))
 
+    def test_restorator_hex_dump_is_registered_and_bracketed_by_the_paint_dispatcher_lifetime(self):
+        for project in ('GlassCore/GlassCore.vcxproj', 'GlassCore/GlassCore.vcxproj.filters'):
+            text = read(project)
+            self.assertEqual(text.count(r'src\Hooks\delphi\RestoratorHexDump.cpp'), 1)
+            self.assertEqual(text.count(r'Include\Hooks\delphi\RestoratorHexDump.h'), 1)
+            ET.fromstring(text.encode('utf-8'))
+        engine = read('GlassCore/src/Core/Engine.cpp')
+        self.assertIn('#include <Hooks/delphi/RestoratorHexDump.h>', engine)
+        self.assertEqual(engine.count('GlassCore::RestoratorHexDump::Startup();'), 1)
+        self.assertEqual(engine.count('GlassCore::RestoratorHexDump::Shutdown();'), 1)
+        # The text renderer is up before the first row can be drawn; providers register before the dispatcher.
+        self.assertLess(engine.index('GlassCore::Text::Startup();'),
+                        engine.index('GlassCore::RestoratorHexDump::Startup();'))
+        self.assertLess(engine.index('GlassCore::RestoratorHexDump::Startup();'),
+                        engine.index('GlassCore::PaintDispatcher::Startup();'))
+        self.assertLess(engine.index('GlassCore::RestoratorHexDump::Shutdown();'),
+                        engine.index('GlassCore::PaintDispatcher::Shutdown();'))
+        header = read('GlassCore/Include/Hooks/delphi/RestoratorHexDump.h')
+        self.assertIn('namespace GlassCore::RestoratorHexDump', header)
+        self.assertEqual(re.findall(r'\bvoid (\w+)\(\) noexcept;', header), ['Startup', 'Shutdown'])
+        # A separate module: the accepted neighbours do not know about it and it does not reach into them.
+        for neighbour in ('GlassCore/src/Hooks/delphi/RestoratorImages.cpp', 'GlassCore/src/Hooks/delphi/TPanelDraw.cpp',
+                          'GlassCore/src/Hooks/delphi/BomeMemoDraw.cpp', 'GlassCore/src/Hooks/RootGdiHooks.cpp',
+                          'GlassCore/src/Hooks/RootWindowHooks.cpp', 'GlassCore/src/Subsystems/RenderText.cpp',
+                          'GlassCore/src/Subsystems/PaintDispatcher.cpp'):
+            self.assertNotIn('HexDump', read(neighbour))
+        code = read('GlassCore/src/Hooks/delphi/RestoratorHexDump.cpp')
+        for foreign in ('RestoratorImages', 'DelphiPanel', 'BomeMemo', 'OpaqueBitmapSource', 'HookDispatcher',
+                        'IATRegistry', 'GetRootOrg'):
+            self.assertNotIn(foreign, code)
+
+    def test_restorator_hex_dump_gate_is_exact_class_exe_caller_and_instance(self):
+        code = read('GlassCore/src/Hooks/delphi/RestoratorHexDump.cpp')
+        self.assertIn('&& _wcsicmp(name, L"THexDump") == 0;', code)
+        self.assertEqual(code.count('L"THexDump"'), 1)
+        for forbidden in ('wcsstr', '_wcsnicmp', 'StrStrI', 'L"TBomeMemo"', 'L"TImgViewBox"', 'L"TResVersionEditor"'):
+            self.assertNotIn(forbidden, code)
+        begin = code.split('void OnBegin(HWND hwnd, HMODULE caller) noexcept', 1)[1].split('void OnEnd(', 1)[0]
+        for marker in ('if (g_shutdown.load(std::memory_order_acquire) || !IsHexDump(hwnd)) return;',
+                       'const bool eligible = exe && caller == exe && GlassCore::Root::IsFullInjectionMode()',
+                       '&& GlassShared::GlassIsBackdropAllowedForHwnd(hwnd)',
+                       '&& reinterpret_cast<HMODULE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)) == exe;',
+                       'session.leased = eligible && Acquire(session.generation);',
+                       'try { g_sessions.push_back(session); }',
+                       'catch (...) { if (session.leased) Release(session.generation); return; }'):
+            self.assertIn(marker, begin)
+        # BWM enables the hooks for the paint session only (RestoratorPaintHandler::Paint), not for GetDC.
+        self.assertEqual(code.count('GlassCore::PaintDispatcher::RegisterPaintProvider({OnBegin, OnEnd});'), 1)
+        for forbidden in ('RegisterGetDCProvider', 'RegisterCompatDCProvider', 'RegisterPostPaintProvider',
+                          'SetWindowSubclass', 'WM_ERASEBKGND'):
+            self.assertNotIn(forbidden, code)
+        session = code.split('HWND SessionWindow(void* returnAddress) noexcept', 1)[1].split('template <typename Native>', 1)[0]
+        for marker in ('if (g_inside || g_sessions.empty() || !g_sessions.back().leased',
+                       '|| g_shutdown.load(std::memory_order_acquire)) return nullptr;',
+                       'return exe && DetourGetContainingModule(returnAddress) == exe ? g_sessions.back().hwnd : nullptr;'):
+            self.assertIn(marker, session)
+
+    def test_restorator_hex_dump_leases_two_private_export_detours_in_one_transaction(self):
+        code = read('GlassCore/src/Hooks/delphi/RestoratorHexDump.cpp')
+        for marker in ('const HMODULE gdi32 = GetModuleHandleW(L"gdi32.dll");',
+                       'const HMODULE user32 = GetModuleHandleW(L"user32.dll");',
+                       'GetProcAddress(gdi32, "ExtTextOutA")', 'GetProcAddress(user32, "TabbedTextOutA")',
+                       'decltype(&::ExtTextOutA) g_actualExtTextOut{};',
+                       'decltype(&::TabbedTextOutA) g_actualTabbedTextOut{};'):
+            self.assertEqual(code.count(marker), 1, marker)
+        self.assertEqual(code.count('GetProcAddress('), 2)
+        acquire = code.split('bool Acquire(unsigned& generation) noexcept', 1)[1].split('void Release(', 1)[0]
+        self.assertEqual(acquire.count('Detours::Write('), 1)
+        self.assertEqual(acquire.count('Detours::Attach('), 2)
+        for marker in ('|| !g_actualExtTextOut || !g_actualTabbedTextOut) return false;',
+                       'if (FAILED(hr)) return false; // No phantom lease after an aborted transaction.',
+                       '++g_refs; generation = g_generation;'):
+            self.assertIn(marker, acquire)
+        detach = code.split('bool Detach() noexcept', 1)[1].split('bool Acquire(', 1)[0]
+        self.assertEqual(detach.count('Detours::Write('), 1)
+        self.assertEqual(detach.count('Detours::Detach('), 2)
+        self.assertIn('if (SUCCEEDED(hr)) g_attached = false;', detach)
+        release = code.split('void Release(unsigned generation) noexcept', 1)[1].split('bool IsHexDump(', 1)[0]
+        self.assertIn('if (generation != g_generation) return;', release)
+        self.assertIn('if (g_refs && --g_refs == 0) Detach();', release)
+        shutdown = code.split('void Shutdown() noexcept', 1)[1]
+        for marker in ('g_refs = 0; ++g_generation;', 'Detach(); // Also retries a failed last-session Detach.'):
+            self.assertIn(marker, shutdown)
+        # A detour never calls its own export: only the resolved original, exactly as the caller passed it.
+        ext = code.split('BOOL WINAPI RowExtTextOutA(HDC dc, int x, int y, UINT options, const RECT* rect,', 1)[1]
+        ext = ext.split('LONG WINAPI RowTabbedTextOutA(HDC dc,', 1)[0]
+        for marker in ('const DWORD entryError = GetLastError();', 'void* const returnAddress = _ReturnAddress();',
+                       'if (!actual) return FALSE; // Never attached without it; the export would re-enter.',
+                       'return actual(dc, x, y, options, rect, text, count, dx);', 'if (!hwnd) return native();'):
+            self.assertIn(marker, ext)
+        tabbed = code.split('LONG WINAPI RowTabbedTextOutA(HDC dc, int x, int y, LPCSTR text, int count,', 1)[1]
+        tabbed = tabbed.split('bool Detach() noexcept', 1)[0]
+        for marker in ('if (!actual) return 0;', 'return actual(dc, x, y, text, count, tabCount, tabs, tabOrigin);',
+                       'if (!hwnd) return native();'):
+            self.assertIn(marker, tabbed)
+        for forbidden in ('::ExtTextOutA(', '::TabbedTextOutA(', 'TextOutA(dc', 'DrawTextA'):
+            self.assertNotIn(forbidden, code)
+
+    def test_restorator_hex_dump_text_needs_its_own_dc_and_keeps_the_callers_position_and_clipping(self):
+        code = read('GlassCore/src/Hooks/delphi/RestoratorHexDump.cpp')
+        target = code.split('LPCWSTR RejectTarget(HWND hwnd, HDC dc) noexcept', 1)[1].split('bool Decode(', 1)[0]
+        for marker in ('|| !GlassShared::GlassIsBackdropAllowedForHwnd(hwnd)) return L"mode";',
+                       'const HWND owner = dc ? WindowFromDC(dc) : nullptr;',
+                       'const bool own = dc && (owner == hwnd || (!owner && GetObjectType(dc) == OBJ_MEMDC',
+                       '&& GlassCore::PaintDispatcher::GetStackOwnerForDc(dc) == hwnd));',
+                       'if (!own || !GlassCore::PaintDispatcher::IsTopWindowDrawingSession(hwnd)',
+                       '|| !GlassCore::PaintDispatcher::IsPaintStackDcForHwnd(hwnd, dc)) return L"dc";',
+                       'if (GetMapMode(dc) != MM_TEXT) return L"map";'):
+            self.assertIn(marker, target)
+        draw = code.split('BOOL DrawExtText(HWND hwnd, HDC dc, int x, int y, UINT options, const RECT* rect,', 1)[1]
+        draw = draw.split('LONG DrawTabbedText(', 1)[0]
+        order = ('LPCWSTR reason = RejectTarget(hwnd, dc);',
+                 'if (!reason && (options & (ETO_GLYPH_INDEX | ETO_PDY))) reason = L"options";',
+                 'if (!reason && (options & ETO_OPAQUE) && !rect) reason = L"rect";',
+                 'if (!reason && !count && !(options & ETO_OPAQUE)) reason = L"empty";',
+                 'if (!reason && count && GetTextAlign(dc) != (TA_LEFT | TA_TOP | TA_NOUPDATECP)) reason = L"align";',
+                 'if (!reason && count && !dx && GetTextCharacterExtra(dc) != 0) reason = L"spacing";',
+                 'if (!decoded) reason = L"conversion";',
+                 'else if (dx && wide.size() != count) reason = L"dx";',
+                 'try { filled = Background(dc, *rect, GetBkColor(dc)); }',
+                 'hr = GlassCore::Text::ExtTextOutWithAlpha(dc, x, y, options & ~static_cast<UINT>(ETO_OPAQUE),',
+                 'rect, wide.data(), static_cast<UINT>(wide.size()), dx, &::ExtTextOutW);',
+                 'if (reason) { result = native(); error = GetLastError(); }',
+                 'SetLastError(error);')
+        positions = [draw.index(marker) for marker in order]
+        self.assertEqual(positions, sorted(positions)) # every gate precedes the first pixel, the fill precedes the glyphs
+        self.assertEqual(draw.count('native()'), 1)
+        self.assertEqual(code.count('GlassCore::Text::ExtTextOutWithAlpha('), 2)
+        # The donor's rectangle arithmetic (x + 80, DrawText inside lprect) is not reproduced, and the shared
+        # renderer is the only thing that draws glyphs: no DrawText path, GDI+, AlphaBlend or colour key here.
+        for forbidden in ('x + 80', '+ 80', 'DrawTextWithAlpha', 'DrawThemeContent', 'AlphaBlend', 'Gdip', 'gdiplus',
+                          'ApplyBlackKeyAlpha', 'SetBkMode(', 'SetTextColor(', 'SetTextAlign(', 'SaveDC(', 'SelectObject(',
+                          'InvalidateRect', 'BeginBufferedPaint'):
+            self.assertNotIn(forbidden, code)
+        background = code.split('bool Background(HDC dc, const RECT& r, COLORREF color)', 1)[1].split('bool Layout(', 1)[0]
+        for marker in ('if (width <= 0 || height <= 0) return true; // nothing to fill',
+                       'if (width > INT_MAX || height > INT_MAX) return false;',
+                       'const COLORREF rgb = color & 0xFFFFFFu;',
+                       'if (!rgb || rgb == (GetSysColor(COLOR_WINDOW) & 0xFFFFFFu)',
+                       '|| rgb == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFFu))',
+                       'return PatBlt(dc, r.left, r.top, static_cast<int>(width), static_cast<int>(height), BLACKNESS) != FALSE;',
+                       'Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(rgb, 255)',
+                       'return brush && FillRect(dc, &r, brush.get()) != 0;'):
+            self.assertIn(marker, background)
+        self.assertEqual(code.count('PatBlt('), 1)
+        self.assertEqual(code.count('FillRect('), 1)
+        # Diagnostics carry metadata only: a row is file content.
+        report = code.split('void Report(const Row& row, LPCWSTR reason, long result) noexcept', 1)[1]
+        report = report.split('HWND SessionWindow(', 1)[0]
+        self.assertIn('if (!TakeDiag(1)) return;', report)
+        self.assertIn('L"[GlassCore][RestoratorHexDump] text api=%s hwnd=0x%p dc=0x%p dcWnd=0x%p dcType=%lu pos=[%d,%d] '
+                      'options=0x%X rect=[%ld,%ld,%ld,%ld] ansiCount=%d wideCount=%zu cp=%u align=0x%X bkMode=%d '
+                      'bk=0x%06X color=0x%06X tabs=%d step=%d origin=%d drawn=%d reason=%s result=%ld",', report)
+        row = code.split('struct Row', 1)[1].split('};', 1)[0]
+        for forbidden in ('LPCSTR', 'std::wstring', 'wchar_t*', 'text'):
+            self.assertNotIn(forbidden, row)
+        for forbidden in ('%hs', '%S', '%ls', 'wide.c_str()', 'glyphs.c_str()'):
+            self.assertNotIn(forbidden, code)
+
+    def test_restorator_hex_dump_tabs_are_one_positive_distance_turned_into_glyph_advances(self):
+        code = read('GlassCore/src/Hooks/delphi/RestoratorHexDump.cpp')
+        draw = code.split('LONG DrawTabbedText(HWND hwnd, HDC dc, int x, int y, LPCSTR text, int count,', 1)[1]
+        draw = draw.split('template <typename Fn> Fn Actual(', 1)[0]
+        order = ('LPCWSTR reason = RejectTarget(hwnd, dc);',
+                 'if (!reason && (tabCount != 1 || !tabs || tabs[0] <= 0 || x < tabOrigin)) reason = L"tabs";',
+                 'if (!reason && GetTextAlign(dc) != (TA_LEFT | TA_TOP | TA_NOUPDATECP)) reason = L"align";',
+                 'try { decoded = text && count > 0 && Decode(dc, text, count, wide, codepage); }',
+                 'if (!reason && (!GetTextMetricsW(dc, &metrics) || metrics.tmHeight <= 0',
+                 '|| metrics.tmUnderlined || metrics.tmStruckOut)) reason = L"font";',
+                 'try { placed = Layout(dc, wide, x, tabs[0], tabOrigin, glyphs, advance, first, width); }',
+                 'if (!placed || bottom > INT_MAX) reason = L"layout";',
+                 'else extent = RECT{x, y, x + width, static_cast<LONG>(bottom)};',
+                 'if (!reason && GetBkMode(dc) == OPAQUE)',
+                 'try { filled = Background(dc, extent, GetBkColor(dc)); }',
+                 'if (!reason && !glyphs.empty())',
+                 'hr = GlassCore::Text::ExtTextOutWithAlpha(dc, first, y, 0, &extent, glyphs.data(),',
+                 'static_cast<UINT>(glyphs.size()), advance.data(), &::ExtTextOutW);',
+                 'LONG result = MAKELONG(width, metrics.tmHeight);',
+                 'if (reason) { result = native(); error = GetLastError(); }',
+                 'SetLastError(error);')
+        positions = [draw.index(marker) for marker in order]
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(draw.count('native()'), 1)
+        layout = code.split('bool Layout(HDC dc, const std::wstring& text, int x, int step, int origin,', 1)[1]
+        layout = layout.split('struct Row', 1)[0]
+        for marker in ("while (i < text.size() && text[i] == L'\\t') { ++tabs; ++i; }",
+                       "while (i < text.size() && text[i] != L'\\t') ++i;",
+                       'if (cursor < origin || length > INT_MAX) return false;',
+                       'const long long start = tabs ? origin + ((cursor - origin) / step + tabs) * step : cursor;',
+                       'if (start > INT_MAX) return false;',
+                       'if (!GetTextExtentExPointW(dc, text.data() + begin, static_cast<int>(length), 0, nullptr,',
+                       'if (advance.empty()) first = static_cast<int>(start);',
+                       'const long long reach = advance.back() + (start - cursor);',
+                       'const long long after = k + 1 < length ? partial[k] : size.cx;',
+                       'if (after < run) return false;',
+                       'advance.push_back(static_cast<INT>(after - run));',
+                       'cursor = start + run;', 'if (cursor > INT_MAX) return false;',
+                       'width = static_cast<int>(cursor - x);'):
+            self.assertIn(marker, layout)
+        # Tab characters never reach GDI or the renderer, and the layout draws nothing by itself.
+        for forbidden in ('ExtTextOut', 'PatBlt', 'FillRect', 'TabbedTextOut', 'GetTabbedTextExtent', 'DT_EXPANDTABS'):
+            self.assertNotIn(forbidden, layout)
+        for forbidden in ('DT_TABSTOP', 'DT_EXPANDTABS', 'GetTabbedTextExtent', 'MAKELONG(343'):
+            self.assertNotIn(forbidden, code)
+
+    def test_restorator_hex_dump_suite_compiles_complete_production_over_recording_doubles(self):
+        test = read('WndCompat/tests/restorator_hexdump_rendering_tests.cpp')
+        # The production unit is included as it is: nothing is renamed or redefined around it.
+        self.assertTrue(test.startswith('#include "restorator_hexdump_test_shim.h"\n'
+                                        '#include "../../GlassCore/src/Hooks/delphi/RestoratorHexDump.cpp"\n\n'
+                                        '#define CHECK(expr)'))
+        self.assertEqual(test.count('#include "'), 2)
+        shim = read('WndCompat/tests/restorator_hexdump_test_shim.h')
+        self.assertIn('#include "coolbar_test_shim.h"', shim)
+        self.assertEqual(shim.count('#include "'), 1)
+        for marker in ('namespace GlassCore::Hooks::Detours', 'if (failCommit) return E_FAIL;', 'assert(!installed);',
+                       'assert(installed == op.hook);', "for (int i = 0; i < count; ++i) assert(text[i] != L'\\t');",
+                       'assert(dc && w > 0 && h > 0 && rop == BLACKNESS);'):
+            self.assertIn(marker, shim)
+        # The doubles record requests; neither they nor the tests lay a row out with the production algorithm.
+        for text in (test, shim):
+            for forbidden in ('Hd::Layout', 'Hd::Background', 'Hd::Decode', 'Hd::RejectTarget', 'bool Layout(',
+                              '/ step + tabs', '(cursor - origin)'):
+                self.assertNotIn(forbidden, text)
+        self.assertIn('struct Case { const char* text; int x, origin, step, first; const wchar_t* glyphs; '
+                      'std::vector<INT> dx; int width; };', test)
+        runner = read('WndCompat/tests/restorator_hexdump_rendering_test.py')
+        for marker in ("'Release'", "'Debug'", "'-D_DEBUG'", "'-DGLASS_DELPHI_DRAW_PROBE'", "'-Werror'",
+                       "'-std=c++20'", "'Subsystems/RenderText.h'"):
+            self.assertIn(marker, runner)
+        for forbidden in ('read_text', 'source.split(', 'code.split(', '-Wno-error'):
+            self.assertNotIn(forbidden, runner)
+        cases = re.findall(r'\{"([a-z-]+)", \w+\}', test)
+        self.assertEqual(len(cases), 11)
+        self.assertEqual(sorted(cases), sorted(re.findall(r"self\.run_case\('([a-z-]+)'\)", runner)))
+
 if __name__ == "__main__":
     unittest.main()
