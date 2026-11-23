@@ -216,6 +216,7 @@ internal static class DesktopWallpaperImageCache
     {
         // COM snapshot on the caller's UI apartment, image IO/decode through our common helpers.
         var monitors = DesktopWallpaperCom.ReadMonitorWallpapers();
+        System.Diagnostics.Debug.WriteLine($"[ReflectionConfigure] wallpaper cache: snapshot ready, count={monitors.Count}");
         var result = new List<MonitorDisplaySource>();
         foreach (var monitor in monitors)
         {
@@ -234,7 +235,9 @@ internal static class DesktopWallpaperImageCache
                         MonitorSources[monitor.Path] = load;
                     }
                 }
+                System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] wallpaper cache: await monitor bitmap");
                 image = await load;
+                System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] wallpaper cache: monitor bitmap ready");
             }
             result.Add(new(monitor, image));
         }
