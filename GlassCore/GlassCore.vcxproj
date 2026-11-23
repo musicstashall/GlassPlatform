@@ -180,7 +180,7 @@
     <ClCompile Include="src\Hooks\delphi\TBackgroundHooks.cpp" />
     <ClCompile Include="src\Hooks\delphi\TPanelDraw.cpp" />
     <ClCompile Include="src\Hooks\delphi\RestoratorImages.cpp" />
-    <ClCompile Include="src\Hooks\delphi\RestoratorHexDump.cpp" />
+    <ClCompile Include="src\Hooks\delphi\THexDumpDraw.cpp" />
     <ClCompile Include="src\Hooks\delphi\TButtonGroupsDraw.cpp" />
     <ClCompile Include="src\Hooks\delphi\BomeMemoDraw.cpp" />
     <ClCompile Include="src\Hooks\delphi\TInputHooks.cpp" />
@@ -271,7 +271,7 @@
     <ClInclude Include="Include\Hooks\delphi\TBackgroundHooks.h" />
     <ClInclude Include="Include\Hooks\delphi\TPanelDraw.h" />
     <ClInclude Include="Include\Hooks\delphi\RestoratorImages.h" />
-    <ClInclude Include="Include\Hooks\delphi\RestoratorHexDump.h" />
+    <ClInclude Include="Include\Hooks\delphi\THexDumpDraw.h" />
     <ClInclude Include="Include\Hooks\delphi\TButtonGroupsDraw.h" />
     <ClInclude Include="Include\Hooks\delphi\BomeMemoDraw.h" />
     <ClInclude Include="Include\Hooks\delphi\TInputHooks.h" />

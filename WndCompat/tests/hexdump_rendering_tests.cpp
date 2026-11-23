@@ -1,11 +1,11 @@
-#include "restorator_hexdump_test_shim.h"
-#include "../../GlassCore/src/Hooks/delphi/RestoratorHexDump.cpp"
+#include "hexdump_test_shim.h"
+#include "../../GlassCore/src/Hooks/delphi/THexDumpDraw.cpp"
 
 #define CHECK(expr) do { if (!(expr)) throw std::runtime_error(#expr); } while (false)
 
 namespace
 {
-    namespace Hd = GlassCore::RestoratorHexDump;
+    namespace Hd = GlassCore::DelphiHexDump;
     using HexTest::Event;
     using HexTest::Kind;
     const auto kExportExt = &::ExtTextOutA;
@@ -995,7 +995,7 @@ namespace
             CHECK(HexTest::logFormats[1].find(L"] detour api=ExtTextOutA+TabbedTextOutA enable=1") != std::wstring::npos);
             CHECK(HexTest::logFormats[2].find(L"] Begin hwnd=") != std::wstring::npos && HexTest::logStrings.empty());
             for (const auto& format : HexTest::logFormats)
-                CHECK(format.rfind(L"[GlassCore][RestoratorHexDump] ", 0) == 0);
+                CHECK(format.rfind(L"[GlassCore][DelphiHexDump] ", 0) == 0);
             CHECK(f.Address()); CHECK(LastReason() == L"none");
             CHECK(HexTest::logStrings.size() == 2 && HexTest::logStrings[0] == L"ExtTextOutA");
             CHECK(f.Bytes()); CHECK(LastReason() == L"none");

@@ -1,4 +1,4 @@
-// Environment doubles for the complete production RestoratorHexDump translation
+// Environment doubles for the complete production THexDumpDraw translation
 // unit, on top of the portable base types only. This file adds an
 // export/trampoline model for the two detoured text functions, a text renderer
 // that records what it is asked to draw, cell-based text metrics and a narrow

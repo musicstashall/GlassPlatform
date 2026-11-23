@@ -2703,25 +2703,25 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertEqual(len(cases), 12)
         self.assertEqual(sorted(cases), sorted(re.findall(r"self\.run_case\('([a-z-]+)'\)", runner)))
 
-    def test_restorator_hex_dump_is_registered_and_bracketed_by_the_paint_dispatcher_lifetime(self):
+    def test_hex_dump_is_registered_and_bracketed_by_the_paint_dispatcher_lifetime(self):
         for project in ('GlassCore/GlassCore.vcxproj', 'GlassCore/GlassCore.vcxproj.filters'):
             text = read(project)
-            self.assertEqual(text.count(r'src\Hooks\delphi\RestoratorHexDump.cpp'), 1)
-            self.assertEqual(text.count(r'Include\Hooks\delphi\RestoratorHexDump.h'), 1)
+            self.assertEqual(text.count(r'src\Hooks\delphi\THexDumpDraw.cpp'), 1)
+            self.assertEqual(text.count(r'Include\Hooks\delphi\THexDumpDraw.h'), 1)
             ET.fromstring(text.encode('utf-8'))
         engine = read('GlassCore/src/Core/Engine.cpp')
-        self.assertIn('#include <Hooks/delphi/RestoratorHexDump.h>', engine)
-        self.assertEqual(engine.count('GlassCore::RestoratorHexDump::Startup();'), 1)
-        self.assertEqual(engine.count('GlassCore::RestoratorHexDump::Shutdown();'), 1)
+        self.assertIn('#include <Hooks/delphi/THexDumpDraw.h>', engine)
+        self.assertEqual(engine.count('GlassCore::DelphiHexDump::Startup();'), 1)
+        self.assertEqual(engine.count('GlassCore::DelphiHexDump::Shutdown();'), 1)
         # The text renderer is up before the first row can be drawn; providers register before the dispatcher.
         self.assertLess(engine.index('GlassCore::Text::Startup();'),
-                        engine.index('GlassCore::RestoratorHexDump::Startup();'))
-        self.assertLess(engine.index('GlassCore::RestoratorHexDump::Startup();'),
+                        engine.index('GlassCore::DelphiHexDump::Startup();'))
+        self.assertLess(engine.index('GlassCore::DelphiHexDump::Startup();'),
                         engine.index('GlassCore::PaintDispatcher::Startup();'))
-        self.assertLess(engine.index('GlassCore::RestoratorHexDump::Shutdown();'),
+        self.assertLess(engine.index('GlassCore::DelphiHexDump::Shutdown();'),
                         engine.index('GlassCore::PaintDispatcher::Shutdown();'))
-        header = read('GlassCore/Include/Hooks/delphi/RestoratorHexDump.h')
-        self.assertIn('namespace GlassCore::RestoratorHexDump', header)
+        header = read('GlassCore/Include/Hooks/delphi/THexDumpDraw.h')
+        self.assertIn('namespace GlassCore::DelphiHexDump', header)
         self.assertEqual(re.findall(r'\bvoid (\w+)\(\) noexcept;', header), ['Startup', 'Shutdown'])
         # A separate module: the accepted neighbours do not know about it and it does not reach into them.
         for neighbour in ('GlassCore/src/Hooks/delphi/RestoratorImages.cpp', 'GlassCore/src/Hooks/delphi/TPanelDraw.cpp',
@@ -2729,13 +2729,13 @@ class DelphiPipelineContract(unittest.TestCase):
                           'GlassCore/src/Hooks/RootWindowHooks.cpp', 'GlassCore/src/Subsystems/RenderText.cpp',
                           'GlassCore/src/Subsystems/PaintDispatcher.cpp'):
             self.assertNotIn('HexDump', read(neighbour))
-        code = read('GlassCore/src/Hooks/delphi/RestoratorHexDump.cpp')
+        code = read('GlassCore/src/Hooks/delphi/THexDumpDraw.cpp')
         for foreign in ('RestoratorImages', 'DelphiPanel', 'BomeMemo', 'OpaqueBitmapSource', 'HookDispatcher',
                         'IATRegistry', 'GetRootOrg'):
             self.assertNotIn(foreign, code)
 
-    def test_restorator_hex_dump_gate_is_exact_class_exe_caller_and_instance(self):
-        code = read('GlassCore/src/Hooks/delphi/RestoratorHexDump.cpp')
+    def test_hex_dump_gate_is_exact_class_exe_caller_and_instance(self):
+        code = read('GlassCore/src/Hooks/delphi/THexDumpDraw.cpp')
         self.assertIn('&& _wcsicmp(name, L"THexDump") == 0;', code)
         self.assertEqual(code.count('L"THexDump"'), 1)
         for forbidden in ('wcsstr', '_wcsnicmp', 'StrStrI', 'L"TBomeMemo"', 'L"TImgViewBox"', 'L"TResVersionEditor"'):
@@ -2760,8 +2760,8 @@ class DelphiPipelineContract(unittest.TestCase):
                        'return exe && DetourGetContainingModule(returnAddress) == exe ? g_sessions.back().hwnd : nullptr;'):
             self.assertIn(marker, session)
 
-    def test_restorator_hex_dump_leases_two_private_export_detours_in_one_transaction(self):
-        code = read('GlassCore/src/Hooks/delphi/RestoratorHexDump.cpp')
+    def test_hex_dump_leases_two_private_export_detours_in_one_transaction(self):
+        code = read('GlassCore/src/Hooks/delphi/THexDumpDraw.cpp')
         for marker in ('const HMODULE gdi32 = GetModuleHandleW(L"gdi32.dll");',
                        'const HMODULE user32 = GetModuleHandleW(L"user32.dll");',
                        'GetProcAddress(gdi32, "ExtTextOutA")', 'GetProcAddress(user32, "TabbedTextOutA")',
@@ -2801,8 +2801,8 @@ class DelphiPipelineContract(unittest.TestCase):
         for forbidden in ('::ExtTextOutA(', '::TabbedTextOutA(', 'TextOutA(dc', 'DrawTextA'):
             self.assertNotIn(forbidden, code)
 
-    def test_restorator_hex_dump_text_needs_its_own_dc_and_keeps_the_callers_position_and_clipping(self):
-        code = read('GlassCore/src/Hooks/delphi/RestoratorHexDump.cpp')
+    def test_hex_dump_text_needs_its_own_dc_and_keeps_the_callers_position_and_clipping(self):
+        code = read('GlassCore/src/Hooks/delphi/THexDumpDraw.cpp')
         target = code.split('LPCWSTR RejectTarget(HWND hwnd, HDC dc) noexcept', 1)[1].split('bool Decode(', 1)[0]
         for marker in ('|| !GlassShared::GlassIsBackdropAllowedForHwnd(hwnd)) return L"mode";',
                        'const HWND owner = dc ? WindowFromDC(dc) : nullptr;',
@@ -2853,7 +2853,7 @@ class DelphiPipelineContract(unittest.TestCase):
         report = code.split('void Report(const Row& row, LPCWSTR reason, long result) noexcept', 1)[1]
         report = report.split('HWND SessionWindow(', 1)[0]
         self.assertIn('if (!TakeDiag(1)) return;', report)
-        self.assertIn('L"[GlassCore][RestoratorHexDump] text api=%s hwnd=0x%p dc=0x%p dcWnd=0x%p dcType=%lu pos=[%d,%d] '
+        self.assertIn('L"[GlassCore][DelphiHexDump] text api=%s hwnd=0x%p dc=0x%p dcWnd=0x%p dcType=%lu pos=[%d,%d] '
                       'options=0x%X rect=[%ld,%ld,%ld,%ld] ansiCount=%d wideCount=%zu cp=%u align=0x%X bkMode=%d '
                       'bk=0x%06X color=0x%06X tabs=%d step=%d origin=%d drawn=%d reason=%s result=%ld",', report)
         row = code.split('struct Row', 1)[1].split('};', 1)[0]
@@ -2862,8 +2862,8 @@ class DelphiPipelineContract(unittest.TestCase):
         for forbidden in ('%hs', '%S', '%ls', 'wide.c_str()', 'glyphs.c_str()'):
             self.assertNotIn(forbidden, code)
 
-    def test_restorator_hex_dump_tabs_are_one_positive_distance_turned_into_glyph_advances(self):
-        code = read('GlassCore/src/Hooks/delphi/RestoratorHexDump.cpp')
+    def test_hex_dump_tabs_are_one_positive_distance_turned_into_glyph_advances(self):
+        code = read('GlassCore/src/Hooks/delphi/THexDumpDraw.cpp')
         draw = code.split('LONG DrawTabbedText(HWND hwnd, HDC dc, int x, int y, LPCSTR text, int count,', 1)[1]
         draw = draw.split('template <typename Fn> Fn Actual(', 1)[0]
         order = ('LPCWSTR reason = RejectTarget(hwnd, dc);',
@@ -2908,14 +2908,14 @@ class DelphiPipelineContract(unittest.TestCase):
         for forbidden in ('DT_TABSTOP', 'DT_EXPANDTABS', 'GetTabbedTextExtent', 'MAKELONG(343'):
             self.assertNotIn(forbidden, code)
 
-    def test_restorator_hex_dump_suite_compiles_complete_production_over_recording_doubles(self):
-        test = read('WndCompat/tests/restorator_hexdump_rendering_tests.cpp')
+    def test_hex_dump_suite_compiles_complete_production_over_recording_doubles(self):
+        test = read('WndCompat/tests/hexdump_rendering_tests.cpp')
         # The production unit is included as it is: nothing is renamed or redefined around it.
-        self.assertTrue(test.startswith('#include "restorator_hexdump_test_shim.h"\n'
-                                        '#include "../../GlassCore/src/Hooks/delphi/RestoratorHexDump.cpp"\n\n'
+        self.assertTrue(test.startswith('#include "hexdump_test_shim.h"\n'
+                                        '#include "../../GlassCore/src/Hooks/delphi/THexDumpDraw.cpp"\n\n'
                                         '#define CHECK(expr)'))
         self.assertEqual(test.count('#include "'), 2)
-        shim = read('WndCompat/tests/restorator_hexdump_test_shim.h')
+        shim = read('WndCompat/tests/hexdump_test_shim.h')
         self.assertIn('#include "coolbar_test_shim.h"', shim)
         self.assertEqual(shim.count('#include "'), 1)
         for marker in ('namespace GlassCore::Hooks::Detours', 'if (failCommit) return E_FAIL;', 'assert(!installed);',
@@ -2929,7 +2929,7 @@ class DelphiPipelineContract(unittest.TestCase):
                 self.assertNotIn(forbidden, text)
         self.assertIn('struct Case { const char* text; int x, origin, step, first; const wchar_t* glyphs; '
                       'std::vector<INT> dx; int width; };', test)
-        runner = read('WndCompat/tests/restorator_hexdump_rendering_test.py')
+        runner = read('WndCompat/tests/hexdump_rendering_test.py')
         for marker in ("'Release'", "'Debug'", "'-D_DEBUG'", "'-DGLASS_DELPHI_DRAW_PROBE'", "'-Werror'",
                        "'-std=c++20'", "'Subsystems/RenderText.h'"):
             self.assertIn(marker, runner)
@@ -2938,6 +2938,32 @@ class DelphiPipelineContract(unittest.TestCase):
         cases = re.findall(r'\{"([a-z-]+)", \w+\}', test)
         self.assertEqual(len(cases), 11)
         self.assertEqual(sorted(cases), sorted(re.findall(r"self\.run_case\('([a-z-]+)'\)", runner)))
+
+    def test_hex_dump_module_is_named_by_its_class_and_reads_no_application_name(self):
+        # THexDump is the control of Borland's HexDump.pas, compiled into every application that takes the unit:
+        # the rule belongs to the window class. Neither the module nor its harness names an application.
+        for path in ('GlassCore/src/Hooks/delphi/THexDumpDraw.cpp', 'GlassCore/Include/Hooks/delphi/THexDumpDraw.h',
+                     'WndCompat/tests/hexdump_test_shim.h', 'WndCompat/tests/hexdump_rendering_tests.cpp',
+                     'WndCompat/tests/hexdump_rendering_test.py'):
+            self.assertNotIn('restorator', read(path).lower(), path)
+        code = read('GlassCore/src/Hooks/delphi/THexDumpDraw.cpp')
+        self.assertIn('\nnamespace GlassCore::DelphiHexDump\n', code)
+        # The gate has no process identity in it: no image name is read or compared.
+        for forbidden in ('GetModuleFileName', 'GetModuleBaseName', 'QueryFullProcessImageName',
+                          'GetProcessImageFileName', 'PathFindFileName', 'GetCommandLine', '.exe'):
+            self.assertNotIn(forbidden, code)
+        self.assertEqual(code.count('L"[GlassCore][DelphiHexDump] '), 5)
+        self.assertEqual(code.count('[GlassCore]['), 5)
+        # The application-named files were renamed, not kept beside the new ones, and nothing wires them in.
+        for stale in ('GlassCore/src/Hooks/delphi/RestoratorHexDump.cpp',
+                      'GlassCore/Include/Hooks/delphi/RestoratorHexDump.h',
+                      'WndCompat/tests/restorator_hexdump_test_shim.h',
+                      'WndCompat/tests/restorator_hexdump_rendering_tests.cpp',
+                      'WndCompat/tests/restorator_hexdump_rendering_test.py'):
+            self.assertFalse((ROOT / stale).exists(), stale)
+        for wiring in ('GlassCore/src/Core/Engine.cpp', 'GlassCore/GlassCore.vcxproj',
+                       'GlassCore/GlassCore.vcxproj.filters'):
+            self.assertNotIn('RestoratorHexDump', read(wiring))
 
 if __name__ == "__main__":
     unittest.main()

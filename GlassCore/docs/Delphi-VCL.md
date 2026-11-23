@@ -6908,3 +6908,133 @@ buffer-DC, который получает шрифт и цвет, но не э�
 неизменны. Все предыдущие разделы документа сохранены побайтово. UTF-8 без
 BOM, Python AST, XML проектов, `git diff --check` и hash BWM.txt проверены;
 разовые scripts удалены.
+
+## Тест 122: THexDump — модуль отвязан от имени Restorator
+
+После публикации **45cf404** (§121) пользователь спросил: **«Получается,
+THexDump — это библиотечный компонент от Borland?»** — и, получив ответ,
+поставил задачу: **«То есть, класс THexDump не является исключительной
+реализацией Restorator и потенциально может появиться в других приложениях?
+Если так, что следует отвязать нашу реализацию отрисовки в Glass от имени
+Restorator.»**
+
+### Откуда класс
+
+`THexDump` — не компонент VCL и не собственный класс Restorator. Это контрол
+из модуля `HexDump.pas` демонстрационной программы Borland «Resource Explorer»
+(`Demos\ResXplor` в поставке Delphi). Модуль распространяется в исходниках, его
+копируют в проект, и контрол компилируется в EXE приложения. Поиск по коду
+GitHub (`THexDump TabbedTextOut filename:HexDump.pas`) на момент проверки даёт
+73 файла.
+
+В §121 раскладка строки приводилась по памяти. Теперь она сверена с тремя
+общедоступными копиями модуля:
+
+| Копия | Особенности |
+|-------|-------------|
+| `coderserdar/DelphiComponents`, `…/RxLib7/Demo/DBEXPL32/HexDump.pas` | заголовок «Delphi Visual Component Library, Copyright (c) 1996,97 Borland International, Portions copyright (c) 1997 Master-Bank»; `Color := clWindow`, шрифт Courier, адрес 10 символов, маркер текущей строки |
+| `project-jedi/jvcl`, `jvcl/examples/JvDBExplorer/HexDump.pas` | та же расширенная версия под заголовком JEDI; адрес и символы — явным `ExtTextOutA` |
+| `project-jedi/jcl`, `jcl/examples/windows/structstorage/HexDump.pas` | короткая версия: `Color := clWhite`, шрифт FixedSys, адрес 9 символов |
+
+Во всех трёх `THexDump = class(TCustomControl)`, а `Paint` пишет строку одними
+и теми же вызовами:
+
+- адрес — `ExtTextOut(Canvas.Handle, R.Left, R.Top, ETO_OPAQUE or
+  ETO_CLIPPED, @R, LineAddr(…), 9 или 10, nil)`;
+- байты — `TabbedTextOut(Canvas.Handle, R.Left, R.Top, LineData(…),
+  (ByteCnt*3)-1, 1, TabStop, R.Left)`, где `TabStop := FItemWidth*3`, а
+  `FItemWidth := Canvas.TextWidth('D') + 1`; буфер строки заполнен `#9`, так
+  что пары цифр разделены табами;
+- символы — `ExtTextOut(…, ETO_OPAQUE or ETO_CLIPPED, @R, LineChars(…),
+  ByteCnt, nil)`;
+- строки за концом данных — `ExtTextOut(…, ETO_OPAQUE or ETO_CLIPPED, @R,
+  nil, 0, nil)`.
+
+Пара API, которую донор ставит для этого класса, и раскладка, которую
+принимает модуль, — одна позиция табуляции, положительное расстояние, origin
+в начале текста — свойства самого контрола, а не Restorator. Прежняя оговорка
+остаётся: бинарник Restorator не исследовался, его копия модуля может
+отличаться; это покажет строка `text` журнала.
+
+### Что изменено
+
+Поведение модуля не менялось: его допуск и раньше не содержал имени
+приложения, оно было только в названиях. Переименование — по образцу соседних
+VCL-модулей (`TPanelDraw` / `DelphiPanel`, `TListBoxDraw` / `DelphiListBox`):
+
+| Было | Стало |
+|------|-------|
+| `GlassCore/src/Hooks/delphi/RestoratorHexDump.cpp` | `GlassCore/src/Hooks/delphi/THexDumpDraw.cpp` |
+| `GlassCore/Include/Hooks/delphi/RestoratorHexDump.h` | `GlassCore/Include/Hooks/delphi/THexDumpDraw.h` |
+| namespace `GlassCore::RestoratorHexDump` | `GlassCore::DelphiHexDump` |
+| префикс журнала `[GlassCore][RestoratorHexDump]` | `[GlassCore][DelphiHexDump]` |
+| `WndCompat/tests/restorator_hexdump_test_shim.h` | `WndCompat/tests/hexdump_test_shim.h` |
+| `WndCompat/tests/restorator_hexdump_rendering_tests.cpp` | `WndCompat/tests/hexdump_rendering_tests.cpp` |
+| `WndCompat/tests/restorator_hexdump_rendering_test.py` | `WndCompat/tests/hexdump_rendering_test.py` |
+| contracts `test_restorator_hex_dump_*` | `test_hex_dump_*` |
+
+Файлы переименованы через `git mv`. В `Engine.cpp`, `GlassCore.vcxproj` и
+`.filters` заменены только имена; место `Startup()` / `Shutdown()` в
+`Engine.cpp` прежнее, поэтому порядок paint-provider'ов не изменился.
+Комментарии в начале `.cpp` и `.h` переписаны: контрол описан по своему
+происхождению, приложение в них не названо. Строки журнала, кроме префикса,
+прежние. В §121 остались старые имена: раздел сохранён как история, таблица
+выше переводит их в нынешние.
+
+`RestoratorImages` не переименован: стартовые картинки (§119–120) — задача
+именно Restorator.
+
+### Что определяет допуск
+
+Без изменений (§121):
+
+- точный класс окна `THexDump`;
+- BeginPaint вызван из entry-point EXE, `GWLP_HINSTANCE` окна — тот же EXE,
+  текстовые вызовы приходят из EXE. Это правило VCL, статически собранного в
+  EXE, — то же, что у `DelphiPanel`;
+- процесс в режиме Full, backdrop для окна разрешён.
+
+Имя процесса модуль не читает. Режим процесса задаёт список `AttachList`
+(`HKCU\Software\StanislavKa\GlassPlatform\AttachList`): `Restorator.exe` входит
+в значения по умолчанию как Full (`GlassShared/include/DefaultProcessLists.h`),
+неизвестные программы получают PopupOnly. Другой программе с этим контролом
+достаточно режима Full; правок кода не требуется.
+
+### Пределы
+
+- **Unicode-сборки** (Delphi 2009 и новее): тот же исходник вызывает
+  `ExtTextOutW` и `TabbedTextOutW`. Перехватываются только A-варианты; вызовы
+  W-функций остаются нативными.
+- **Runtime packages и DLL:** если VCL или сам контрол собраны в BPL или DLL,
+  caller — не EXE, и сессия не арендуется (`eligible=0` в строке `Begin`).
+- **Изменённые копии контрола:** другая раскладка табов остаётся нативной с
+  причиной в `reason` (§121). В расширенной версии (RxLib, JVCL) текущая
+  строка пишется с фоном `clHighlight`; по правилу фона §121 он будет залит
+  непрозрачно.
+- В других программах модуль не проверялся: ни одной, кроме Restorator, для
+  проверки нет.
+
+### Проверки
+
+- `hexdump_rendering_test.py`: **11 сценариев × Release / Debug PASS** — набор
+  §121 без изменений поверх переименованного production-файла.
+- **140 source contracts PASS.** Шесть контрактов THexDump переведены на новые
+  имена и пути. Добавлен седьмой: в модуле и его harness нет слова
+  «Restorator»; модуль не читает имя образа процесса (`GetModuleFileName` и
+  подобные, литерал `.exe`); все пять строк журнала идут с новым префиксом;
+  прежние файлы не оставлены рядом с новыми, `Engine.cpp` и проекты их не
+  упоминают. Девять нарушений, внесённых по одному, контракт отверг. Прежние
+  133 контракта сохранены побайтово.
+- Логика production-файла не менялась, поэтому мутационный и sanitizer-прогоны
+  §121 не повторялись. Соседние suites не перезапускались: их исходники не
+  затронуты.
+- MSVC-сборки и проверки в Windows по-прежнему нет — ни для Restorator (§121),
+  ни для других программ.
+
+Сверка с **cf66bdd** — вершиной ветки, где поверх 45cf404 лежат коммиты
+пользователя по GlassSetup: **5 файлов переименованы** (production `.cpp` /
+`.h`, shim, tests, runner), **5 существовавших изменены** — `Engine.cpp`,
+`GlassCore.vcxproj`, `.filters`, contracts и этот документ; остальные **1793**
+из 1803 tracked-файлов побайтово неизменны. Все предыдущие разделы документа
+сохранены побайтово. UTF-8 без BOM, Python AST, XML проектов и
+`git diff --check` проверены; разовые scripts удалены.

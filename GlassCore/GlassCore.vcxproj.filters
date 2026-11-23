@@ -118,7 +118,7 @@
     <ClCompile Include="src\Hooks\delphi\RestoratorImages.cpp">
       <Filter>src\Hooks\delphi</Filter>
     </ClCompile>
-    <ClCompile Include="src\Hooks\delphi\RestoratorHexDump.cpp">
+    <ClCompile Include="src\Hooks\delphi\THexDumpDraw.cpp">
       <Filter>src\Hooks\delphi</Filter>
     </ClCompile>
     <ClCompile Include="src\Hooks\delphi\TButtonGroupsDraw.cpp">
@@ -387,7 +387,7 @@
     <ClInclude Include="Include\Hooks\delphi\RestoratorImages.h">
       <Filter>Include\Hooks\delphi</Filter>
     </ClInclude>
-    <ClInclude Include="Include\Hooks\delphi\RestoratorHexDump.h">
+    <ClInclude Include="Include\Hooks\delphi\THexDumpDraw.h">
       <Filter>Include\Hooks\delphi</Filter>
     </ClInclude>
     <ClInclude Include="Include\Hooks\delphi\TButtonGroupsDraw.h">

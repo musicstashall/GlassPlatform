@@ -1,8 +1,12 @@
-// Restorator hex viewer. BWM RestoratorPaintHandler::Paint (window, caller EXE):
-// exact THexDump -> TabbedTextOutAttach + ExtTextOutAttach. The EXE writes every
-// row with ANSI GDI text straight into its paint DC: the address and the
-// character column through ExtTextOutA, the bytes through TabbedTextOutA. On
-// glass those glyphs land with A=0 and are not visible.
+// Delphi THexDump: the hex viewer control of Borland's HexDump.pas. The unit
+// ships as source with the Resource Explorer demo and is copied into
+// applications, where it is compiled into the EXE. Its Paint writes every row
+// with GDI text straight into the paint DC: the address and the character
+// column through ExtTextOut, the bytes through TabbedTextOut with one tab
+// distance. In an ANSI build these are ExtTextOutA and TabbedTextOutA; on glass
+// their glyphs land with A=0 and are not visible. BWM attaches the same two
+// functions for this class inside a handler written for one application; here
+// the rule belongs to the class.
 //
 // While such a paint session is open both exports are detoured. A call from the
 // EXE into that window's own DC keeps the caller's position, clipping, tab stops
@@ -10,8 +14,13 @@
 // opaque text background is cleared when it is the window's own (black or a
 // system colour) and filled opaque when it is any other colour. Other DCs and
 // callers, and layouts this module cannot place exactly, stay native.
+//
+// The gate is the window class and the EXE that paints it, as for the other
+// VCL controls. No application is named and no process name is read: every
+// ANSI VCL program that compiled the unit in is handled alike. A Unicode build
+// of the unit calls the W exports, which are not attached here.
 #include "CorePch.h"
-#include <Hooks/delphi/RestoratorHexDump.h>
+#include <Hooks/delphi/THexDumpDraw.h>
 #include <Core/Intercept/HookHelper.h>
 #include <Module/ModuleHandler.h>
 #include <Subsystems/PaintDispatcher.h>
@@ -26,7 +35,7 @@
 #include <string>
 #include <vector>
 
-namespace GlassCore::RestoratorHexDump
+namespace GlassCore::DelphiHexDump
 {
     namespace
     {
@@ -187,7 +196,7 @@ namespace GlassCore::RestoratorHexDump
             if (!TakeDiag(1)) return;
             const HDC dc = row.dc;
             DebugLog(DBG_NORMAL,
-                L"[GlassCore][RestoratorHexDump] text api=%s hwnd=0x%p dc=0x%p dcWnd=0x%p dcType=%lu pos=[%d,%d] options=0x%X rect=[%ld,%ld,%ld,%ld] ansiCount=%d wideCount=%zu cp=%u align=0x%X bkMode=%d bk=0x%06X color=0x%06X tabs=%d step=%d origin=%d drawn=%d reason=%s result=%ld",
+                L"[GlassCore][DelphiHexDump] text api=%s hwnd=0x%p dc=0x%p dcWnd=0x%p dcType=%lu pos=[%d,%d] options=0x%X rect=[%ld,%ld,%ld,%ld] ansiCount=%d wideCount=%zu cp=%u align=0x%X bkMode=%d bk=0x%06X color=0x%06X tabs=%d step=%d origin=%d drawn=%d reason=%s result=%ld",
                 row.api, row.hwnd, dc, dc ? WindowFromDC(dc) : nullptr, dc ? GetObjectType(dc) : 0ul,
                 row.x, row.y, row.options, row.rect.left, row.rect.top, row.rect.right, row.rect.bottom,
                 row.ansiCount, row.wideCount, row.codepage,
@@ -384,7 +393,7 @@ namespace GlassCore::RestoratorHexDump
             });
             if (SUCCEEDED(hr)) g_attached = false;
             if (TakeDiag(2)) DebugLog(SUCCEEDED(hr) ? DBG_NORMAL : DBG_WARNING,
-                L"[GlassCore][RestoratorHexDump] detour api=ExtTextOutA+TabbedTextOutA enable=0 refs=%zu attached=%d hr=0x%08X",
+                L"[GlassCore][DelphiHexDump] detour api=ExtTextOutA+TabbedTextOutA enable=0 refs=%zu attached=%d hr=0x%08X",
                 g_refs, g_attached ? 1 : 0, static_cast<unsigned>(hr));
             return SUCCEEDED(hr);
         }
@@ -400,7 +409,7 @@ namespace GlassCore::RestoratorHexDump
                 });
                 if (SUCCEEDED(hr)) g_attached = true;
                 if (TakeDiag(2)) DebugLog(SUCCEEDED(hr) ? DBG_NORMAL : DBG_WARNING,
-                    L"[GlassCore][RestoratorHexDump] detour api=ExtTextOutA+TabbedTextOutA enable=1 refs=%zu attached=%d hr=0x%08X",
+                    L"[GlassCore][DelphiHexDump] detour api=ExtTextOutA+TabbedTextOutA enable=1 refs=%zu attached=%d hr=0x%08X",
                     g_refs + (SUCCEEDED(hr) ? 1u : 0u), g_attached ? 1 : 0, static_cast<unsigned>(hr));
                 if (FAILED(hr)) return false; // No phantom lease after an aborted transaction.
             }
@@ -436,7 +445,7 @@ namespace GlassCore::RestoratorHexDump
             catch (...) { if (session.leased) Release(session.generation); return; }
             if (TakeDiag(0))
                 DebugLog(DBG_NORMAL,
-                    L"[GlassCore][RestoratorHexDump] Begin hwnd=0x%p caller=0x%p eligible=%d leased=%d depth=%zu",
+                    L"[GlassCore][DelphiHexDump] Begin hwnd=0x%p caller=0x%p eligible=%d leased=%d depth=%zu",
                     hwnd, caller, eligible ? 1 : 0, session.leased ? 1 : 0, g_sessions.size());
         }
         void OnEnd(HWND hwnd, HMODULE) noexcept
@@ -466,7 +475,7 @@ namespace GlassCore::RestoratorHexDump
             g_actualTabbedTextOut = user32
                 ? reinterpret_cast<decltype(g_actualTabbedTextOut)>(GetProcAddress(user32, "TabbedTextOutA")) : nullptr;
             DebugLog(g_actualExtTextOut && g_actualTabbedTextOut ? DBG_NORMAL : DBG_WARNING,
-                L"[GlassCore][RestoratorHexDump] resolve gdi32=0x%p ExtTextOutA=0x%p user32=0x%p TabbedTextOutA=0x%p",
+                L"[GlassCore][DelphiHexDump] resolve gdi32=0x%p ExtTextOutA=0x%p user32=0x%p TabbedTextOutA=0x%p",
                 gdi32, reinterpret_cast<void*>(g_actualExtTextOut),
                 user32, reinterpret_cast<void*>(g_actualTabbedTextOut));
         }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the complete production RestoratorHexDump unit with Win32 doubles.
+"""Run the complete production THexDumpDraw unit with Win32 doubles.
 
 Optimized and Debug/probe configurations exercise what reaches the surface for
 every ANSI row call (background, glyph string, position, advances), the tab
@@ -19,13 +19,13 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 
 
-class RestoratorHexDumpRenderingTest(unittest.TestCase):
+class HexDumpRenderingTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         compiler = shlex.split(os.environ.get('CXX', 'g++'))
         if not compiler or not shutil.which(compiler[0]):
             raise unittest.SkipTest('A GCC-compatible C++20 compiler is required')
-        cls.tmp = tempfile.TemporaryDirectory(prefix='restorator-hexdump-')
+        cls.tmp = tempfile.TemporaryDirectory(prefix='hexdump-')
         cls.addClassCleanup(cls.tmp.cleanup)
         tmp = Path(cls.tmp.name)
         stubs = tmp / 'include'
@@ -42,16 +42,16 @@ class RestoratorHexDumpRenderingTest(unittest.TestCase):
             ('Release', ['-O2']),
             ('Debug', ['-O0', '-g', '-D_DEBUG', '-DGLASS_DELPHI_DRAW_PROBE']),
         ):
-            binary = tmp / f'restorator-hexdump-{mode}'
+            binary = tmp / f'hexdump-{mode}'
             result = subprocess.run(compiler + [
                 '-std=c++20', '-Wall', '-Wextra', '-Werror', '-Wno-sign-compare',
                 '-Wno-unknown-pragmas', '-pthread', *flags,
                 '-I', str(stubs), '-I', str(ROOT / 'GlassCore/Include'),
-                str(ROOT / 'WndCompat/tests/restorator_hexdump_rendering_tests.cpp'),
+                str(ROOT / 'WndCompat/tests/hexdump_rendering_tests.cpp'),
                 '-o', str(binary),
             ], capture_output=True, text=True, timeout=180)
             if result.returncode:
-                raise AssertionError(f'{mode} Restorator hex dump test build failed:\n{result.stdout}{result.stderr}')
+                raise AssertionError(f'{mode} THexDump test build failed:\n{result.stdout}{result.stderr}')
             cls.binaries[mode] = binary
 
     def run_case(self, name):
