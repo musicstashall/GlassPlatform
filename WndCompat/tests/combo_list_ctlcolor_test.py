@@ -314,8 +314,91 @@ namespace {
             CHECK(Mock::calls.size()==1 && c.dc.bk==0 && c.dc.text==Mock::nativeText);
         }
         c.combo.cls=L"TComboBox";
+        // Neither message is the field's when another window sends it.
         c.ResetTrace(); c.NativeResult(c.Call(WM_CTLCOLORSTATIC));
+        c.ResetTrace(); c.NativeResult(c.Call(WM_CTLCOLOREDIT));
         c.ResetTrace(); c.NativeResult(c.Call(WM_CTLCOLORLISTBOX,&c.dc,&c.edit));
+    }
+    // A disabled (or read-only) Edit never sends WM_CTLCOLOREDIT: it asks with
+    // WM_CTLCOLORSTATIC, and VCL answers that from the same handler with the
+    // same brush. The field follows the rule of the enabled one.
+    void DisabledEdit() {
+        Context c;
+        const auto field=[&](UINT msg) {
+            c.ResetTrace(); c.dc.bk=0x778899;
+            const LRESULT result=c.Call(msg,&c.dc,&c.edit);
+            CHECK(Mock::calls.size()==1 && Mock::calls[0].hwnd==&c.combo && Mock::calls[0].msg==msg);
+            CHECK(Mock::calls[0].entry==Mock::entryError);
+            CHECK(Mock::calls[0].wp==reinterpret_cast<WPARAM>(&c.dc));
+            CHECK(Mock::calls[0].lp==reinterpret_cast<LPARAM>(&c.edit));
+            CHECK(c.dc.text==Mock::nativeText && c.dc.mode==2 && c.dc.font==81); // only the background
+            return result;
+        };
+        const auto black=reinterpret_cast<LRESULT>(&Mock::black);
+        for (LPCWSTR cls:{L"TComboBox",L"tcombobox",L"TColorBox",L"TDriveComboBox",L"TFilterComboBox"}) {
+            c.combo.cls=cls;
+            for (UINT msg:{WM_CTLCOLORSTATIC,WM_CTLCOLOREDIT}) {
+                CHECK(field(msg)==black && c.dc.bk==0 && Mock::setBkCalls==1 && Mock::stockCalls==1);
+            }
+        }
+        c.combo.cls=L"TComboBox";
+        // The current system colour, not a constant white.
+        c.brush.lbColor=Mock::nativeBk=Mock::windowColor=0x443322;
+        CHECK(field(WM_CTLCOLORSTATIC)==black && c.dc.bk==0);
+        c.brush.lbColor=Mock::nativeBk=0xffffff;
+        CHECK(field(WM_CTLCOLORSTATIC)==Mock::originalResult && c.dc.bk==0xffffff && Mock::setBkCalls==0);
+        Mock::windowColor=0xffffff;
+        // A colour the application chose, a pattern, a brush without metadata.
+        for (int variant=0;variant<5;++variant) {
+            c.brush={BS_SOLID,0xffffff,0}; Mock::nativeBk=0xffffff;
+            Mock::originalResult=reinterpret_cast<LRESULT>(&c.brush);
+            if (variant==0) c.brush.lbColor=0x00c0ff;
+            if (variant==1) Mock::nativeBk=0x00c0ff;
+            if (variant==2) c.brush.lbStyle=BS_PATTERN;
+            if (variant==3) Mock::originalResult=0;
+            if (variant==4) Mock::failObject=true;
+            CHECK(field(WM_CTLCOLORSTATIC)==Mock::originalResult && c.dc.bk==Mock::nativeBk);
+            CHECK(Mock::setBkCalls==0 && Mock::stockCalls==0);
+            Mock::failObject=false;
+        }
+        c.brush={BS_SOLID,0xffffff,0}; Mock::nativeBk=0xffffff;
+        Mock::originalResult=reinterpret_cast<LRESULT>(&c.brush);
+        // Only this combo's own Edit child, only a VCL combo, only Full with glass.
+        for (int variant=0;variant<8;++variant) {
+            const auto saved=Mock::infos.at(&c.combo); c.ResetTrace(); c.dc.bk=0x778899;
+            HWND child=&c.edit;
+            if (variant==0) child=&c.other;
+            if (variant==1) Mock::infos[&c.combo].hwndItem=&c.other;
+            if (variant==2) c.edit.cls=L"TEdit";
+            if (variant==3) Mock::failInfo=true;
+            if (variant==4) c.combo.cls=L"ComboBox";
+            if (variant==5) Mock::mode=Shared::InjectionMode::PopupOnly;
+            if (variant==6) c.combo.backdrop=false;
+            if (variant==7) Mock::shutdown=true;
+            SetLastError(Mock::entryError);
+            const LRESULT result=ComboBoxSubclassProc(&c.combo,WM_CTLCOLORSTATIC,
+                reinterpret_cast<WPARAM>(&c.dc),reinterpret_cast<LPARAM>(child),2,0);
+            CHECK(result==Mock::originalResult && c.dc.bk==Mock::nativeBk && Mock::setBkCalls==0);
+            CHECK(Mock::calls.size()==1 && Mock::calls[0].msg==WM_CTLCOLORSTATIC);
+            CHECK(Mock::calls[0].entry==Mock::entryError);
+            Mock::infos[&c.combo]=saved; c.edit.cls=L"Edit"; Mock::failInfo=false;
+            c.combo.cls=L"TComboBox"; Mock::mode=Shared::InjectionMode::Full;
+            c.combo.backdrop=true; Mock::shutdown=false;
+        }
+        // No DC: one native call, nothing touched.
+        c.ResetTrace(); SetLastError(Mock::entryError);
+        CHECK(ComboBoxSubclassProc(&c.combo,WM_CTLCOLORSTATIC,0,reinterpret_cast<LPARAM>(&c.edit),2,0)==Mock::originalResult);
+        CHECK(Mock::calls.size()==1 && Mock::setBkCalls==0 && Mock::calls[0].entry==Mock::entryError);
+#if defined(_DEBUG)
+        // The probe line names the message, so a log tells the two states apart.
+        Mock::clock+=5000; c.ResetTrace();
+        CHECK(field(WM_CTLCOLORSTATIC)==black);
+        CHECK(Mock::logs.size()==1 && Mock::logs[0].find(L"[WndCompat][DelphiComboEdit] CTLCOLOR")!=std::wstring::npos);
+        CHECK(Mock::logs[0].find(L"msg=0x138")!=std::wstring::npos && Mock::logs[0].find(L"replaced=1")!=std::wstring::npos);
+        Mock::clock+=5000; c.ResetTrace();
+        CHECK(field(WM_CTLCOLOREDIT)==black && Mock::logs.size()==1);
+        CHECK(Mock::logs[0].find(L"msg=0x133")!=std::wstring::npos);
+#endif
     }
     void ShutdownDetachAndAnimation() {
         Context c; Mock::shutdown=true; c.NativeResult(c.Call()); Mock::shutdown=false;
@@ -375,6 +458,7 @@ int main(int argc,char** argv) {
         else if (name=="native-first") NativeDecidesBeforeProof();
         else if (name=="revalidate") RevalidateAfterNative();
         else if (name=="edit-messages") ExistingEditAndOtherMessages();
+        else if (name=="disabled-edit") DisabledEdit();
         else if (name=="lifecycle") ShutdownDetachAndAnimation();
         else if (name=="nested") NestedMessagesStayLocal();
         else if (name=="probe") ProbeIsLocalAndBounded();
@@ -434,6 +518,7 @@ class ComboListCtlColorTest(unittest.TestCase):
     def test_background_is_inspected_after_exactly_one_native_call(self): self.run_case('native-first')
     def test_identity_mode_and_backdrop_are_rechecked_after_native_reentry(self): self.run_case('revalidate')
     def test_accepted_child_edit_and_other_messages_are_unchanged(self): self.run_case('edit-messages')
+    def test_disabled_child_edit_asks_with_ctlcolorstatic_and_gets_the_same_rule(self): self.run_case('disabled-edit')
     def test_shutdown_detach_and_existing_dropdown_animation_are_unchanged(self): self.run_case('lifecycle')
     def test_nested_other_combo_message_keeps_results_and_dcs_separate(self): self.run_case('nested')
     def test_debug_probe_reports_original_brush_decision_and_has_a_budget(self): self.run_case('probe')

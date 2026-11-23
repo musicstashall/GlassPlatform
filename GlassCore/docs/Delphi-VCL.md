@@ -7201,3 +7201,90 @@ root-провайдеры, `PaintDispatcher` и `RenderText` не менялис
 **1796** из 1803 tracked-файлов побайтово неизменны. Все предыдущие разделы
 документа сохранены побайтово. UTF-8 без BOM, Python AST и
 `git diff --check` проверены; разовые scripts удалены.
+
+## Тест 124: TComboBox — отключённое поле спрашивает кисть через WM_CTLCOLORSTATIC
+
+После публикации **cfba9dc** (§123) пользователь принял прокрутку memo
+(«Отлично») и поставил три задачи; им отвечают §124–§126. Первая:
+**«TComboBox — отключенный (WS_DISABLED) не получает отрисовку, читай логи с
+зондом.»** Приложен журнал одного показа, скриншота нет.
+
+### Что видно в журнале
+
+| Строка журнала | Что она значит |
+|----------------|----------------|
+| `ComboBoxControl BeginPaint session open … class=TComboBox source=comctl32` | сессия combo открыта |
+| `DTB result … part=4 state=4 alpha=0 … success=1` | рамка `CP_BORDER` в состоянии `CBB_DISABLED` нарисована |
+| `VclEditProbe api=BeginPaint … class=Edit parent=0x025E0900 style=0x58000380` | дочерний Edit; в стиле есть `WS_DISABLED` (0x08000000) |
+| `DelphiComboEdit ExtTextOut … options=0x1004 count=16 … bk=0x00FFFFFF` | текст идёт в буфер Edit; фон DC — белый |
+| `DelphiComboEdit TextResult … hr=0x00000000 fallback=0` | текст отрисован с альфой |
+| — | строки `[WndCompat][DelphiComboEdit] CTLCOLOR` нет вовсе |
+
+Рамка и текст идут штатным путём. От рабочего поля журнал отличается одним:
+адаптер CTLCOLOR из §9 не вызван, и фон DC остался белым.
+
+### Причина
+
+- Отключённый или read-only Edit не посылает `WM_CTLCOLOREDIT`: кисть фона он
+  запрашивает сообщением `WM_CTLCOLORSTATIC`. Это документированное поведение
+  edit control.
+- VCL отвечает на оба сообщения сам и одной кистью. Delphi 7, `StdCtrls.pas`
+  (копия `ilsaul/emuloader`, `source/vcl-d7`), `TCustomCombo.WndProc`,
+  2740–2746: диапазон `WM_CTLCOLORMSGBOX..WM_CTLCOLORSTATIC` →
+  `SetTextColor`, `SetBkColor(ColorToRGB(Brush.Color))`, `Result :=
+  Brush.Handle`, без inherited.
+- `ComboBoxSubclass.cpp` (§9, §38) подменял кисть только на
+  `WM_CTLCOLOREDIT`. `WM_CTLCOLORSTATIC` уходил в VCL как есть, и Edit заливал
+  поле белой кистью `clWindow`.
+
+У донора обработчика на самом combo нет (`ComboBoxHandler.cpp`, 3914–3938 —
+только `WM_LBUTTONDOWN`). В Restorator он на всё время процесса возвращает 0
+для `COLOR_WINDOW` (17772, 18382–18396), поэтому кисть VCL чёрная в обоих
+состояниях. В Glass цвет для процесса не подменяется, и состояние Edit
+приходится различать по сообщению.
+
+### Что изменено
+
+`WndCompat/Popup/ComboLBox/ComboBoxSubclass.cpp`: один блок отвечает на
+`WM_CTLCOLORSTATIC` и `WM_CTLCOLOREDIT`.
+
+- Условия прежние: Full, backdrop, точный VCL-класс combo, `lParam` — его
+  собственный `COMBOBOXINFO.hwndItem` класса `Edit`.
+- Правило прежнее: один вызов родного обработчика; чёрная кисть и `bk = 0`
+  только если VCL вернул сплошную кисть цвета `COLOR_WINDOW` и поставил тот же
+  фон DC. Пользовательский цвет, pattern и кисть без описания не трогаются.
+- Проверки вызывают user32, поэтому перед родным обработчиком восстанавливается
+  входной LastError: `WM_CTLCOLORSTATIC` от любого другого отправителя доходит
+  до VCL так же, как раньше.
+- Debug-строка `[WndCompat][DelphiComboEdit] CTLCOLOR` получила поле `msg=`:
+  `0x133` — рабочее поле, `0x138` — отключённое.
+
+Цвет текста не меняется: после получения кисти comctl32 сам ставит
+`COLOR_GRAYTEXT` для отключённого Edit. Альфа рамки, кнопка, список и
+`RootSubclass` не затронуты.
+
+### Проверки
+
+- `combo_list_ctlcolor_test.py`: **14 сценариев × Release / Debug /
+  Debug+probe PASS** (было 13). Новый `disabled-edit`: оба сообщения для четырёх
+  VCL-классов, текущий системный цвет, пять видов «чужой» кисти, восемь
+  отказов по отправителю, классу, режиму и backdrop, отсутствие DC, поле
+  `msg=` в журнале. Прежний сценарий дополнен: `WM_CTLCOLORSTATIC` и
+  `WM_CTLCOLOREDIT` не от своего Edit — один родной вызов с входным LastError.
+- То же под **ASan + UBSan + leak detection** — PASS.
+- **8/8 мутантов блока отвергнуты runtime**: без
+  метки `WM_CTLCOLORSTATIC`, любой отправитель, любой класс, три потери
+  LastError, кисть без проверки фона DC, поле `msg`.
+
+### Пределы результата
+
+**MSVC-сборки и проверки в Windows нет.** Не подтверждено:
+
+- что после правки поле выглядит как рабочее: серый текст на стекле зависит от
+  общего renderer'а и настроек;
+- отключённый `csDropDownList` (без дочернего Edit): в журнале его нет, и эта
+  правка его не касается.
+
+В журнале после правки у отключённого combo должна появиться строка
+`[WndCompat][DelphiComboEdit] CTLCOLOR … msg=0x138 … replaced=1`, а
+`DelphiComboEdit ExtTextOut` — показать `bk=0x00000000`.

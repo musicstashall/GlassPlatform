@@ -43,20 +43,27 @@ namespace
 
         switch (uMsg)
         {
+        // A disabled or read-only Edit asks for its brush with WM_CTLCOLORSTATIC,
+        // never with WM_CTLCOLOREDIT. VCL answers both itself with one brush.
+        case WM_CTLCOLORSTATIC:
         case WM_CTLCOLOREDIT:
         {
             // Только настоящий дочерний Edit VCL ComboBox в Full. Редактор сам
             // посылает CTLCOLOR родителю, поэтому root окна это не перехватывает.
+            // The checks call into user32; the native handler gets the message
+            // as it came, last error included, whoever sent it.
+            const DWORD entryError = GetLastError();
             if (WndCompat::WinEventHook_GetMode() != Shared::InjectionMode::Full
                 || !GlassShared::GlassIsBackdropAllowedForHwnd(hWnd)
                 || !IsDelphiComboBox(hWnd))
-                break;
+            { SetLastError(entryError); break; }
             COMBOBOXINFO info{ sizeof(info) };
             HWND edit = reinterpret_cast<HWND>(lParam);
             if (!GetComboBoxInfo(hWnd, &info) || info.hwndItem != edit
                 || !edit || !WndCompat::IsWindowClass(edit, L"Edit"))
-                break;
+            { SetLastError(entryError); break; }
             HDC dc = reinterpret_cast<HDC>(wParam);
+            SetLastError(entryError);
             if (!dc) break;
             const LRESULT original = DefSubclassProc(hWnd, uMsg, wParam, lParam);
             const COLORREF bk = GetBkColor(dc);
@@ -84,8 +91,8 @@ namespace
             {
                 --budget;
                 DebugLog(DBG_NORMAL,
-                    L"[WndCompat][DelphiComboEdit] CTLCOLOR combo=0x%p edit=0x%p dc=0x%p focused=%d bk=0x%08X brush=0x%p solid=%d color=0x%08X replaced=%d",
-                    hWnd, edit, dc, GetFocus() == edit ? 1 : 0, static_cast<unsigned>(bk),
+                    L"[WndCompat][DelphiComboEdit] CTLCOLOR combo=0x%p edit=0x%p msg=0x%X dc=0x%p focused=%d bk=0x%08X brush=0x%p solid=%d color=0x%08X replaced=%d",
+                    hWnd, edit, uMsg, dc, GetFocus() == edit ? 1 : 0, static_cast<unsigned>(bk),
                     brush, solid ? 1 : 0, static_cast<unsigned>(lb.lbColor), replace ? 1 : 0);
             }
 #endif

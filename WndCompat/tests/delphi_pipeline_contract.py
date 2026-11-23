@@ -3013,5 +3013,36 @@ class DelphiPipelineContract(unittest.TestCase):
                        'GlassCore/GlassCore.vcxproj.filters'):
             self.assertNotIn('RestoratorHexDump', read(wiring))
 
+    def test_tcombo_disabled_edit_asks_with_ctlcolorstatic_and_shares_the_field_rule(self):
+        combo = read('WndCompat/Popup/ComboLBox/ComboBoxSubclass.cpp')
+        # A disabled or read-only Edit sends WM_CTLCOLORSTATIC instead of WM_CTLCOLOREDIT and VCL answers
+        # both from one handler with one brush: one block here, the static label falling into the edit one.
+        self.assertEqual(combo.count('        case WM_CTLCOLORSTATIC:\n        case WM_CTLCOLOREDIT:\n        {\n'), 1)
+        self.assertEqual(combo.count('case WM_CTLCOLORSTATIC:'), 1)
+        self.assertEqual(combo.count('case WM_CTLCOLOREDIT:'), 1)
+        ctl = combo.split('case WM_CTLCOLOREDIT:', 1)[1].split('case WM_CTLCOLORLISTBOX:', 1)[0]
+        # Still only this combo's own Edit child, one native call, the same brush proof.
+        for marker in ('IsDelphiComboBox(hWnd)', 'info.hwndItem != edit', 'WndCompat::IsWindowClass(edit, L"Edit")',
+                       'const bool replace = solid && (lb.lbColor & 0xFFFFFFu) == windowColor',
+                       '&& (bk & 0xFFFFFFu) == windowColor;', 'msg=0x%X'):
+            self.assertIn(marker, ctl)
+        self.assertEqual(ctl.count('DefSubclassProc('), 1)
+        # Whoever is not this field gets the message exactly as it came, last error included.
+        self.assertEqual(ctl.count('const DWORD entryError = GetLastError();'), 1)
+        self.assertEqual(ctl.count('SetLastError(entryError);'), 3)
+        self.assertEqual(ctl.count('{ SetLastError(entryError); break; }'), 2)
+        self.assertLess(ctl.index('const DWORD entryError = GetLastError();'), ctl.index('WinEventHook_GetMode()'))
+        self.assertLess(ctl.index('SetLastError(entryError);\n            if (!dc) break;'),
+                        ctl.index('const LRESULT original = DefSubclassProc('))
+        # The state of the edit is not read and no colour of the text is set: the control keeps doing that.
+        for forbidden in ('SetTextColor', 'SetBkMode', 'GRAYTEXT', 'IsWindowEnabled', 'WS_DISABLED', 'ES_READONLY',
+                          'GetWindowLong', 'PatBlt', 'FillRect'):
+            self.assertNotIn(forbidden, ctl)
+        harness = read('WndCompat/tests/combo_list_ctlcolor_test.py')
+        self.assertIn('else if (name=="disabled-edit") DisabledEdit();', harness)
+        self.assertIn("self.run_case('disabled-edit')", harness)
+        for marker in ('for (UINT msg:{WM_CTLCOLORSTATIC,WM_CTLCOLOREDIT})', 'L"msg=0x138"', 'L"msg=0x133"'):
+            self.assertIn(marker, harness)
+
 if __name__ == "__main__":
     unittest.main()
