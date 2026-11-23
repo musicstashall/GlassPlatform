@@ -159,3 +159,9 @@ assert 'bounds.Add(new Windows.Graphics.RectInt32(rect.Left, rect.Top,' in deskt
 assert 'rect.Right - rect.Left, rect.Bottom - rect.Top' in desktop_preview
 assert 'return bounds.ToArray();' in desktop_preview
 print('PASS: monitor snapshot uses native full monitor rectangles, without WinRT DisplayArea calls')
+
+assert 'layers.Clip = new RectangleGeometry' in desktop_preview
+assert 'CreateGeometricClip(' not in desktop_preview
+assert 'GetElementVisual(layers)' not in desktop_preview
+assert 'layers.Loaded +=' not in desktop_preview
+print('PASS: XAML owns monitor clipping; no geometric Composition clip on its visual')

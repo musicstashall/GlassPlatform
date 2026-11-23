@@ -63,16 +63,10 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
             // Clip each monitor, including the reflection's viewport into the full canvas.
             layers.Clip = new RectangleGeometry { Rect = new Rect(0, 0, monitor.Width, monitor.Height) };
             double radius = Math.Max(8, DesktopWidth / 600.0 * 8);
-            layers.Loaded += (_, _) =>
-            {
-                System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] preview: apply loaded composition clip");
-                var visual = Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(layers);
-                var rounded = visual.Compositor.CreateRoundedRectangleGeometry();
-                rounded.Size = new System.Numerics.Vector2(monitor.Width, monitor.Height);
-                rounded.CornerRadius = new System.Numerics.Vector2((float)radius);
-                visual.Clip = visual.Compositor.CreateGeometricClip(rounded);
-                System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] preview: composition clip ready");
-            };
+            // Do not assign CompositionGeometricClip to a XAML-owned visual.
+            // WinUI processes that clip later during rendering and can fail QI
+            // with E_NOINTERFACE in UpdateVisualClipAndTransform (stowed failfast).
+            // The XAML RectangleGeometry above owns content clipping instead.
             var card = new Border
             {
                 Width = monitor.Width, Height = monitor.Height,

@@ -287,7 +287,7 @@ HKCU, AccessDenied/удаление/очистка, ограничения PNG �
 
 В Output Visual Studio этапы открытия помечаются `[ReflectionConfigure]`:
 click → settings → picker → desktop snapshot/cards → render → hosted dialog,
-а после Loaded — composition clip и загрузка wallpaper sources. Обработчик
+а после Loaded — загрузка wallpaper sources. Обработчик
 кнопки выводит полное managed exception и повторно бросает его для штатной
 диагностики (ошибка не маскируется под Cancel). Native FailFast этими catch
 не перехватывается: для него необходимы код исключения/стек отладчика или дамп.
@@ -319,3 +319,16 @@ EnumDisplayMonitors (полные прямоугольники, включая �
 дальнейшая раскладка использует managed-массив. Это устраняет данный WinRT-путь,
 но тождество first-chance исключения и прежнего завершения процесса ещё не
 подтверждено; необходима повторная проверка диалога в Windows.
+
+### Разбор Stowed Exception и исправление клипа
+
+WinDbg для пользовательского дампа показал `STOWED_EXCEPTION_80004002` /
+`E_NOINTERFACE` в `Microsoft.UI.Xaml!HWCompTreeNodeWinRT::UpdateVisualClipAndTransform`
+(WinUI 3.2.1.0), затем FailFast `0xC000027B` при отправке кадра compositor.
+Это не стек чтения wallpaper. Из preview удалено прямое назначение
+`CompositionGeometricClip` через `GetElementVisual(layers).Clip`: оно конфликтует
+с обработкой clip у XAML-owned visual. Обрезка полного desktop canvas по монитору
+остаётся штатной XAML `RectangleGeometry`; рамка Border сохраняет CornerRadius
+и тень. Отдельная rounded composition-маска содержимого больше не создаётся.
+Исправление требует пользовательской runtime-проверки; дамп локализовал render
+clip, но локальное воспроизведение на Windows здесь не выполнялось.
