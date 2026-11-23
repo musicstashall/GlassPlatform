@@ -194,10 +194,9 @@ print('PASS: shared checked swatches, standard flyout picker, pixel-scale textur
 
 assert 'GetDialogWidth(preview.DesktopWidth, preview.DesktopHeight)' in dialog
 assert 'Math.Clamp(previewWidth + 64, 480, 1120)' in dialog
-assert 'bool inline = width >= 960' in dialog
+assert 'bool inline = width >= parameterBudget + cell + 2 * gap + pickerWidth' in dialog
 assert 'colorFlyout.Content = null' in dialog and 'colorFlyout.Content = picker' in dialog
 assert 'inlinePicker.Children.Add(picker)' in dialog and 'inlinePicker.Children.Clear()' in dialog
-assert 'presets.Orientation = vertical ? Orientation.Vertical' in dialog
 assert 'ReadUserAccentColor()' in dialog and 'accentPreset.Clicked +=' in dialog
 assert 'watcher.Changed += OnDesktopChanged' in dialog and 'watcher.Changed -= OnDesktopChanged' in dialog
 assert 'ReflectionColorHistory.Read()' in dialog and 'ReflectionColorHistory.Save' in dialog
@@ -219,14 +218,19 @@ print('PASS: fourth custom preset, previous custom enters history, all preset du
 assert 'Themes_Colors_RecentColors' not in dialog
 assert '280.0 * desktopWidth / Math.Max(1, desktopHeight)' in dialog
 assert 'MonitorFromWindow' not in dialog and 'XamlRoot?.Size.Width' not in dialog
-assert 'bool vertical = inline || width < 620' in dialog
-assert 'bool stacked = width < 480' in dialog
 assert 'Grid.SetRow(pickerRail, stacked ? 1 : 0)' in dialog
-assert 'int columns = vertical ? 1 : 3' in dialog
 print('PASS: preview-aspect dialog width, vertical narrow palettes/history, stacked fallback and no detached history heading')
 
 assert 'customPreset.IsEnabled = customColor.HasValue' not in dialog
 assert 'HorizontalAlignment = HorizontalAlignment.Left' in dialog
-assert 'pickerRail.Width = vertical ? 56 : 216' in dialog
 assert 'savedColors.Count > 0 ? savedColors[0] : picker.GetColorArgb()' in dialog
 print('PASS: always-visible custom picker launcher, no redundant button, left-aligned compact swatch column')
+
+assert 'var presets = new Grid' in dialog
+assert 'paletteBudget >= 4 * cell + 3 * cellGap ? 4' in dialog
+assert 'paletteBudget >= 2 * cell + cellGap ? 2 : 1' in dialog
+assert 'Grid.SetColumn((FrameworkElement)presets.Children[i], i % columns)' in dialog
+assert 'double pickerWidth = Math.Max(300, picker.DesiredSize.Width)' in dialog
+assert 'Width = new GridLength(1, GridUnitType.Star)' in dialog
+assert 'MaxWidth = 420, Height = 176' in dialog
+print('PASS: available-width 1/2/4 swatch grid, shared history columns, measured standard picker budget and flexible parameter column')

@@ -21,7 +21,7 @@ public static class ReflectionSettingsDialog
         System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] dialog: create picker");
         var picker = new GlassAlphaColorPicker { IsAlphaVisible = true };
         picker.SetColor(((uint)Math.Round(initial.OpacityPercent * 255.0 / 100) << 24) | initial.ColorRgb);
-        var presets = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Left };
+        var presets = new Grid { ColumnSpacing = 8, RowSpacing = 8, HorizontalAlignment = HorizontalAlignment.Left };
         var darkPreset = new AccentRecentColorSwatch { SwatchColor = Windows.UI.Color.FromArgb(255, 0, 0, 0) };
         var lightPreset = new AccentRecentColorSwatch { SwatchColor = Windows.UI.Color.FromArgb(255, 160, 160, 160) };
         GlassSettingsToolTipService.SetToolTip(darkPreset, GlassSettingsResources.Get("Reflection_PresetDark"));
@@ -77,7 +77,7 @@ public static class ReflectionSettingsDialog
         noiseGroup.Children.Add(Row("Reflection_SettingNoiseType", noiseType));
         noiseGroup.Children.Add(Row("Reflection_SettingNoise", noise));
         noiseGroup.Children.Add(Row("Reflection_SettingNoiseDensity", noiseDensity));
-        var groups = new Pivot { Width = 340, Height = 176, VerticalAlignment = VerticalAlignment.Top, HorizontalAlignment = HorizontalAlignment.Left };
+        var groups = new Pivot { MaxWidth = 420, Height = 176, VerticalAlignment = VerticalAlignment.Top, HorizontalAlignment = HorizontalAlignment.Stretch };
         groups.Resources.Add(typeof(PivotHeaderItem), new Style(typeof(PivotHeaderItem))
         {
             BasedOn = (Style)Application.Current.Resources["GlassSettingsPivotHeaderItemStyle"]
@@ -121,7 +121,7 @@ public static class ReflectionSettingsDialog
         var editors = new Grid { ColumnSpacing = 16, RowSpacing = 16 };
         editors.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         editors.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        editors.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        editors.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         editors.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         Grid.SetColumn(pickerRail, 1);
         editors.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -131,7 +131,10 @@ public static class ReflectionSettingsDialog
         // Reparent one standard picker; never clone it or alter its template.
         void UpdateEditorLayout(double width)
         {
-            bool inline = width >= 960;
+            picker.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+            double pickerWidth = Math.Max(300, picker.DesiredSize.Width);
+            const double parameterBudget = 320, gap = 16, cell = 48, cellGap = 8;
+            bool inline = width >= parameterBudget + cell + 2 * gap + pickerWidth;
             if (inline && inlinePicker.Children.Count == 0)
             {
                 colorFlyout.Hide(); colorFlyout.Content = null;
@@ -142,14 +145,25 @@ public static class ReflectionSettingsDialog
                 inlinePicker.Children.Clear(); colorFlyout.Content = picker;
             }
             inlinePicker.Visibility = inline ? Visibility.Visible : Visibility.Collapsed;
-            bool stacked = width < 480;
-            bool vertical = inline || width < 620;
-            presets.Orientation = vertical ? Orientation.Vertical : Orientation.Horizontal;
-            pickerRail.Width = vertical ? 56 : 216;
+            bool stacked = width < 380;
+            double paletteBudget = stacked ? width
+                : width - parameterBudget - gap - (inline ? pickerWidth + gap : 0);
+            int columns = paletteBudget >= 4 * cell + 3 * cellGap ? 4
+                : paletteBudget >= 2 * cell + cellGap ? 2 : 1;
+            pickerRail.Width = columns * cell + (columns - 1) * cellGap;
             Grid.SetColumn(pickerRail, stacked ? 0 : 1);
             Grid.SetRow(pickerRail, stacked ? 1 : 0);
-            groups.Width = Math.Max(1, Math.Min(340, stacked ? width : width - pickerRail.Width - 16));
-            int columns = vertical ? 1 : 3;
+            groups.MaxWidth = stacked ? Math.Max(1, width) : 420;
+            presets.ColumnDefinitions.Clear(); presets.RowDefinitions.Clear();
+            for (int i = 0; i < columns; i++)
+                presets.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            for (int i = 0; i < (4 + columns - 1) / columns; i++)
+                presets.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            for (int i = 0; i < presets.Children.Count; i++)
+            {
+                Grid.SetRow((FrameworkElement)presets.Children[i], i / columns);
+                Grid.SetColumn((FrameworkElement)presets.Children[i], i % columns);
+            }
             recentColors.ColumnDefinitions.Clear();
             recentColors.RowDefinitions.Clear();
             for (int i = 0; i < columns; i++)
