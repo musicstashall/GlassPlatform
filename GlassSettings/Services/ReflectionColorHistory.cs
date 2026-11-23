@@ -15,7 +15,7 @@ internal static class ReflectionColorHistory
             return (key?.GetValue(ValueName) as string[] ?? [])
                 .Select(value => uint.TryParse(value, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var color)
                     ? (uint?)color : null)
-                .Where(color => color.HasValue).Select(color => color!.Value).Distinct().Take(8).ToArray();
+                .Where(color => color.HasValue).Select(color => color!.Value).Distinct().Take(4).ToArray();
         }
         catch (Exception error) when (error is System.IO.IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
@@ -42,7 +42,7 @@ internal static class ReflectionColorHistory
     {
         try
         {
-            var colors = history.Distinct().Take(8)
+            var colors = history.Distinct().Take(4)
                 .Select(color => color.ToString("X8", CultureInfo.InvariantCulture)).ToArray();
             using var key = Registry.CurrentUser.CreateSubKey(ReflectionRenderState.RegistryPath);
             key.SetValue(ValueName, colors, RegistryValueKind.MultiString);

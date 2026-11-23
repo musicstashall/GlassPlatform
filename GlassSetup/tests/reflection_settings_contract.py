@@ -203,14 +203,14 @@ assert 'ReflectionColorHistory.Read()' in dialog and 'ReflectionColorHistory.Sav
 assert 'preview.SetSourceLabel(' in dialog and 'body.Children.Add(new TextBlock' not in dialog
 assert '_sourceBadge' in desktop_preview and 'CornerRadius = new CornerRadius(6)' in desktop_preview
 history = (root / 'GlassSettings/Services/ReflectionColorHistory.cs').read_text()
-assert '.Distinct().Take(8)' in history and 'RegistryValueKind.MultiString' in history
+assert '.Distinct().Take(4)' in history and 'RegistryValueKind.MultiString' in history
 print('PASS: monitor-bound dialog width, bounded fields, adaptive inline/flyout picker, live accent, bounded recent colors and preview badge')
 
 assert 'presets.Children.Add(customPreset)' in dialog
-assert 'customPreset.Clicked +=' in dialog
-assert 'recentValues.RemoveAll(color => IsBuiltInColor(color) || color == customColor)' in dialog
+assert 'customPreset.Click +=' in dialog
+assert 'recentValues.RemoveAll(IsBuiltInColor)' in dialog
 assert 'ReadRecentAccentColors()' not in dialog
-assert 'customColor = color;' in dialog and 'recentValues.Insert(0, previous)' in dialog
+assert 'customColor = color;' in dialog and 'recentValues.Insert(0, color)' in dialog
 assert 'ReflectionColorHistory.Save(recentValues, customColor)' in dialog
 assert 'ReadCustom()' in history and '"CustomColor"' in history
 print('PASS: fourth custom preset, previous custom enters history, all preset duplicates excluded, no imported Windows colors')
@@ -234,3 +234,10 @@ assert 'double pickerWidth = Math.Max(300, picker.DesiredSize.Width)' in dialog
 assert 'Width = new GridLength(1, GridUnitType.Star)' in dialog
 assert 'MaxWidth = 420, Height = 176' in dialog
 print('PASS: available-width 1/2/4 swatch grid, shared history columns, measured standard picker budget and flexible parameter column')
+
+assert 'var customPreset = new Button' in dialog and 'new FontIcon' in dialog
+assert 'presets.Children.Insert(presets.Children.Count - 1, swatch)' in dialog
+assert 'presets.Children.Clear()' not in dialog
+assert 'customPreset.SwatchColor' not in dialog
+assert 'recentValues.Count > 4' in dialog and '.Take(8)' not in history
+print('PASS: neutral icon picker launcher stays last in unified grid, max four custom history colors, stable flyout anchor')
