@@ -34,7 +34,7 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
         DesktopHeight = bounds.Max(b => b.Y + b.Height) - top;
         var desktop = new Canvas { Width = DesktopWidth, Height = DesktopHeight };
         // Physical desktop coordinates are retained inside one proportionally scaled Viewbox.
-        Children.Add(new Viewbox { Child = desktop, Stretch = Stretch.Uniform, MaxHeight = 240 });
+        Children.Add(new Viewbox { Child = desktop, Stretch = Stretch.Uniform, MaxHeight = 200 });
         Margin = new Thickness(8, 8, 8, 16);
         foreach (var monitor in bounds)
         {

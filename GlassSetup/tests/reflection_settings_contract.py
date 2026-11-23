@@ -47,7 +47,7 @@ assert header_style.get('BasedOn') == '{StaticResource GlassSettingsPivotHeaderI
 print('PASS: configure precedes intensity in one header table; Pivot reuses Adjacent Windows typography')
 assert 'int NoisePercent = 0' in state and 'Math.Clamp(NoisePercent, 0, 100)' in state
 assert 'noise.ValueChanged' in dialog and 'initial.NoisePercent' in dialog
-assert 'MaxHeight = 760' in dialog and 'HostedDialogSpec' in dialog
+assert 'MaxHeight = 820' in dialog and 'HostedDialogSpec' in dialog
 assert 'CreateCancelConfirmFooter(GlassSettingsResources.Get("CmdApply"))' in dialog
 for language in ('ru-RU', 'en-US'):
     assert 'Reflection_SettingNoise' in (root / f'GlassSettings/Strings/{language}/Resources.resw').read_text()
@@ -75,7 +75,7 @@ assert 'blue / (double)weight' not in effects and 'weight += a' not in effects
 print('PASS: bipolar luminance grain independent of source RGB, Gaussian film samples')
 assert 'bool Enabled = true' in state
 assert 'if (!settings.Enabled) settings = new ReflectionRenderSettings();' in service
-for control in ('groups', 'picker', 'darkPreset', 'lightPreset'):
+for control in ('groups', 'picker'):
     assert f'{control}.IsEnabled = enabled.IsOn;' in dialog
 assert 'pickerRail.IsEnabled' not in dialog
 assert 'void SyncProcessingControls()' in dialog
@@ -95,11 +95,11 @@ assert 'Margin = new Thickness(0, 12, 0, 0)' in dialog
 assert 'Checkerboard' not in desktop_preview and 'preview.Opacity' not in dialog
 print('PASS: process-only Pivot selection, shared wallpaper without image dimming, top content inset')
 assert 'groups.Loaded +=' in dialog and 'groups.Unloaded +=' in dialog
-assert 'Grid.SetColumn(reset, 1)' in dialog and 'body.Children.Add(reset)' not in dialog
+assert 'Grid.SetColumn(presets, 1)' in dialog and 'var reset =' not in dialog
 assert 'Shadow = new ThemeShadow()' in desktop_preview
 assert 'Reflection_NoiseSand' in (root / 'GlassSettings/Strings/ru-RU/Resources.resw').read_text()
 assert 'if (type == 4)' in effects and 'u < 1311' in effects and 'u < 64004' in effects
-print('PASS: Pivot load restoration, top-right Defaults, preview shadow and independent-pixel sand grain')
+print('PASS: Pivot load restoration, top-right theme presets, preview shadow and independent-pixel sand grain')
 assert '"None", "Soft", "Film", "Dots", "Blocks", "Sand"' in dialog
 assert 'noiseType.SelectedIndex = initial.NoiseType + 1' in dialog
 assert 'Math.Clamp(noiseType.SelectedIndex - 1, -1, 4)' in dialog
@@ -118,7 +118,7 @@ print('PASS: reflection numeric inputs reuse popup Animation NumberBox style and
 assert 'GlassAlphaColorPicker' in dialog and 'IsAlphaVisible = true' in dialog
 assert 'ColorRgb' in state and 'Colorize(pixels, settings.ColorRgb)' in service
 assert 'Reflection_PresetDark' in dialog and 'Reflection_PresetLight' in dialog
-assert 'MaxWidth = 1100' in dialog and 'Grid.SetColumn(pickerRail, 1)' in dialog
+assert 'MaxWidth = 960' in dialog and 'Grid.SetColumn(pickerRail, 1)' in dialog
 assert 'EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, callback, IntPtr.Zero)' in desktop_preview
 assert 'WallpaperPreviewCrossfade' in desktop_preview
 assert '_watcher.Changed += OnEnvironmentChanged' in desktop_preview
@@ -165,3 +165,13 @@ assert 'CreateGeometricClip(' not in desktop_preview
 assert 'GetElementVisual(layers)' not in desktop_preview
 assert 'layers.Loaded +=' not in desktop_preview
 print('PASS: XAML owns monitor clipping; no geometric Composition clip on its visual')
+
+assert 'layout.Children.Add(body); layout.Children.Add(editors);' in dialog
+assert 'editors.Children.Add(groups); editors.Children.Add(pickerRail);' in dialog
+assert 'pickerRail.Children.Add(presets)' not in dialog
+assert 'BitmapInterpolationMode.Fant' in dialog
+assert 'preview.DesktopWidth * factor' in dialog and 'RasterizationScale' in dialog
+assert 'preview.SizeChanged +=' in dialog
+assert 'scale.Value = 100; softness.Value = 0;' in dialog
+assert 'darkPreset.IsEnabled = enabled.IsOn' not in dialog
+print('PASS: compact preview-above-editors layout, full recipe presets and filtered desktop-scale thumbnail')

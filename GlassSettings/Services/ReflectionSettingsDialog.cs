@@ -44,7 +44,6 @@ public static class ReflectionSettingsDialog
         System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] dialog: desktop preview ready");
         var renderGate = new SemaphoreSlim(1, 1);
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
-        var reset = new Button { Content = GlassSettingsResources.Get("Reflection_Reset") };
         var body = new StackPanel { Spacing = 8, Margin = new Thickness(0, 12, 0, 0) };
         body.Children.Add(new TextBlock
         {
@@ -57,10 +56,10 @@ public static class ReflectionSettingsDialog
         processingRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         processingRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         enabled.VerticalAlignment = VerticalAlignment.Center;
-        reset.VerticalAlignment = VerticalAlignment.Center;
-        Grid.SetColumn(reset, 1);
+        presets.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(presets, 1);
         processingRow.Children.Add(enabled);
-        processingRow.Children.Add(reset);
+        processingRow.Children.Add(presets);
         body.Children.Add(processingRow);
         var imageGroup = new StackPanel { Spacing = 12 };
         imageGroup.Children.Add(Row("Reflection_SettingScale", scale));
@@ -92,7 +91,6 @@ public static class ReflectionSettingsDialog
             if (trackingGroup && groups.IsLoaded && groups.SelectedIndex >= 0)
                 _selectedGroupIndex = restoredGroupIndex = groups.SelectedIndex;
         };
-        body.Children.Add(groups);
         body.Children.Add(error);
         var pickerRail = new StackPanel { Spacing = 12, MaxWidth = 330 };
         pickerRail.Children.Add(new TextBlock
@@ -100,22 +98,15 @@ public static class ReflectionSettingsDialog
             Text = GlassSettingsResources.Get("Reflection_ColorTitle"),
             Style = (Style)Application.Current.Resources["SubtitleTextBlockStyle"]
         });
-        pickerRail.Children.Add(picker); pickerRail.Children.Add(presets);
-        var layout = new Grid { ColumnSpacing = 28, RowSpacing = 20 };
-        layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        layout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        pickerRail.Children.Add(picker);
+        // Preview spans the dialog; all editing controls live below it.
+        var editors = new Grid { ColumnSpacing = 24 };
+        editors.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        editors.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         Grid.SetColumn(pickerRail, 1);
-        layout.Children.Add(body); layout.Children.Add(pickerRail);
-        layout.SizeChanged += (_, args) =>
-        {
-            bool narrow = args.NewSize.Width < 740;
-            Grid.SetColumn(pickerRail, narrow ? 0 : 1);
-            Grid.SetRow(pickerRail, narrow ? 1 : 0);
-            Grid.SetColumnSpan(body, narrow ? 2 : 1);
-            Grid.SetColumnSpan(pickerRail, narrow ? 2 : 1);
-        };
+        editors.Children.Add(groups); editors.Children.Add(pickerRail);
+        var layout = new StackPanel { Spacing = 12 };
+        layout.Children.Add(body); layout.Children.Add(editors);
         int revision = 0;
         bool closed = false;
         ReflectionRenderSettings Values() => new(
@@ -141,10 +132,25 @@ public static class ReflectionSettingsDialog
                 System.Diagnostics.Debug.WriteLine($"[ReflectionConfigure] reflection render: complete, bytes={png.Length}");
                 using var stream = new MemoryStream(png);
                 using var random = stream.AsRandomAccessStream();
-                var bitmap = new BitmapImage();
-                System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] reflection decode: SetSourceAsync begin");
-                await bitmap.SetSourceAsync(random);
-                System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] reflection decode: SetSourceAsync complete");
+                // Filter the full desktop canvas before display. Letting the GPU
+                // minify native 3–8px tiles directly produces false large patterns/moiré.
+                var decoder = await Windows.Graphics.Imaging.BitmapDecoder.CreateAsync(random);
+                double rasterScale = preview.XamlRoot?.RasterizationScale ?? 1;
+                double factor = Math.Min(1, Math.Min(
+                    Math.Max(1, preview.ActualWidth) * rasterScale / preview.DesktopWidth,
+                    Math.Max(1, preview.ActualHeight) * rasterScale / preview.DesktopHeight));
+                int width = Math.Max(1, (int)Math.Round(preview.DesktopWidth * factor));
+                int height = Math.Max(1, (int)Math.Round(preview.DesktopHeight * factor));
+                var pixels = await decoder.GetPixelDataAsync(
+                    Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8,
+                    Windows.Graphics.Imaging.BitmapAlphaMode.Premultiplied,
+                    new Windows.Graphics.Imaging.BitmapTransform
+                    {
+                        ScaledWidth = (uint)width, ScaledHeight = (uint)height,
+                        InterpolationMode = Windows.Graphics.Imaging.BitmapInterpolationMode.Fant
+                    }, Windows.Graphics.Imaging.ExifOrientationMode.IgnoreExifOrientation,
+                    Windows.Graphics.Imaging.ColorManagementMode.DoNotColorManage);
+                var bitmap = CompositionWallpaperPipelineBuilder.CreateBitmap(width, height, pixels.DetachPixelData());
                 if (closed || current != revision) return;
                 preview.SetReflection(bitmap); error.Text = ""; error.Visibility = Visibility.Collapsed;
             }
@@ -163,10 +169,11 @@ public static class ReflectionSettingsDialog
         picker.ColorChanged += (_, _) => _ = RefreshAsync();
         void ApplyPreset(uint argb)
         {
+            enabled.IsOn = true;
+            scale.Value = 100; softness.Value = 0;
+            noise.Value = 0; noiseDensity.Value = 50; noiseType.SelectedIndex = 0;
             picker.SetColor(argb); _ = RefreshAsync();
         }
-        darkPreset.Click += (_, _) => ApplyPreset(0xFF000000u);
-        lightPreset.Click += (_, _) => ApplyPreset(0xFFA0A0A0u);
         softness.ValueChanged += (_, _) => _ = RefreshAsync();
         noise.ValueChanged += (_, _) => _ = RefreshAsync();
         noiseDensity.ValueChanged += (_, _) => _ = RefreshAsync();
@@ -181,8 +188,6 @@ public static class ReflectionSettingsDialog
         {
             groups.IsEnabled = enabled.IsOn;
             picker.IsEnabled = enabled.IsOn;
-            darkPreset.IsEnabled = enabled.IsOn;
-            lightPreset.IsEnabled = enabled.IsOn;
             SyncNoiseControls();
         }
         enabled.Toggled += (_, _) =>
@@ -190,7 +195,7 @@ public static class ReflectionSettingsDialog
             SyncProcessingControls(); _ = RefreshAsync();
         };
         SyncProcessingControls();
-        reset.Click += (_, _) => { enabled.IsOn = true; scale.Value = 100; picker.SetColor(0xFF000000u); softness.Value = 0; noise.Value = 0; noiseDensity.Value = 50; noiseType.SelectedIndex = 0; };
+        preview.SizeChanged += (_, _) => _ = RefreshAsync();
         System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] dialog: start reflection render");
         _ = RefreshAsync();
         try
@@ -199,7 +204,7 @@ public static class ReflectionSettingsDialog
             var result = await HostedDialogService.ShowAsync(new HostedDialogSpec
             {
                 Title = GlassSettingsResources.Get("Reflection_Configure"), Body = HostedDialogLayout.WrapBodyWithContentPadding(layout),
-                MinWidth = 780, MaxWidth = 1100, MaxHeight = 760,
+                MinWidth = 700, MaxWidth = 960, MaxHeight = 820,
                 Footer = HostedConfirmationDialogService.CreateCancelConfirmFooter(GlassSettingsResources.Get("CmdApply"))
             });
             return result == HostedDialogResult.Primary ? Values().Normalize() : null;
