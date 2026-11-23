@@ -175,3 +175,12 @@ assert 'preview.SizeChanged +=' in dialog
 assert 'scale.Value = 100; softness.Value = 0;' in dialog
 assert 'darkPreset.IsEnabled = enabled.IsOn' not in dialog
 print('PASS: compact preview-above-editors layout, full recipe presets and filtered desktop-scale thumbnail')
+
+assert 'darkPreset.Click += (_, _) => ApplyPreset(0xFF000000u);' in dialog
+assert 'lightPreset.Click += (_, _) => ApplyPreset(0xFFA0A0A0u);' in dialog
+assert 'Height = 176, VerticalAlignment = VerticalAlignment.Top' in dialog
+assert 'picker.UseCompactLayout();' in dialog
+picker_code = (root / 'GlassSettings/Controls/GlassAlphaColorPicker.xaml.cs').read_text()
+assert 'spectrum.Height = 140;' in picker_code
+assert 'Picker.IsMoreButtonVisible = false;' in picker_code
+print('PASS: A layout uses top-aligned editors and compact spectrum; both preset Click handlers are connected')

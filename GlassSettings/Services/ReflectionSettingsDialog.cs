@@ -20,6 +20,7 @@ public static class ReflectionSettingsDialog
         var scale = Number("Reflection_SettingScale", 25, 200, initial.ScalePercent);
         System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] dialog: create picker");
         var picker = new GlassAlphaColorPicker { IsAlphaVisible = true };
+        picker.UseCompactLayout();
         picker.SetColor(((uint)Math.Round(initial.OpacityPercent * 255.0 / 100) << 24) | initial.ColorRgb);
         var presets = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         var darkPreset = new Button { Content = GlassSettingsResources.Get("Reflection_PresetDark") };
@@ -68,7 +69,7 @@ public static class ReflectionSettingsDialog
         noiseGroup.Children.Add(Row("Reflection_SettingNoiseType", noiseType));
         noiseGroup.Children.Add(Row("Reflection_SettingNoise", noise));
         noiseGroup.Children.Add(Row("Reflection_SettingNoiseDensity", noiseDensity));
-        var groups = new Pivot { Height = 176 };
+        var groups = new Pivot { Height = 176, VerticalAlignment = VerticalAlignment.Top };
         groups.Resources.Add(typeof(PivotHeaderItem), new Style(typeof(PivotHeaderItem))
         {
             BasedOn = (Style)Application.Current.Resources["GlassSettingsPivotHeaderItemStyle"]
@@ -92,11 +93,14 @@ public static class ReflectionSettingsDialog
                 _selectedGroupIndex = restoredGroupIndex = groups.SelectedIndex;
         };
         body.Children.Add(error);
-        var pickerRail = new StackPanel { Spacing = 12, MaxWidth = 330 };
+        var pickerRail = new StackPanel
+        {
+            Spacing = 8, Width = 280, VerticalAlignment = VerticalAlignment.Top
+        };
         pickerRail.Children.Add(new TextBlock
         {
             Text = GlassSettingsResources.Get("Reflection_ColorTitle"),
-            Style = (Style)Application.Current.Resources["SubtitleTextBlockStyle"]
+            Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"]
         });
         pickerRail.Children.Add(picker);
         // Preview spans the dialog; all editing controls live below it.
@@ -174,6 +178,8 @@ public static class ReflectionSettingsDialog
             noise.Value = 0; noiseDensity.Value = 50; noiseType.SelectedIndex = 0;
             picker.SetColor(argb); _ = RefreshAsync();
         }
+        darkPreset.Click += (_, _) => ApplyPreset(0xFF000000u);
+        lightPreset.Click += (_, _) => ApplyPreset(0xFFA0A0A0u);
         softness.ValueChanged += (_, _) => _ = RefreshAsync();
         noise.ValueChanged += (_, _) => _ = RefreshAsync();
         noiseDensity.ValueChanged += (_, _) => _ = RefreshAsync();
