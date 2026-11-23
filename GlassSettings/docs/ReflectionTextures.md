@@ -282,3 +282,18 @@ python3 GlassSetup/tests/openglass_resources_contract.py
 превью и PNG в OpenGlass, resize шапки, повторное открытие диалога, отмена,
 HKCU, AccessDenied/удаление/очистка, ограничения PNG и SVG, несколько мониторов
 и поведение при замене результата другим пользователем/процессом.
+
+### Диагностика открытия диалога (Debug)
+
+В Output Visual Studio этапы открытия помечаются `[ReflectionConfigure]`:
+click → settings → picker → desktop snapshot/cards → render → hosted dialog,
+а после Loaded — composition clip и загрузка wallpaper sources. Обработчик
+кнопки выводит полное managed exception и повторно бросает его для штатной
+диагностики (ошибка не маскируется под Cancel). Native FailFast этими catch
+не перехватывается: для него необходимы код исключения/стек отладчика или дамп.
+
+Полученный журнал GlassSettings.txt до нажатия «Настроить» на Debug x64 с
+ed2a5ac содержит успешную генерацию/декодирование AtlasPreview, но не содержит
+исключения или следа открытия reflection dialog. Он не устанавливает причину
+повторного падения; предыдущий стек про WinRT IEnumerable к нему автоматически
+не относится.

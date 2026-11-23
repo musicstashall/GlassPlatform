@@ -26,10 +26,12 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
         // FindAll projects an IReadOnlyList whose WinRT IEnumerable QI can fail
         // on some Windows App SDK runtimes. Use Count/indexer, then LINQ only
         // on the managed snapshot (never on the projected collection).
+        System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] preview: DisplayArea.FindAll");
         var displays = DisplayArea.FindAll();
         var bounds = new Windows.Graphics.RectInt32[displays.Count];
         for (int i = 0; i < bounds.Length; i++)
             bounds[i] = displays[i].OuterBounds;
+        System.Diagnostics.Debug.WriteLine($"[ReflectionConfigure] preview: monitor snapshot ready, count={bounds.Length}");
         _bounds = bounds;
         if (bounds.Length == 0) throw new InvalidOperationException("No desktop displays.");
         int left = bounds.Min(b => b.X), top = bounds.Min(b => b.Y);
@@ -41,6 +43,7 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
         Margin = new Thickness(8, 8, 8, 16);
         foreach (var monitor in bounds)
         {
+            System.Diagnostics.Debug.WriteLine($"[ReflectionConfigure] preview: create monitor {monitor.X},{monitor.Y} {monitor.Width}x{monitor.Height}");
             var fallback = new Border
             {
                 Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"]
@@ -67,11 +70,13 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
             double radius = Math.Max(8, DesktopWidth / 600.0 * 8);
             layers.Loaded += (_, _) =>
             {
+                System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] preview: apply loaded composition clip");
                 var visual = Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(layers);
                 var rounded = visual.Compositor.CreateRoundedRectangleGeometry();
                 rounded.Size = new System.Numerics.Vector2(monitor.Width, monitor.Height);
                 rounded.CornerRadius = new System.Numerics.Vector2((float)radius);
                 visual.Clip = visual.Compositor.CreateGeometricClip(rounded);
+                System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] preview: composition clip ready");
             };
             var card = new Border
             {
@@ -116,10 +121,13 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
         {
             // MainWindow owns invalidation on wallpaper changes. Never create a
             // second watcher, read/decode pipeline or registry wallpaper resolver here.
+            System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] wallpaper: begin shared load");
             DesktopWallpaperImageCache.BeginLoad(DispatcherQueue);
             if (DesktopWallpaperImageCache.LoadTask is { } task) await task;
             if (_disposed || revision != _wallpaperRevision) return;
+            System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] wallpaper: read monitor sources");
             var sources = await DesktopWallpaperImageCache.GetMonitorDisplaySourcesAsync(DispatcherQueue);
+            System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] wallpaper: monitor sources ready");
             if (_disposed || revision != _wallpaperRevision) return;
             var shared = DesktopWallpaperImageCache.GetDisplaySourceOrLoad();
             for (int i = 0; i < _bounds.Length; i++)
@@ -140,7 +148,8 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
         }
         catch (Exception error)
         {
-            System.Diagnostics.Trace.TraceWarning("Reflection wallpaper preview: {0}", error.Message);
+            System.Diagnostics.Debug.WriteLine($"[ReflectionConfigure] wallpaper failed: {error}");
+            System.Diagnostics.Trace.TraceWarning("Reflection wallpaper preview: {0}", error);
         }
     }
 

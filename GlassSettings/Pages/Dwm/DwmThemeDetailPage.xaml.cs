@@ -828,8 +828,20 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         if (_currentReflectionPath is null) return;
         var source = ReflectionTextureService.ResolveSource(_currentReflectionPath);
         if (!ReflectionTextureService.IsTexture(source) && !SvgReflectionRenderer.IsPattern(source)) return;
-        var settings = await ReflectionSettingsDialog.ShowAsync(source);
-        if (settings is not null) await ApplyReflectionSourceAsync(source, settings);
+        System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] click: opening dialog");
+        try
+        {
+            var settings = await ReflectionSettingsDialog.ShowAsync(source);
+            System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] dialog: closed");
+            if (settings is not null) await ApplyReflectionSourceAsync(source, settings);
+        }
+        catch (Exception error)
+        {
+            // Preserve normal unhandled-error reporting after emitting the full
+            // managed exception; never silently treat a broken dialog as Cancel.
+            System.Diagnostics.Debug.WriteLine($"[ReflectionConfigure] failed: {error}");
+            throw;
+        }
     }
 
     private void UpdateMaterialTileSelection() =>

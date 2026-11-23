@@ -15,8 +15,10 @@ public static class ReflectionSettingsDialog
 
     public static async Task<ReflectionRenderSettings?> ShowAsync(string source)
     {
+        System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] dialog: read settings");
         var initial = ReflectionRenderState.Settings;
         var scale = Number("Reflection_SettingScale", 25, 200, initial.ScalePercent);
+        System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] dialog: create picker");
         var picker = new GlassAlphaColorPicker { IsAlphaVisible = true };
         picker.SetColor(((uint)Math.Round(initial.OpacityPercent * 255.0 / 100) << 24) | initial.ColorRgb);
         var presets = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
@@ -37,7 +39,9 @@ public static class ReflectionSettingsDialog
         {
             Header = GlassSettingsResources.Get("Reflection_EnableProcessing"), IsOn = initial.Enabled
         };
+        System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] dialog: create desktop preview");
         using var preview = new ReflectionDesktopPreview();
+        System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] dialog: desktop preview ready");
         var renderGate = new SemaphoreSlim(1, 1);
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
         var reset = new Button { Content = GlassSettingsResources.Get("Reflection_Reset") };
@@ -182,9 +186,11 @@ public static class ReflectionSettingsDialog
         };
         SyncProcessingControls();
         reset.Click += (_, _) => { enabled.IsOn = true; scale.Value = 100; picker.SetColor(0xFF000000u); softness.Value = 0; noise.Value = 0; noiseDensity.Value = 50; noiseType.SelectedIndex = 0; };
+        System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] dialog: start reflection render");
         _ = RefreshAsync();
         try
         {
+            System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] dialog: show hosted dialog");
             var result = await HostedDialogService.ShowAsync(new HostedDialogSpec
             {
                 Title = GlassSettingsResources.Get("Reflection_Configure"), Body = HostedDialogLayout.WrapBodyWithContentPadding(layout),
