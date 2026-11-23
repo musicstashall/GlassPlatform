@@ -1,5 +1,6 @@
 using GlassSettings.Services;
-using Microsoft.UI.Windowing;
+using System.Runtime.InteropServices;
+using System.ComponentModel;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -23,14 +24,8 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
 
     public ReflectionDesktopPreview()
     {
-        // FindAll projects an IReadOnlyList whose WinRT IEnumerable QI can fail
-        // on some Windows App SDK runtimes. Use Count/indexer, then LINQ only
-        // on the managed snapshot (never on the projected collection).
-        System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] preview: DisplayArea.FindAll");
-        var displays = DisplayArea.FindAll();
-        var bounds = new Windows.Graphics.RectInt32[displays.Count];
-        for (int i = 0; i < bounds.Length; i++)
-            bounds[i] = displays[i].OuterBounds;
+        System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] preview: EnumDisplayMonitors");
+        var bounds = ReadMonitorBounds();
         System.Diagnostics.Debug.WriteLine($"[ReflectionConfigure] preview: monitor snapshot ready, count={bounds.Length}");
         _bounds = bounds;
         if (bounds.Length == 0) throw new InvalidOperationException("No desktop displays.");
@@ -95,6 +90,38 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
         if (_watcher is not null) _watcher.Changed += OnEnvironmentChanged;
         Loaded += OnLoaded;
     }
+
+    // Avoid DisplayArea.FindAll and its failing WinRT collection projection.
+    // EnumDisplayMonitors supplies full monitor rectangles, not working areas.
+    private static Windows.Graphics.RectInt32[] ReadMonitorBounds()
+    {
+        var bounds = new List<Windows.Graphics.RectInt32>();
+        MonitorEnumProc callback = (IntPtr monitor, IntPtr hdc, ref MonitorRect rect, IntPtr data) =>
+        {
+            if (rect.Right > rect.Left && rect.Bottom > rect.Top)
+                bounds.Add(new Windows.Graphics.RectInt32(rect.Left, rect.Top,
+                    rect.Right - rect.Left, rect.Bottom - rect.Top));
+            return true;
+        };
+        if (!EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, callback, IntPtr.Zero))
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot enumerate desktop monitors.");
+        return bounds.ToArray();
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MonitorRect
+    {
+        public int Left, Top, Right, Bottom;
+    }
+
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private delegate bool MonitorEnumProc(IntPtr monitor, IntPtr hdc, ref MonitorRect rect, IntPtr data);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr clip,
+        MonitorEnumProc callback, IntPtr data);
 
     public void SetReflection(ImageSource source)
     {

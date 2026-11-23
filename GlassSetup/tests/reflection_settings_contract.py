@@ -119,7 +119,7 @@ assert 'GlassAlphaColorPicker' in dialog and 'IsAlphaVisible = true' in dialog
 assert 'ColorRgb' in state and 'Colorize(pixels, settings.ColorRgb)' in service
 assert 'Reflection_PresetDark' in dialog and 'Reflection_PresetLight' in dialog
 assert 'MaxWidth = 1100' in dialog and 'Grid.SetColumn(pickerRail, 1)' in dialog
-assert 'DisplayArea.FindAll()' in desktop_preview
+assert 'EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, callback, IntPtr.Zero)' in desktop_preview
 assert 'WallpaperPreviewCrossfade' in desktop_preview
 assert '_watcher.Changed += OnEnvironmentChanged' in desktop_preview
 assert '_watcher.Changed -= OnEnvironmentChanged' in desktop_preview
@@ -154,9 +154,8 @@ assert '_Lite' not in state and 'uint ColorRgb = 0' in state
 assert 'state.Source' in service and 'state.Output' in service
 print('PASS: only current publication resolves its explicit source; no legacy paths, filename aliases or color migration')
 
-assert 'var displays = DisplayArea.FindAll();' in desktop_preview
-assert 'new Windows.Graphics.RectInt32[displays.Count]' in desktop_preview
-assert 'bounds[i] = displays[i].OuterBounds;' in desktop_preview
-assert 'DisplayArea.FindAll().Select' not in desktop_preview
-assert 'foreach (var display in displays)' not in desktop_preview
-print('PASS: monitor snapshot uses WinRT Count/indexer, not the failing IEnumerable projection')
+assert 'var displays = DisplayArea.FindAll();' not in desktop_preview
+assert 'bounds.Add(new Windows.Graphics.RectInt32(rect.Left, rect.Top,' in desktop_preview
+assert 'rect.Right - rect.Left, rect.Bottom - rect.Top' in desktop_preview
+assert 'return bounds.ToArray();' in desktop_preview
+print('PASS: monitor snapshot uses native full monitor rectangles, without WinRT DisplayArea calls')
