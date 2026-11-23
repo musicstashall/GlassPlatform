@@ -1,5 +1,15 @@
 // VCL client background: observe EXE FillRect before BeginPaint returns, then
 // validate its HDC against BeginPaint or a subsequent WM_DRAWITEM before editing.
+//
+// VCL erases a wrapped native control itself (TWinControl.WMEraseBkgnd fills
+// the client with the control's brush) whenever Windows sends WM_ERASEBKGND.
+// Windows sends it from inside BeginPaint only when the erase is still pending
+// there. After a window was shown, restored or resized it sends the message on
+// its own, at once and outside any paint: that fill is not seen here, and the
+// WM_PAINT that follows erases nothing. A list then repaints only its rows and
+// keeps what VCL filled below the last one. So when BeginPaint of a list brought
+// no erase, the list is asked to erase once more into the DC BeginPaint has just
+// returned (EraseAgain): the same fill arrives where it can be replaced.
 #include "CorePch.h"
 #include <Hooks/delphi/TBackgroundHooks.h>
 #include <Hooks/delphi/TListBoxDraw.h>
@@ -42,6 +52,8 @@ namespace GlassCore::DelphiBackground
             HGDIOBJ observedBitmap{};
             RECT observedRect{};
             bool defaultBrush{};
+            bool erasing{};       // EraseAgain is sending WM_ERASEBKGND for paintDc
+            bool erasedAgain{};   // ...and its default fill was replaced
         };
         thread_local std::vector<Session> g_sessions;
         thread_local unsigned long long g_serial = 0;
@@ -136,6 +148,17 @@ namespace GlassCore::DelphiBackground
                 return orig(dc, r, brush);
             const bool sys = IsSystemBrush(brush)
                 && (!s.number || GlassShared::HasDelphiInputDefaultBackground(s.hwnd));
+            // The erase EraseAgain asked for. BeginPaint returned this DC for this
+            // window a moment ago; the dispatcher has not recorded it yet. Any
+            // other DC and any other brush are the application's own business.
+            if (s.erasing)
+            {
+                if (s.paintDc != dc || !sys
+                    || !PatBlt(dc, r->left, r->top, r->right-r->left, r->bottom-r->top, BLACKNESS))
+                    return orig(dc, r, brush);
+                g_sessions[slot].erasedAgain = true; // nothing above runs the application's code
+                return 1;
+            }
             // Once BeginPaint has returned, only the exact returned client DC is eligible.
             if (s.paint && s.afterBegin && s.paintDc == dc && sys
                 && GlassCore::PaintDispatcher::IsCurrentPaintDcForHwnd(s.hwnd, dc))
@@ -170,12 +193,40 @@ namespace GlassCore::DelphiBackground
             SetLastError(error);
             return result;
         }
-        bool AfterPaint(HWND hwnd, HDC dc, LPPAINTSTRUCT, HMODULE) noexcept
+        // Windows erased this list before BeginPaint, outside the session (see the
+        // header). The message is the one Windows itself sends: the DC to erase
+        // and nothing else. Only the default fill of the whole client is replaced,
+        // inside the update region BeginPaint selected into the DC.
+        bool EraseAgain(size_t slot, HWND hwnd, HDC dc, const PAINTSTRUCT& ps) noexcept
+        {
+            const unsigned long long serial = g_sessions[slot].serial;
+            g_sessions[slot].erasing = true;
+            SendMessageW(hwnd, WM_ERASEBKGND, reinterpret_cast<WPARAM>(dc), 0);
+            // The handler is the application's: it may have painted other windows.
+            if (slot >= g_sessions.size() || g_sessions[slot].serial != serial) return false;
+            g_sessions[slot].erasing = false;
+            const bool cleared = g_sessions[slot].erasedAgain;
+#if defined(_DEBUG)
+            static thread_local ULONGLONG epoch = 0;
+            static thread_local unsigned budget = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (!epoch || now - epoch >= 1000) { epoch = now; budget = 12; }
+            if (budget) { --budget; DebugLog(DBG_NORMAL, L"[GlassCore][DelphiBackground] erase-again hwnd=0x%p dc=0x%p paint=[%ld,%ld,%ld,%ld] cleared=%d",
+                hwnd, dc, ps.rcPaint.left, ps.rcPaint.top, ps.rcPaint.right, ps.rcPaint.bottom, cleared ? 1 : 0); }
+#else
+            (void)ps;
+#endif
+            return cleared;
+        }
+        bool AfterPaint(HWND hwnd, HDC dc, LPPAINTSTRUCT ps, HMODULE) noexcept
         {
             if (g_shutdown.load(std::memory_order_acquire) || g_sessions.empty()) return false;
             auto& s = g_sessions.back();
             if (!s.armed || !s.paint || s.hwnd != hwnd) return false;
             s.afterBegin = true; s.paintDc = dc;
+            // Nothing was filled while BeginPaint ran: the erase came before it.
+            if (s.list && !s.observedDc && dc && ps && !IsRectEmpty(&ps->rcPaint))
+                return EraseAgain(g_sessions.size() - 1, hwnd, dc, *ps);
             if (!s.defaultBrush || (s.number && !GlassShared::HasDelphiInputDefaultBackground(hwnd)) || s.observedDc != dc || !IsFullClient(hwnd, dc, &s.observedRect)
                 || s.observedBitmap != GetCurrentObject(dc, OBJ_BITMAP)) return false;
             RECT clip{};

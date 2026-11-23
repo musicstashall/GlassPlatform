@@ -3044,5 +3044,88 @@ class DelphiPipelineContract(unittest.TestCase):
         for marker in ('for (UINT msg:{WM_CTLCOLORSTATIC,WM_CTLCOLOREDIT})', 'L"msg=0x138"', 'L"msg=0x133"'):
             self.assertIn(marker, harness)
 
+    def test_vcl_list_erase_sent_before_beginpaint_is_asked_again_on_the_returned_dc(self):
+        code = read('GlassCore/src/Hooks/delphi/TBackgroundHooks.cpp')
+        after = code.split('bool AfterPaint(HWND hwnd, HDC dc, LPPAINTSTRUCT ps, HMODULE) noexcept', 1)[1].split(
+            '    void Startup() noexcept', 1)[0]
+        # Only a list, only when BeginPaint brought no client erase, only with something to repaint.
+        self.assertIn('if (s.list && !s.observedDc && dc && ps && !IsRectEmpty(&ps->rcPaint))\n'
+                      '                return EraseAgain(g_sessions.size() - 1, hwnd, dc, *ps);', after)
+        self.assertLess(after.index('if (!s.armed || !s.paint || s.hwnd != hwnd) return false;'),
+                        after.index('s.afterBegin = true; s.paintDc = dc;'))
+        self.assertLess(after.index('s.afterBegin = true; s.paintDc = dc;'), after.index('return EraseAgain('))
+        self.assertLess(after.index('return EraseAgain('), after.index('if (!s.defaultBrush'))
+        again = code.split('bool EraseAgain(size_t slot, HWND hwnd, HDC dc, const PAINTSTRUCT& ps) noexcept', 1)[1].split(
+            'bool AfterPaint(', 1)[0]
+        # The message Windows itself sends: the DC and nothing in lParam. The handler is the application's,
+        # so the session is found again by position and serial, never through a kept reference.
+        for marker in ('const unsigned long long serial = g_sessions[slot].serial;',
+                       'g_sessions[slot].erasing = true;',
+                       'SendMessageW(hwnd, WM_ERASEBKGND, reinterpret_cast<WPARAM>(dc), 0);',
+                       'if (slot >= g_sessions.size() || g_sessions[slot].serial != serial) return false;',
+                       'g_sessions[slot].erasing = false;',
+                       'const bool cleared = g_sessions[slot].erasedAgain;', 'return cleared;',
+                       'L"[GlassCore][DelphiBackground] erase-again hwnd=0x%p dc=0x%p paint=[%ld,%ld,%ld,%ld] cleared=%d"',
+                       'budget = 12'):
+            self.assertIn(marker, again)
+        self.assertLess(again.index('g_sessions[slot].erasing = true;'), again.index('SendMessageW('))
+        self.assertLess(again.index('SendMessageW('), again.index('g_sessions[slot].serial != serial'))
+        self.assertLess(again.index('g_sessions[slot].serial != serial'), again.index('g_sessions[slot].erasing = false;'))
+        for forbidden in ('auto& s', 'g_sessions.back()', 'PatBlt', 'FillRect'):
+            self.assertNotIn(forbidden, again)
+        self.assertEqual(code.count('SendMessageW(hwnd, WM_ERASEBKGND'), 1)
+        fill = code.split('int WINAPI ObserveFill(HDC dc, const RECT* r, HBRUSH brush)\n        {', 1)[1].split(
+            'bool EraseAgain(', 1)[0]
+        branch = fill.split('if (s.erasing)', 1)[1].split('// Once BeginPaint has returned', 1)[0]
+        # Replaced, not followed: the returned DC, a default brush, the whole client; anything else is native.
+        for marker in ('if (s.paintDc != dc || !sys',
+                       '|| !PatBlt(dc, r->left, r->top, r->right-r->left, r->bottom-r->top, BLACKNESS))',
+                       'return orig(dc, r, brush);', 'g_sessions[slot].erasedAgain = true;', 'return 1;'):
+            self.assertIn(marker, branch)
+        self.assertEqual(branch.count('orig(dc, r, brush)'), 1)
+        self.assertLess(fill.index('|| !IsFullClient(s.hwnd, dc, r))'), fill.index('if (s.erasing)'))
+        self.assertLess(fill.index('const bool sys = IsSystemBrush(brush)'), fill.index('if (s.erasing)'))
+        self.assertLess(fill.index('if (s.erasing)'),
+                        fill.index('if (s.paint && s.afterBegin && s.paintDc == dc && sys'))
+        # No new hook, provider or subclass; no repaint is forced and no pixel is read.
+        for forbidden in ('SetWindowSubclass', 'GetPixel', 'RedrawWindow', 'InvalidateRect', 'UpdateWindow',
+                          'Detours::', 'GetSysColorBrush', 'CreateSolidBrush', 'PostMessage', 'SendMessageTimeout'):
+            self.assertNotIn(forbidden, code)
+        for registration in ('RegisterPaintProvider(', 'RegisterPostPaintProvider(', 'RegisterGetDCProvider('):
+            self.assertEqual(code.count(registration), 1)
+        self.assertIn('HookDispatcher<1, 3> g_dispatcher{g_dep, nullptr};', code)
+        self.assertEqual(read('GlassCore/Include/Hooks/delphi/TBackgroundHooks.h').count('noexcept;'), 3)
+
+    def test_vcl_background_suite_compiles_complete_production_over_recording_doubles(self):
+        test = read('WndCompat/tests/vcl_background_rendering_tests.cpp')
+        self.assertTrue(test.startswith('#include "vcl_background_test_shim.h"\n'
+                                        '#include "../../GlassCore/src/Hooks/delphi/TBackgroundHooks.cpp"\n\n'
+                                        '#define CHECK(expr)'))
+        self.assertEqual(test.count('#include "'), 2)
+        shim = read('WndCompat/tests/vcl_background_test_shim.h')
+        self.assertEqual(shim.count('#include "'), 0)
+        # The window double erases the way TWinControl.WMEraseBkgnd does, through the EXE's import, and the
+        # dispatcher double records the paint DC only after the post providers ran.
+        for marker in ('if (w->erases && (!w->doubleBuffered || wParam == static_cast<WPARAM>(lParam)))',
+                       'ExeFillRect(*GlassCore::ModuleHandler::g_entryPointModule, dc, &w->client, w->brush);',
+                       'assert(dc && rop == BLACKNESS);'):
+            self.assertIn(marker, shim)
+        begin = test.split('bool Begin(TestWindow& w, TestDC& dc, bool erasePending, PAINTSTRUCT* ps = nullptr)', 1)[1].split(
+            'void End(TestWindow& w, TestDC& dc)', 1)[0]
+        self.assertLess(begin.index('paintProviders.front().onBegin(&w, &exe);'),
+                        begin.index('if (erasePending) SendMessageW(&w, WM_ERASEBKGND'))
+        self.assertLess(begin.index('if (erasePending) SendMessageW(&w, WM_ERASEBKGND'),
+                        begin.index('postProviders.front().onAfterBeginPaint('))
+        self.assertLess(begin.index('postProviders.front().onAfterBeginPaint('),
+                        begin.index('BgTest::paintDcs[&dc] = &w;'))
+        runner = read('WndCompat/tests/vcl_background_rendering_test.py')
+        for marker in ("'Release'", "'Debug'", "'-D_DEBUG'", "'-DGLASS_DELPHI_DRAW_PROBE'", "'-Werror'", "'-std=c++20'"):
+            self.assertIn(marker, runner)
+        for forbidden in ('read_text', 'source.split(', 'code.split(', '-Wno-error'):
+            self.assertNotIn(forbidden, runner)
+        cases = re.findall(r'name == "([a-z-]+)"', test)
+        self.assertEqual(len(cases), 9)
+        self.assertEqual(sorted(cases), sorted(re.findall(r"self\.run_case\('([a-z-]+)'\)", runner)))
+
 if __name__ == "__main__":
     unittest.main()
