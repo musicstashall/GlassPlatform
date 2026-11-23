@@ -210,7 +210,7 @@ assert 'presets.Children.Add(customPreset)' in dialog
 assert 'customPreset.Click +=' in dialog
 assert 'recentValues.RemoveAll(IsBuiltInColor)' in dialog
 assert 'ReadRecentAccentColors()' not in dialog
-assert 'customColor = color;' in dialog and 'recentValues.Insert(0, color)' in dialog
+assert 'customColor = color;' in dialog and 'recentValues.Insert(0, appliedColor)' in dialog
 assert 'ReflectionColorHistory.Save(recentValues, customColor)' in dialog
 assert 'ReadCustom()' in history and '"CustomColor"' in history
 print('PASS: fourth custom preset, previous custom enters history, all preset duplicates excluded, no imported Windows colors')
@@ -241,3 +241,13 @@ assert 'presets.Children.Clear()' not in dialog
 assert 'customPreset.SwatchColor' not in dialog
 assert 'recentValues.Count > 4' in dialog and '.Take(8)' not in history
 print('PASS: neutral icon picker launcher stays last in unified grid, max four custom history colors, stable flyout anchor')
+
+pending_color = dialog[dialog.index('void UpdatePendingColor()'):dialog.index('void ApplyPreset')]
+assert 'recentValues.' not in pending_color and 'PopulateRecentColors()' not in pending_color
+assert 'UpdatePendingColor(); _ = RefreshAsync();' in pending_color
+apply_block = dialog[dialog.index('if (result == HostedDialogResult.Primary)'):dialog.index('return null;')]
+assert 'recentValues.Insert(0, appliedColor)' in apply_block
+assert 'ReflectionColorHistory.Save(recentValues, customColor)' in apply_block
+assert dialog.count('recentValues.Insert(0, appliedColor)') == 1
+assert 'RememberLocalColor' not in dialog
+print('PASS: picker edits do not mutate/rebuild history; only explicit Apply records the final selected color')

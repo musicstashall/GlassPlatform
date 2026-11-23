@@ -267,7 +267,7 @@ public static class ReflectionSettingsDialog
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(swatch, $"#{color:X8}");
                 swatch.Clicked += (_, _) =>
                 {
-                    picker.SetColor(color); RememberLocalColor(); _ = RefreshAsync();
+                    picker.SetColor(color); UpdatePendingColor(); _ = RefreshAsync();
                 };
                 presets.Children.Insert(presets.Children.Count - 1, swatch);
                 recentSwatches.Add(swatch);
@@ -275,19 +275,14 @@ public static class ReflectionSettingsDialog
             if (editorWidth > 0) UpdateEditorLayout(editorWidth);
             SyncColorSelection();
         }
-        void RememberLocalColor()
+        void UpdatePendingColor()
         {
             uint color = picker.GetColorArgb();
-            if (!IsBuiltInColor(color))
-            {
-                customColor = color;
-                recentValues.Remove(color); recentValues.Insert(0, color);
-            }
-            recentValues.RemoveAll(IsBuiltInColor);
-            if (recentValues.Count > 4) recentValues.RemoveRange(4, recentValues.Count - 4);
-            PopulateRecentColors();
+            if (!IsBuiltInColor(color)) customColor = color;
+            // Editing updates only the pending color and preview, never the history tiles.
+            SyncColorSelection();
         }
-        picker.ColorChanged += (_, _) => { RememberLocalColor(); _ = RefreshAsync(); };
+        picker.ColorChanged += (_, _) => { UpdatePendingColor(); _ = RefreshAsync(); };
         void ApplyPreset(uint argb)
         {
             enabled.IsOn = true;
@@ -353,7 +348,15 @@ public static class ReflectionSettingsDialog
             });
             if (result == HostedDialogResult.Primary)
             {
+                uint appliedColor = picker.GetColorArgb();
+                if (!IsBuiltInColor(appliedColor))
+                {
+                    customColor = appliedColor;
+                    recentValues.Remove(appliedColor);
+                    recentValues.Insert(0, appliedColor);
+                }
                 recentValues.RemoveAll(IsBuiltInColor);
+                if (recentValues.Count > 4) recentValues.RemoveRange(4, recentValues.Count - 4);
                 ReflectionColorHistory.Save(recentValues, customColor);
                 return Values().Normalize();
             }
