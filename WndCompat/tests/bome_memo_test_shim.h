@@ -261,6 +261,36 @@ namespace GlassCore::Text
 }
 namespace GlassCore::FormsHooks
 { inline void DrawTextExAttach(bool) { ++MemoTest::formAttachCalls; } }
+namespace MemoTest
+{
+    // What production logs: the format and its arguments in order, pointers
+    // and integers apart from strings. The clock drives the rate limit.
+    struct Log { std::wstring format; std::vector<long long> numbers; std::vector<std::wstring> strings; };
+    inline thread_local std::vector<Log> logs;
+    inline ULONGLONG clock = 100;
+    inline std::unordered_map<HDC, DWORD> objectTypes; // e.g. a printer DC: no window, not a memory DC
+}
+inline DWORD MemoObjectType(HDC dc)
+{
+    const auto it = MemoTest::objectTypes.find(dc);
+    return it == MemoTest::objectTypes.end() ? GetObjectType(dc) : it->second;
+}
+template <typename T> inline void MemoCaptureLogArg(MemoTest::Log& log, T value)
+{
+    if constexpr (std::is_convertible_v<T, const wchar_t*>)
+        log.strings.emplace_back(value ? static_cast<const wchar_t*>(value) : L"(null)");
+    else if constexpr (std::is_pointer_v<T>)
+        log.numbers.push_back(static_cast<long long>(reinterpret_cast<std::intptr_t>(value)));
+    else
+        log.numbers.push_back(static_cast<long long>(value));
+}
+template <typename... Args> inline void MemoDebugLog(int, const wchar_t* format, Args... args)
+{
+    MemoTest::Log log{format, {}, {}};
+    (MemoCaptureLogArg(log, args), ...);
+    MemoTest::logs.push_back(std::move(log));
+}
+inline ULONGLONG MemoTickCount64() { return MemoTest::clock; }
 namespace GlassCore::TextGlow
 {
     enum class TextGlowSpreadCategory { Global };
@@ -273,3 +303,6 @@ namespace GlassCore::TextGlow
 #define SaveDC MemoSaveDC
 #define FillRect MemoNativeFill
 #define DrawTextWithAlpha MemoDrawTextWithAlpha
+#define DebugLog MemoDebugLog
+#define GetTickCount64 MemoTickCount64
+#define GetObjectType MemoObjectType

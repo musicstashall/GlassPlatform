@@ -180,12 +180,56 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('RegisterPostPaintProvider({ Root_OnBomeMemoAfterBeginPaint })', root)
         self.assertIn('GlassCore::BomeMemo::ClearSessions()', root)
         code = read('GlassCore/src/Hooks/delphi/BomeMemoDraw.cpp')
-        for guard in ('g_sessions.back().ready', 'g_sessions.back().hwnd',
-                      'IsTopWindowDrawingSession(host)', 'IsPaintStackDcForHwnd(host, dc)',
-                      'GetStackOwnerForDc(dc) == host', 'owner && owner != host',
-                      'IsFullInjectionMode()', 'GlassIsBackdropAllowedForHwnd(host)'):
-            self.assertIn(guard, code)
+        # VCL keeps canvas DCs until the message ends, so sessions of the memo and of its gutter are open side by
+        # side. Readiness is per window (its newest session decides, an unarmed one is a barrier); a call is
+        # authorized by the DC it draws on, not by the session that opened last.
+        served = code.split('Session* Served(HWND hwnd) noexcept', 1)[1].split('Session* Drawing() noexcept', 1)[0]
+        for marker in ('for (auto it = g_sessions.rbegin(); it != g_sessions.rend(); ++it)',
+                       'if (it->hwnd != hwnd) continue;',
+                       'return it->ready && GlassCore::BomeMemo::IsWindow(hwnd)',
+                       '&& GlassShared::GlassIsBackdropAllowedForHwnd(hwnd) ? &*it : nullptr;'):
+            self.assertIn(marker, served)
+        drawing = code.split('Session* Drawing() noexcept', 1)[1].split('bool Open() noexcept', 1)[0]
+        self.assertIn('if (GlassCore::PaintDispatcher::IsTopWindowDrawingSession(it->hwnd))', drawing)
+        self.assertIn('return Served(it->hwnd);', drawing)
+        self.assertIn('{ return !g_inside && !g_sessions.empty() && GlassCore::Root::IsFullInjectionMode(); }', code)
+        active = code.split('HWND ActiveHost() noexcept', 1)[1].split('HWND TargetDc(', 1)[0]
+        self.assertIn('const Session* drawing = Open() ? Drawing() : nullptr;', active)
+        target = code.split('HWND TargetDc(HDC dc, LPCWSTR& reason) noexcept', 1)[1].split('void Count(', 1)[0]
+        order = ('if (!Open()) return nullptr;',
+                 'if (GetMapMode(dc) != MM_TEXT) { reason = L"map"; return nullptr; }',
+                 'if (const HWND window = WindowFromDC(dc))',
+                 'if (!Served(window)) { reason = L"window"; return nullptr; }',
+                 'if (!GlassCore::PaintDispatcher::IsPaintStackDcForHwnd(window, dc))',
+                 '{ reason = L"window-dc"; return nullptr; }',
+                 'return window;',
+                 'if (GetObjectType(dc) != OBJ_MEMDC) { reason = L"dc"; return nullptr; }',
+                 'const HWND owner = GlassCore::PaintDispatcher::GetStackOwnerForDc(dc);',
+                 'if (Served(owner)) return owner;',
+                 'if (const Session* drawing = Drawing()) return drawing->hwnd;',
+                 'reason = L"buffer";')
+        positions = [target.index(marker) for marker in order]
+        self.assertEqual(positions, sorted(positions))
+        # The dispatcher's ambient host is the context a buffer was created in, not its owner: it decides nothing
+        # here, and the newest session of the thread is consulted only by the post-BeginPaint erase.
+        self.assertNotIn('GetPaintSessionHostHwnd', code)
+        self.assertEqual(code.count('g_sessions.back().ready'), 1)
+        for api in ('int Fill(decltype(&::FillRect) original', 'int DrawAnsi(decltype(&::DrawTextA) original'):
+            body = code.split(api, 1)[1]
+            self.assertIn('const HWND host = TargetDc(dc, skipped);', body)
+            self.assertIn('++g_sessions.back().skip;', body)
+        for api in ('DWORD SystemColor(', 'HBRUSH CreateBrush('):
+            self.assertIn('ActiveHost()', code.split(api, 1)[1].split('\n    }\n', 1)[0])
+        # Counters and reasons are metadata: what a session drew and why a DC stayed native, never the text.
+        for line in ('L"[GlassCore][BomeMemo] hooks-end hwnd=0x%p channel=%s ready=%d text=%u fill=%u skip=%u open=%zu",',
+                     'L"[GlassCore][BomeMemo] text-skip dc=0x%p dcWnd=0x%p stackOwner=0x%p sessions=%zu reason=%s",',
+                     'Count(host, &Session::text);', 'Count(host, &Session::fill);'):
+            self.assertEqual(code.count(line), 1, line)
         post = code.split('bool AfterBeginPaint(', 1)[1].split('DWORD SystemColor(', 1)[0]
+        for guard in ('g_sessions.back().ready', 'g_sessions.back().hwnd != hwnd',
+                      'GlassCore::Root::IsFullInjectionMode()', 'GlassShared::GlassIsBackdropAllowedForHwnd(hwnd)',
+                      'caller != GlassCore::ModuleHandler::g_entryPointModule'):
+            self.assertIn(guard, post)
         self.assertIn('g_sessions.back().paint', post)
         self.assertIn('Clear(dc, ps->rcPaint)', post)
         self.assertNotIn('ActiveHost()', post)  # post runs before the dispatcher push
@@ -222,6 +266,10 @@ class DelphiPipelineContract(unittest.TestCase):
         for production in ('Root_OnBeginPaint', 'Root_OnEndPaint', 'Root_OnGetDC', 'Root_OnReleaseDC',
                            'kBomeMemoSlots', 'Bome memo EXE thunks:'):
             self.assertIn(production, runner)
+        test = read('WndCompat/tests/bome_memo_rendering_tests.cpp')
+        cases = re.findall(r'\{"([a-z]+)",\w+\}', test)
+        self.assertEqual(len(cases), 15)
+        self.assertEqual(sorted(cases), sorted(re.findall(r"self\.run_case\('([a-z]+)'\)", runner)))
 
     def test_bome_memo_scope_exit_matches_wil_callback_constraints(self):
         code = read('GlassCore/src/Hooks/delphi/BomeMemoDraw.cpp')
