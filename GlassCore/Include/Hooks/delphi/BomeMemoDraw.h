@@ -10,7 +10,10 @@ namespace GlassCore::BomeMemo
     // Not an alias for Edit/TMemo and not tied to a process name.
     bool IsWindow(HWND hwnd) noexcept;
     // Record a native barrier too when acquisition failed. IAT is process-wide,
-    // whereas readiness and DC authorization must belong to this thread/session.
+    // whereas readiness belongs to this thread's sessions. Sessions of the memo
+    // and of its gutter stay open side by side (VCL keeps canvas DCs until the
+    // message ends): a call is served by the DC it draws on, not by the session
+    // that opened last.
     void BeginSession(HWND hwnd, bool paint, unsigned mask) noexcept;
     bool EndSession(HWND hwnd, bool paint) noexcept; // true: release the four acquired refs.
     void ClearSessions() noexcept;

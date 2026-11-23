@@ -252,16 +252,195 @@ namespace
     {
         Context c; c.Begin();
         const int alpha = Test::alphaText;
-        CHECK(c.Text(&c.unknown) == 43 && c.Text(&c.foreign) == 43);
-        Test::stackOwners[&c.unknown] = &c.other; CHECK(c.Text(&c.unknown) == 43);
-        Test::stackOwners.erase(&c.memory); CHECK(c.Text(&c.memory) == 43);
-        Test::stackOwners[&c.memory] = &c.window;
+        c.brush.lbColor = MemoTest::windowColor;
+        // Another window's DC is never this route's: neither when that window
+        // holds it in a session of its own, nor whatever else was recorded for it.
+        CHECK(c.Text(&c.foreign) == 43 && c.Fill(&c.foreign) == 37);
+        Test::stackOwners[&c.foreign] = &c.other; CHECK(c.Text(&c.foreign) == 43 && c.Fill(&c.foreign) == 37);
+        Test::stackOwners[&c.foreign] = &c.window; CHECK(c.Text(&c.foreign) == 43);
+        Test::stackOwners.erase(&c.foreign);
+        // Neither a window's DC nor a buffer: a printer, a metafile.
+        TestDC device; MemoTest::objectTypes[&device] = 3;
+        CHECK(c.Text(&device) == 43 && c.Fill(&device) == 37);
+        Test::stackOwners[&device] = &c.window; CHECK(c.Text(&device) == 43);
+        Test::stackOwners.erase(&device); MemoTest::objectTypes.clear();
+        // The window's own DC counts only while one of its open sessions holds it.
+        TestDC cached; cached.owner = &c.window;
+        CHECK(c.Text(&cached) == 43 && c.Fill(&cached) == 37);
         MemoTest::maps[&c.dc] = 2; CHECK(c.Text() == 43); MemoTest::maps.clear();
-        Test::topWindow = &c.other; CHECK(c.Text() == 43); Test::topWindow = &c.window;
-        Test::host = &c.other; CHECK(c.Text() == 43); Test::host = &c.window;
-        Test::full = false; CHECK(c.Text() == 43 && c.Color(COLOR_WINDOW) == MemoTest::windowColor); Test::full = true;
-        c.window.backdrop = false; CHECK(c.Text() == 43 && c.Fill() == 37); c.window.backdrop = true;
-        CHECK(Test::alphaText == alpha && c.Text(&c.memory) == 15);
+        MemoTest::maps[&c.memory] = 2; CHECK(c.Text(&c.memory) == 43); MemoTest::maps.clear();
+        Test::full = false;
+        CHECK(c.Text() == 43 && c.Text(&c.memory) == 43 && c.Color(COLOR_WINDOW) == MemoTest::windowColor);
+        Test::full = true;
+        c.window.backdrop = false;
+        CHECK(c.Text() == 43 && c.Fill() == 37 && c.Text(&c.memory) == 43 && c.Text(&c.unknown) == 43);
+        CHECK(c.Color(COLOR_WINDOW) == MemoTest::windowColor);
+        c.window.backdrop = true;
+        // The window of the session is no longer an exact memo class.
+        c.window.cls = L"TMemo";
+        CHECK(c.Text() == 43 && c.Text(&c.memory) == 43 && c.Color(COLOR_WINDOW) == MemoTest::windowColor);
+        c.window.cls = L"TBomeMemo";
+        // While another window's session is the innermost one, a buffer is this
+        // route's only if the dispatcher recorded it for a served window; the
+        // imports without a DC follow that innermost session.
+        Test::topWindow = &c.other;
+        CHECK(c.Text(&c.unknown) == 43 && c.Fill(&c.unknown) == 37);
+        Test::stackOwners[&c.unknown] = &c.other; CHECK(c.Text(&c.unknown) == 43);
+        CHECK(c.Color(COLOR_WINDOW) == MemoTest::windowColor && c.Color(COLOR_BTNFACE) == MemoTest::faceColor);
+        LOGBRUSH custom{BS_SOLID, RGB(45,67,89)};
+        { std::unique_ptr<LOGBRUSH> passed(c.Brush(&custom)); CHECK(passed && passed->lbColor == RGB(45,67,89)); }
+        CHECK(Test::alphaText == alpha);
+        // The ambient host of the dispatcher is not consulted at all.
+        Test::host = &c.other;
+        CHECK(c.Text() == 15 && c.Text(&c.memory) == 15 && Test::alphaText == alpha+2);
+        Test::topWindow = Test::host = nullptr; // no window session at all: only what was recorded
+        CHECK(c.Text() == 15 && c.Text(&c.memory) == 15 && c.Text(&c.unknown) == 43);
+        CHECK(c.Color(COLOR_WINDOW) == MemoTest::windowColor);
+    }
+    // VCL keeps the canvas DCs of the memo and of its gutter until the message
+    // ends: both GetDC sessions stay open and the EXE draws on either window's
+    // DC and into the memo's buffer in turns.
+    void Interleaving()
+    {
+        Context c;
+        Root::Root_OnGetDC(&c.window,&c.module); c.Activate(&c.window,&c.dc);
+        Test::stackOwners[&c.memory] = &c.window; // the buffer, created in the memo's session
+        Root::Root_OnGetDC(&c.gutter,&c.module); c.Activate(&c.gutter,&c.gutterDc); // opened last
+        for (size_t i=0;i<4;++i) CHECK(c.Ref(i) == 2);
+        int alpha = Test::alphaText, black = Test::black;
+        c.brush.lbColor = MemoTest::windowColor;
+        // Each window's own DC and the memo's buffer, whichever session opened last.
+        CHECK(c.Text(&c.gutterDc) == 15 && c.Text(&c.dc) == 15 && c.Text(&c.memory) == 15);
+        CHECK(Test::alphaText == alpha+3);
+        black = Test::black;
+        CHECK(c.Fill(&c.gutterDc) == 1 && c.Fill(&c.dc) == 1 && c.Fill(&c.memory) == 1 && Test::black == black+3);
+        CHECK(c.Color(COLOR_WINDOW) == 0 && c.Color(COLOR_BTNFACE) == 0);
+        // The memo is painted again while the gutter's session is still open. Its
+        // next buffer was recorded for the gutter (ambient when it was created),
+        // another one was created before any session, a third one is recorded
+        // for an unrelated window: all three are the drawing of the memo now.
+        TestDC late; Test::stackOwners[&late] = &c.gutter;
+        Test::topWindow = &c.window;
+        alpha = Test::alphaText;
+        CHECK(c.Text(&late) == 15 && c.Text(&c.unknown) == 15 && c.Fill(&c.unknown) == 1);
+        Test::stackOwners[&c.unknown] = &c.other;
+        CHECK(c.Text(&c.unknown) == 15 && Test::alphaText == alpha+3);
+        CHECK(c.Text(&c.gutterDc) == 15 && c.Text(&c.foreign) == 43);
+        Test::stackOwners.erase(&c.unknown);
+        // The gutter's session closes first: its DC is native again, the memo is
+        // served on, and the buffer recorded for the gutter is the memo's drawing.
+        Root::Root_OnReleaseDC(&c.gutter,&c.module);
+        CHECK(c.Ref() == 1 && c.Text(&c.gutterDc) == 43 && c.Fill(&c.gutterDc) == 37);
+        CHECK(c.Text(&c.dc) == 15 && c.Text(&c.memory) == 15 && c.Text(&late) == 15);
+        // Another module takes the gutter's DC: a native barrier for the gutter,
+        // and for buffers while the gutter's session is the innermost one, but
+        // not for the memo's own DC and recorded buffer.
+        Root::Root_OnGetDC(&c.gutter,&c.otherModule); Test::topWindow = &c.gutter;
+        alpha = Test::alphaText;
+        CHECK(c.Ref() == 1 && c.Text(&c.gutterDc) == 43 && c.Text(&late) == 43 && c.Text(&c.unknown) == 43);
+        CHECK(c.Color(COLOR_WINDOW) == MemoTest::windowColor && Test::alphaText == alpha);
+        CHECK(c.Text(&c.dc) == 15 && c.Text(&c.memory) == 15);
+        Root::Root_OnReleaseDC(&c.gutter,&c.otherModule); Test::topWindow = &c.window;
+        CHECK(c.Text(&late) == 15 && c.Color(COLOR_WINDOW) == 0);
+        Root::Root_OnReleaseDC(&c.window,&c.module);
+        CHECK(c.module.hooks.empty() && Root::g_rootDcStack.empty());
+        CHECK(c.Text(&c.dc) == 43 && c.Text(&c.memory) == 43 && c.Text(&late) == 43);
+    }
+    void Diagnostics()
+    {
+        Context c;
+        const auto find = [](const wchar_t* part) {
+            std::vector<MemoTest::Log> found;
+            for (const auto& log : MemoTest::logs)
+                if (log.format.find(part) != std::wstring::npos) found.push_back(log);
+            return found;
+        };
+        const auto number = [](void* p) { return static_cast<long long>(reinterpret_cast<std::intptr_t>(p)); };
+        std::vector<MemoTest::Log> seen; // everything logged in this test
+        const auto nextSecond = [&] {
+            seen.insert(seen.end(), MemoTest::logs.begin(), MemoTest::logs.end());
+            MemoTest::logs.clear(); MemoTest::clock += 1000;
+        };
+        MemoTest::clock += 100000; MemoTest::logs.clear();
+        Root::Root_OnGetDC(&c.window,&c.module); c.Activate(&c.window,&c.dc);
+        Test::stackOwners[&c.memory] = &c.window;
+        auto begin = find(L"] hooks route=2 ");
+        CHECK(begin.size() == 1 && begin[0].strings == (std::vector<std::wstring>{L"TBomeMemo", L"GetDC"}));
+        CHECK(begin[0].numbers == (std::vector<long long>{number(&c.window), 0xF, 1}));
+        c.brush.lbColor = MemoTest::windowColor;
+        const char* secret = "secret-row-text";
+        CHECK(c.Text(&c.memory,secret) == 15 && c.Text(&c.dc,secret) == 15 && c.Fill(&c.memory) == 1);
+        CHECK(find(L"] text-skip ").empty());
+        // Why a DC stayed native, without the text.
+        CHECK(c.Text(&c.foreign,secret) == 43);
+        Test::topWindow = &c.other; CHECK(c.Text(&c.unknown,secret) == 43); Test::topWindow = &c.window;
+        TestDC cached; cached.owner = &c.window; CHECK(c.Text(&cached,secret) == 43);
+        MemoTest::maps[&c.memory] = 2; CHECK(c.Text(&c.memory,secret) == 43 && c.Fill(&c.memory) == 37);
+        MemoTest::maps.clear();
+        TestDC device; MemoTest::objectTypes[&device] = 3;
+        CHECK(c.Text(&device,secret) == 43);
+        MemoTest::objectTypes.clear();
+        CHECK(c.Call("DrawTextA", &DrawTextA, static_cast<HDC>(nullptr), secret, -1, &c.rect, kFlags) == 43);
+        const auto skips = find(L"] text-skip ");
+        CHECK(skips.size() == 6 && skips[5].strings == std::vector<std::wstring>{L"dc"});
+        CHECK(skips[5].numbers == (std::vector<long long>{0, 0, 0, 1}));
+        const wchar_t* reasons[]{L"window", L"buffer", L"window-dc", L"map", L"dc"};
+        TestDC* targets[]{&c.foreign, &c.unknown, &cached, &c.memory, &device};
+        for (size_t i=0;i<5;++i)
+        {
+            CHECK(skips[i].format == L"[GlassCore][BomeMemo] text-skip dc=0x%p dcWnd=0x%p stackOwner=0x%p sessions=%zu reason=%s");
+            CHECK(skips[i].strings == std::vector<std::wstring>{reasons[i]});
+            CHECK(skips[i].numbers.size() == 4 && skips[i].numbers[0] == number(targets[i]) && skips[i].numbers[3] == 1);
+            CHECK(skips[i].numbers[1] == number(targets[i]->owner));
+        }
+        CHECK(skips[3].numbers[2] == number(&c.window) && skips[1].numbers[2] == 0);
+        // The limit is per second and per channel; a skipped call is counted even when it is not logged.
+        for (int i=0;i<40;++i) CHECK(c.Text(&c.foreign,secret) == 43);
+        CHECK(find(L"] text-skip ").size() == 14); // 16 per second on the text channel, two of them were `text` lines
+        // The channels have budgets of their own: with the text channel
+        // exhausted a session still reports its begin and its end.
+        Root::Root_OnGetDC(&c.gutter,&c.module);
+        Root::Root_OnReleaseDC(&c.gutter,&c.module);
+        CHECK(find(L"] hooks route=2 ").size() == 2);
+        const auto gutterEnd = find(L"] hooks-end ");
+        CHECK(gutterEnd.size() == 1 && gutterEnd[0].numbers == (std::vector<long long>{number(&c.gutter), 1, 0, 0, 0, 1}));
+        nextSecond();
+        CHECK(c.Text(&c.foreign,secret) == 43 && find(L"] text-skip ").size() == 1);
+        // What the session drew, when it closes: two texts, one fill, 48 native calls with a DC.
+        Root::Root_OnReleaseDC(&c.window,&c.module);
+        const auto end = find(L"] hooks-end ");
+        CHECK(end.size() == 1 && end[0].strings == std::vector<std::wstring>{L"GetDC"});
+        CHECK(end[0].format == L"[GlassCore][BomeMemo] hooks-end hwnd=0x%p channel=%s ready=%d text=%u fill=%u skip=%u open=%zu");
+        CHECK(end[0].numbers == (std::vector<long long>{number(&c.window), 1, 2, 1, 48, 0}));
+        // Two open sessions of one window: what is drawn counts for the newest.
+        nextSecond();
+        Root::Root_OnGetDC(&c.window,&c.module); c.Activate(&c.window,&c.dc);
+        Root::Root_OnBeginPaint(&c.window,&c.module);
+        CHECK(c.Text(&c.dc,secret) == 15 && c.Fill() == 1);
+        Root::Root_OnEndPaint(&c.window,&c.module);
+        Root::Root_OnReleaseDC(&c.window,&c.module);
+        const auto pair = find(L"] hooks-end ");
+        CHECK(pair.size() == 2 && pair[0].strings == std::vector<std::wstring>{L"Paint"});
+        CHECK(pair[0].numbers == (std::vector<long long>{number(&c.window), 1, 1, 1, 0, 1}));
+        CHECK(pair[1].strings == std::vector<std::wstring>{L"GetDC"});
+        CHECK(pair[1].numbers == (std::vector<long long>{number(&c.window), 1, 0, 0, 0, 0}));
+        // A session that could not be armed reports itself and counts nothing.
+        nextSecond();
+        Root::Root_OnBeginPaint(&c.window,&c.otherModule); c.Activate(&c.window,&c.dc);
+        CHECK(c.Text() == 43);
+        Root::Root_OnEndPaint(&c.window,&c.otherModule);
+        const auto barrier = find(L"] hooks-end ");
+        CHECK(barrier.size() == 1 && barrier[0].strings == std::vector<std::wstring>{L"Paint"});
+        CHECK(barrier[0].numbers == (std::vector<long long>{number(&c.window), 0, 0, 0, 0, 0}));
+        // Nothing logged carries the text of a row.
+        nextSecond();
+        const std::wstring wide(secret, secret + std::strlen(secret));
+        CHECK(seen.size() >= 20); // the whole test, not only its last second
+        for (const auto& log : seen)
+        {
+            CHECK(log.format.find(L"%hs") == std::wstring::npos && log.format.find(L"%S") == std::wstring::npos);
+            for (const auto& value : log.strings) CHECK(value.find(wide) == std::wstring::npos);
+        }
     }
     void Failures()
     {
@@ -295,9 +474,9 @@ namespace
         Context c; c.Begin();
         Root::Root_OnGetDC(&c.gutter,&c.module); c.Activate(&c.gutter,&c.gutterDc);
         for (size_t i=0;i<4;++i) CHECK(c.Ref(i) == 2);
-        CHECK(c.Text(&c.gutterDc) == 15 && c.Text() == 43);
+        CHECK(c.Text(&c.gutterDc) == 15 && c.Text() == 15); // both sessions are open: each DC is its window's
         Root::Root_OnEndPaint(&c.window,&c.module); // remove lower Paint, keep upper GetDC
-        CHECK(c.Ref() == 1 && c.Text(&c.gutterDc) == 15);
+        CHECK(c.Ref() == 1 && c.Text(&c.gutterDc) == 15 && c.Text() == 43); // a closed session's DC is native
         Root::Root_OnEndPaint(&c.window,&c.module); CHECK(c.Ref() == 1); // duplicate/no-open close
         Root::Root_OnReleaseDC(&c.gutter,&c.module); CHECK(c.module.hooks.empty());
         // The actual PaintDispatcher failure branch compensates onBegin with onEnd.
@@ -332,7 +511,8 @@ int main(int argc, char** argv)
     const std::pair<const char*,void(*)()> cases[]{
         {"classes",Classes},{"transaction",Transaction},{"paint",Paint},{"getdc",GetDc},
         {"text",TextLines},{"conversion",Conversion},{"native",Native},{"backgrounds",Backgrounds},
-        {"opaque",Opaque},{"isolation",Isolation},{"failures",Failures},{"nesting",Nesting},{"lifecycle",Lifecycle}};
+        {"opaque",Opaque},{"isolation",Isolation},{"interleaving",Interleaving},{"diagnostics",Diagnostics},
+        {"failures",Failures},{"nesting",Nesting},{"lifecycle",Lifecycle}};
     try { for (const auto& [name,run] : cases) if (std::strcmp(argv[1],name) == 0) { run(); return 0; } }
     catch (const std::exception& error) { std::cerr << argv[1] << ": " << error.what() << '\n'; return 1; }
     return 2;
