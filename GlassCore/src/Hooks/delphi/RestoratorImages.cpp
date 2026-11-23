@@ -5,10 +5,10 @@
 //
 // While such a paint session is open both gdi32 exports are detoured. A SRCCOPY
 // blit of a picture on black into that window's own DC gets an owned 32bpp
-// copy with the black matte removed: solid blocks opaque, strokes as opaque as
-// they are bright, background transparent black. The caller's blit then runs
-// unchanged with that copy selected. Other ROPs, DCs and callers, and pictures
-// that are not on black, stay native. No shared colour key and no AlphaBlend.
+// copy whose alpha is a brightness mask: black is transparent, white opaque,
+// every pixel as opaque as it is bright. The caller's blit then runs unchanged
+// with that copy selected. Other ROPs, DCs and callers, and pictures that are
+// not on black, stay native. No shared colour key and no AlphaBlend.
 #include "CorePch.h"
 #include <Hooks/delphi/RestoratorImages.h>
 #include <Core/Intercept/HookHelper.h>
@@ -31,19 +31,12 @@ namespace GlassCore::RestoratorImages
     {
         using namespace GlassCore::Hooks;
 
-        // Brightest channel of a pixel. The pictures are lossy, so near-black
-        // ringing surrounds their content: at or below kBackground a pixel is
-        // background, above kInk it is content, in between only if chained to content.
+        // The pictures are lossy: their black background carries ringing up to
+        // about this level. It only tells whether a picture is drawn on black.
         constexpr unsigned kBackground = 16;
-        constexpr unsigned kInk = 32;
-        // Content this thick in both directions is a solid block, and the dark
-        // details it encloses (a caption outline inside a banner) belong to it.
-        // Thinner strokes are text: the black inside a letter stays background.
-        constexpr unsigned kSolidSide = 5;
         // The picture, or a client-sized buffer holding it, up to 2560x1600.
         // This bounds the copy made per paint; a larger source stays native.
         constexpr std::uint64_t kMaxPixels = 1u << 22;
-        constexpr BYTE Ink = 1, Weak = 2, Corner = 4, Solid = 8, Open = 16;
 
         BOOL WINAPI PictureBitBlt(HDC, int, int, int, int, HDC, int, int, DWORD);
         BOOL WINAPI PictureStretchBlt(HDC, int, int, int, int, HDC, int, int, int, int, DWORD);
@@ -70,18 +63,23 @@ namespace GlassCore::RestoratorImages
             --budget[channel]; return true;
         }
 
+        // Brightest channel of a pixel: how far it is from black.
         unsigned Level(DWORD pixel) noexcept
         {
             return (std::max)({pixel & 0xFFu, (pixel >> 8) & 0xFFu, (pixel >> 16) & 0xFFu});
         }
 
         // Top-down or bottom-up BGRA, A=255 on entry, premultiplied on success.
+        // A picture drawn on black is its content blended with black, so the
+        // brightness of a pixel is its coverage. That brightness becomes the alpha
+        // mask, pixel by pixel: black is transparent, white is opaque, and a dark
+        // pixel is as transparent as it is dark. Colour stays and never exceeds
+        // alpha. There are no thresholds and no regions, so no black is left over.
         // Returns false, leaving the pixels untouched, unless at least three
-        // quarters of the outline is background: only a picture drawn on black
-        // has a black matte to remove.
-        bool CutBlackBackground(DWORD* pixels, size_t width, size_t height)
+        // quarters of the outline is black: only a picture on black has black to
+        // subtract.
+        bool CutBlackBackground(DWORD* pixels, size_t width, size_t height) noexcept
         {
-            const size_t count = width * height;
             size_t outline = 0, dark = 0;
             const auto probe = [&](size_t x, size_t y) {
                 ++outline;
@@ -91,87 +89,11 @@ namespace GlassCore::RestoratorImages
             for (size_t y = 1; y + 1 < height; ++y) { probe(0, y); if (width > 1) probe(width - 1, y); }
             if (dark * 4 < outline * 3) return false;
 
-            std::vector<BYTE> mark(count);
-            std::vector<std::uint32_t> pending; // pixel indices; count <= kMaxPixels
+            const size_t count = width * height;
             for (size_t i = 0; i < count; ++i)
             {
-                const unsigned level = Level(pixels[i]);
-                mark[i] = level > kInk ? Ink : level > kBackground ? Weak : BYTE{};
-            }
-            // Content: bright pixels and the dim ones chained to them, 8 neighbours.
-            const auto attach = [&](size_t x, size_t y) {
-                const size_t right = (std::min)(x + 1, width - 1), bottom = (std::min)(y + 1, height - 1);
-                for (size_t ny = y ? y - 1 : 0; ny <= bottom; ++ny)
-                    for (size_t nx = x ? x - 1 : 0; nx <= right; ++nx)
-                    {
-                        BYTE& m = mark[ny * width + nx];
-                        if (m != Weak) continue;
-                        m = Ink; pending.push_back(static_cast<std::uint32_t>(ny * width + nx));
-                    }
-            };
-            for (size_t y = 0; y < height; ++y)
-                for (size_t x = 0; x < width; ++x)
-                    if (mark[y * width + x] == Ink) attach(x, y);
-            while (!pending.empty())
-            {
-                const size_t i = pending.back(); pending.pop_back();
-                attach(i % width, i / width);
-            }
-            // Solid blocks: content covered by a full kSolidSide square. First mark
-            // the bottom-right corner of every such square, then spread each corner
-            // back over its square.
-            std::vector<BYTE> column(width);
-            for (size_t y = 0; y < height; ++y)
-            {
-                unsigned run = 0;
-                for (size_t x = 0; x < width; ++x)
-                {
-                    BYTE& m = mark[y * width + x];
-                    run = m == Ink ? (std::min)(run + 1u, kSolidSide) : 0u;
-                    const unsigned rows = run == kSolidSide ? (std::min)(column[x] + 1u, kSolidSide) : 0u;
-                    column[x] = static_cast<BYTE>(rows);
-                    if (rows == kSolidSide) m |= Corner;
-                }
-            }
-            std::fill(column.begin(), column.end(), static_cast<BYTE>(kSolidSide));
-            for (size_t y = height; y-- > 0;)
-            {
-                unsigned across = kSolidSide; // columns to the nearest corner on the right
-                for (size_t x = width; x-- > 0;)
-                {
-                    BYTE& m = mark[y * width + x];
-                    across = (m & Corner) ? 0u : (std::min)(across + 1u, kSolidSide);
-                    // rows to the nearest covered row below
-                    const unsigned down = across < kSolidSide ? 0u : (std::min)(column[x] + 1u, kSolidSide);
-                    column[x] = static_cast<BYTE>(down);
-                    if (down < kSolidSide) m |= Solid;
-                }
-            }
-            // Background: whatever the outline reaches without crossing a solid block.
-            const auto open = [&](size_t i) {
-                BYTE& m = mark[i];
-                if (m & (Solid | Open)) return;
-                m |= Open; pending.push_back(static_cast<std::uint32_t>(i));
-            };
-            for (size_t x = 0; x < width; ++x) { open(x); open(count - width + x); }
-            for (size_t y = 0; y < height; ++y) { open(y * width); open(y * width + width - 1); }
-            while (!pending.empty())
-            {
-                const size_t i = pending.back(); pending.pop_back();
-                const size_t x = i % width;
-                if (x) open(i - 1);
-                if (x + 1 < width) open(i + 1);
-                if (i >= width) open(i - width);
-                if (i + width < count) open(i + width);
-            }
-            // Not reached: a solid block and what it encloses; colour and A=255 stay.
-            // Reached content was blended with the black around it, so its brightness
-            // is its coverage: a white core stays opaque, an edge fades, and no dark
-            // fringe remains. Reached background becomes transparent black.
-            for (size_t i = 0; i < count; ++i)
-            {
-                if (!(mark[i] & Open)) continue;
-                pixels[i] = (mark[i] & Ink) ? (pixels[i] & 0x00FFFFFFu) | (Level(pixels[i]) << 24) : 0u;
+                const DWORD mask = Level(pixels[i]); // 0 black .. 255 full brightness
+                pixels[i] = (pixels[i] & 0x00FFFFFFu) | (mask << 24);
             }
             return true;
         }
@@ -230,12 +152,8 @@ namespace GlassCore::RestoratorImages
             const BITMAP& info = dib.dsBm;
             if (!info.bmBits || info.bmPlanes != 1 || info.bmBitsPixel != 32
                 || info.bmWidth != original.bmWidth || info.bmHeight != original.bmHeight) return false;
-            try
-            {
-                return CutBlackBackground(static_cast<DWORD*>(info.bmBits),
-                    static_cast<size_t>(info.bmWidth), static_cast<size_t>(info.bmHeight));
-            }
-            catch (...) { return false; } // Out of memory: pixels are still untouched.
+            return CutBlackBackground(static_cast<DWORD*>(info.bmBits),
+                static_cast<size_t>(info.bmWidth), static_cast<size_t>(info.bmHeight));
         }
 
         // The donor's gate: a leased paint session on this thread and an EXE call site.
@@ -259,8 +177,8 @@ namespace GlassCore::RestoratorImages
             if (!reason)
             {
                 // The source may also be a client-sized buffer. The A=255 copy is
-                // never drawn as it is: its matte is cut, or it is dropped and the
-                // caller's own bitmap is drawn.
+                // never drawn as it is: its alpha becomes the mask, or it is dropped
+                // and the caller's own bitmap is drawn.
                 GlassCore::GdiUtils::OpaqueBitmapSource picture{blit.source};
                 if (!picture) reason = L"copy";
                 else if (!CutSelectedCopy(blit.source, info)) reason = L"background";

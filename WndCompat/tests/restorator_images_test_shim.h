@@ -25,18 +25,12 @@ namespace RestoratorTest
     inline int countQueries = 0;
     inline thread_local ULONGLONG clock = 100;
     inline thread_local std::vector<std::wstring> logFormats, logStrings;
-    // Allocation failure is injected only inside the pixel policy: the countdown
-    // starts at the second DIBSECTION query of a blit (the prepared copy) and is
-    // disarmed before the native recorder runs.
     inline thread_local int dibQueries = 0;
-    inline int copyFault = 0; // corrupts what the second DIBSECTION query reports
-    inline thread_local long armAllocations = -1, allocationCountdown = -1;
-    inline thread_local bool allocationFailed = false;
+    inline int copyFault = 0; // corrupts what the second DIBSECTION query of a blit (the prepared copy) reports
 }
 
 inline BOOL WINAPI RestoratorTrampolineBitBlt(HDC dc, int x, int y, int w, int h, HDC src, int sx, int sy, DWORD rop)
 {
-    RestoratorTest::allocationCountdown = -1;
     ++RestoratorTest::trampolineCalls;
     assert(RestoratorTest::bitDetour); // exists only while attached
     return BitBlt(dc, x, y, w, h, src, sx, sy, rop);
@@ -44,7 +38,6 @@ inline BOOL WINAPI RestoratorTrampolineBitBlt(HDC dc, int x, int y, int w, int h
 inline BOOL WINAPI RestoratorTrampolineStretchBlt(HDC dc, int x, int y, int w, int h,
     HDC src, int sx, int sy, int sw, int sh, DWORD rop)
 {
-    RestoratorTest::allocationCountdown = -1;
     ++RestoratorTest::trampolineCalls;
     assert(RestoratorTest::stretchDetour);
     return StretchBlt(dc, x, y, w, h, src, sx, sy, sw, sh, rop);
@@ -147,8 +140,6 @@ inline FARPROC RestoratorGetProcAddress(HMODULE module, LPCSTR name)
 inline int RestoratorGetObjectW(HGDIOBJ object, int bytes, void* out)
 {
     const bool copy = bytes == sizeof(DIBSECTION) && ++RestoratorTest::dibQueries == 2;
-    if (copy && RestoratorTest::armAllocations >= 0)
-        RestoratorTest::allocationCountdown = RestoratorTest::armAllocations;
     const int result = ImageGetObjectW(object, bytes, out);
     if (!copy || !RestoratorTest::copyFault) return result;
     auto& info = static_cast<DIBSECTION*>(out)->dsBm;
