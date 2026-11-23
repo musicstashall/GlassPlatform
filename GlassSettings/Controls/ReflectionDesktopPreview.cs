@@ -19,12 +19,15 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
     private readonly DesktopEnvironmentWatcher? _watcher;
     private bool _disposed;
     private readonly Viewbox _desktopView;
+    private readonly TextBlock _sourceName = new() { FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 320 };
+    private readonly Border _sourceBadge;
     private readonly ProgressRing _loading = new() { IsActive = true, Width = 32, Height = 32 };
     private bool _wallpaperReady, _reflectionReady;
     private void UpdateReadyState()
     {
         if (!_wallpaperReady || !_reflectionReady || _disposed) return;
         _desktopView.Opacity = 1;
+        _sourceBadge.Visibility = Visibility.Visible;
         _loading.IsActive = false;
         _loading.Visibility = Visibility.Collapsed;
     }
@@ -46,6 +49,17 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
         // Physical desktop coordinates are retained inside one proportionally scaled Viewbox.
         _desktopView = new Viewbox { Child = desktop, Stretch = Stretch.Uniform, MaxHeight = 280, Opacity = 0 };
         Children.Add(_desktopView);
+        _sourceBadge = new Border
+        {
+            Child = _sourceName, HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(12),
+            Padding = new Thickness(10, 4, 10, 4), CornerRadius = new CornerRadius(6),
+            BorderThickness = new Thickness(1),
+            Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"],
+            BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"],
+            Visibility = Visibility.Collapsed, IsHitTestVisible = false
+        };
+        Children.Add(_sourceBadge);
         Children.Add(_loading);
         Margin = new Thickness(8, 8, 8, 16);
         foreach (var monitor in bounds)
@@ -128,6 +142,8 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr clip,
         MonitorEnumProc callback, IntPtr data);
+
+    public void SetSourceLabel(string name) => _sourceName.Text = name;
 
     public void ShowReflectionFailure()
     {

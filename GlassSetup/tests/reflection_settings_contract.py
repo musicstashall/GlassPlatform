@@ -119,7 +119,7 @@ print('PASS: reflection numeric inputs reuse popup Animation NumberBox style and
 assert 'GlassAlphaColorPicker' in dialog and 'IsAlphaVisible = true' in dialog
 assert 'ColorRgb' in state and 'Colorize(pixels, settings.ColorRgb)' in service
 assert 'Reflection_PresetDark' in dialog and 'Reflection_PresetLight' in dialog
-assert 'MaxWidth = 960' in dialog and 'Grid.SetColumn(pickerRail, 1)' in dialog
+assert 'MaxWidth = dialogWidth' in dialog and 'Grid.SetColumn(pickerRail, 1)' in dialog
 assert 'EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, callback, IntPtr.Zero)' in desktop_preview
 assert 'WallpaperPreviewCrossfade' in desktop_preview
 assert '_watcher.Changed += OnEnvironmentChanged' in desktop_preview
@@ -191,3 +191,18 @@ assert 'pickerRail.Children.Add(setColor)' in dialog
 assert '_wallpaperReady || !_reflectionReady' in desktop_preview
 assert '_desktopView.Opacity = 1' in desktop_preview and 'Opacity = 0' in desktop_preview
 print('PASS: shared checked swatches, standard flyout picker, pixel-scale texture vs desktop-scale SVG, loading readiness gate')
+
+assert 'GetMonitorInfo(monitor, ref info)' in dialog and 'MonitorFromWindow' in dialog
+assert 'Math.Clamp(available - 48, 480, 1120)' in dialog
+assert 'bool inline = width >= 960' in dialog
+assert 'colorFlyout.Content = null' in dialog and 'colorFlyout.Content = picker' in dialog
+assert 'inlinePicker.Children.Add(picker)' in dialog and 'inlinePicker.Children.Clear()' in dialog
+assert 'presets.Orientation = inline ? Orientation.Vertical' in dialog
+assert 'ReadUserAccentColor()' in dialog and 'accentPreset.Clicked +=' in dialog
+assert 'watcher.Changed += OnDesktopChanged' in dialog and 'watcher.Changed -= OnDesktopChanged' in dialog
+assert 'ReflectionColorHistory.Read()' in dialog and 'ReflectionColorHistory.Remember' in dialog
+assert 'preview.SetSourceLabel(' in dialog and 'body.Children.Add(new TextBlock' not in dialog
+assert '_sourceBadge' in desktop_preview and 'CornerRadius = new CornerRadius(6)' in desktop_preview
+history = (root / 'GlassSettings/Services/ReflectionColorHistory.cs').read_text()
+assert '.Distinct().Take(8)' in history and 'RegistryValueKind.MultiString' in history
+print('PASS: monitor-bound dialog width, bounded fields, adaptive inline/flyout picker, live accent, bounded recent colors and preview badge')
