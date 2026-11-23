@@ -200,9 +200,18 @@ assert 'inlinePicker.Children.Add(picker)' in dialog and 'inlinePicker.Children.
 assert 'presets.Orientation = inline ? Orientation.Vertical' in dialog
 assert 'ReadUserAccentColor()' in dialog and 'accentPreset.Clicked +=' in dialog
 assert 'watcher.Changed += OnDesktopChanged' in dialog and 'watcher.Changed -= OnDesktopChanged' in dialog
-assert 'ReflectionColorHistory.Read()' in dialog and 'ReflectionColorHistory.Remember' in dialog
+assert 'ReflectionColorHistory.Read()' in dialog and 'ReflectionColorHistory.Save' in dialog
 assert 'preview.SetSourceLabel(' in dialog and 'body.Children.Add(new TextBlock' not in dialog
 assert '_sourceBadge' in desktop_preview and 'CornerRadius = new CornerRadius(6)' in desktop_preview
 history = (root / 'GlassSettings/Services/ReflectionColorHistory.cs').read_text()
 assert '.Distinct().Take(8)' in history and 'RegistryValueKind.MultiString' in history
 print('PASS: monitor-bound dialog width, bounded fields, adaptive inline/flyout picker, live accent, bounded recent colors and preview badge')
+
+assert 'presets.Children.Add(customPreset)' in dialog
+assert 'customPreset.Clicked +=' in dialog
+assert 'recentValues.RemoveAll(color => IsBuiltInColor(color) || color == customColor)' in dialog
+assert 'ReadRecentAccentColors()' not in dialog
+assert 'customColor = color;' in dialog and 'recentValues.Insert(0, previous)' in dialog
+assert 'ReflectionColorHistory.Save(recentValues, customColor)' in dialog
+assert 'ReadCustom()' in history and '"CustomColor"' in history
+print('PASS: fourth custom preset, previous custom enters history, all preset duplicates excluded, no imported Windows colors')

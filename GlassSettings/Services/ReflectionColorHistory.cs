@@ -24,14 +24,31 @@ internal static class ReflectionColorHistory
         }
     }
 
-    public static void Remember(uint argb)
+    public static uint? ReadCustom()
     {
         try
         {
-            var colors = new[] { argb }.Concat(Read()).Distinct().Take(8)
+            using var key = Registry.CurrentUser.OpenSubKey(ReflectionRenderState.RegistryPath);
+            return key?.GetValue("CustomColor") is int value ? unchecked((uint)value) : null;
+        }
+        catch (Exception error) when (error is System.IO.IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            System.Diagnostics.Trace.TraceWarning("Reflection custom color read: {0}", error.Message);
+            return null;
+        }
+    }
+
+    public static void Save(IEnumerable<uint> history, uint? custom)
+    {
+        try
+        {
+            var colors = history.Distinct().Take(8)
                 .Select(color => color.ToString("X8", CultureInfo.InvariantCulture)).ToArray();
             using var key = Registry.CurrentUser.CreateSubKey(ReflectionRenderState.RegistryPath);
             key.SetValue(ValueName, colors, RegistryValueKind.MultiString);
+            if (custom is { } savedCustom)
+                key.SetValue("CustomColor", unchecked((int)savedCustom), RegistryValueKind.DWord);
+            else key.DeleteValue("CustomColor", throwOnMissingValue: false);
         }
         catch (Exception error) when (error is System.IO.IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
