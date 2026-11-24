@@ -32,7 +32,7 @@ class VclBackgroundRenderingTest(unittest.TestCase):
         stubs = tmp / 'include'
         for header in (
             'CorePch.h', 'windows.h', 'DebugLog.h', 'GlassControlKind.h', 'GlassBackdropMark.h',
-            'GlassDelphiInputBackground.h', 'Hooks/delphi/TListBoxDraw.h',
+            'GlassDelphiInputBackground.h', 'WinApiUtils.h', 'Hooks/delphi/TListBoxDraw.h',
             'Core/Intercept/HookDispatcher.h', 'Module/ModuleHandler.h',
             'Subsystems/PaintDispatcher.h', 'Subsystems/RootSwcaGradient.h',
         ):
@@ -92,6 +92,9 @@ class VclBackgroundRenderingTest(unittest.TestCase):
     def test_erase_sent_outside_every_session_is_replaced_where_it_is_made(self):
         self.run_case('erase-outside')
 
+    def test_colour_an_application_gave_a_memo_is_kept_as_the_tint_of_its_paint(self):
+        self.run_case('own-colour')
+
     def test_only_the_default_whole_client_fill_of_the_windows_own_erase_is_replaced(self):
         self.run_case('outside-gates')
 
@@ -100,6 +103,9 @@ class VclBackgroundRenderingTest(unittest.TestCase):
 
     def test_debug_line_reports_each_fill_that_reached_a_control_outside_its_sessions(self):
         self.run_case('outside-diagnostics')
+
+    def test_debug_line_reports_each_fill_that_reached_another_vcl_window_outside_its_sessions(self):
+        self.run_case('other-diagnostics')
 
 
 if __name__ == '__main__':

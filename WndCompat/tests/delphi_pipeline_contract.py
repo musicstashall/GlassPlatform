@@ -3129,7 +3129,7 @@ class DelphiPipelineContract(unittest.TestCase):
         for forbidden in ('read_text', 'source.split(', 'code.split(', '-Wno-error'):
             self.assertNotIn(forbidden, runner)
         cases = re.findall(r'name == "([a-z-]+)"', test)
-        self.assertEqual(len(cases), 13)
+        self.assertEqual(len(cases), 15)
         self.assertEqual(sorted(cases), sorted(re.findall(r"self\.run_case\('([a-z-]+)'\)", runner)))
 
     def test_res_version_editor_is_registered_and_bracketed_by_the_paint_dispatcher_lifetime(self):
@@ -3349,20 +3349,24 @@ class DelphiPipelineContract(unittest.TestCase):
 
     def test_vcl_erase_sent_outside_sessions_is_replaced_through_the_kept_import(self):
         code = read('GlassCore/src/Hooks/delphi/TBackgroundHooks.cpp')
-        outside = code.split('bool EraseOutside(HDC dc, const RECT* r, HBRUSH brush) noexcept', 1)[1].split(
+        outside = code.split('int EraseOutside(HDC dc, const RECT* r, HBRUSH brush) noexcept', 1)[1].split(
             'int WINAPI ObserveFill(HDC dc, const RECT* r, HBRUSH brush)\n        {', 1)[0]
         # Cheapest first: a memory DC is not asked for its window, and a window with a session of its own
-        # is not classified. Then the class, the thread, the whole client inside the clip, the brush - and one fill.
-        gates = ('if (GetObjectType(dc) != OBJ_DC) return false;',
+        # is not classified. Then the class, the thread, the whole client inside the clip, the brush - and one
+        # answer: the transparent base for the default background (1), the tint for a memo's own colour (2).
+        gates = ('if (GetObjectType(dc) != OBJ_DC) return 0;',
                  'const HWND hwnd = WindowFromDC(dc);',
-                 'for (const Session& s : g_sessions) if (s.hwnd == hwnd) return false;',
-                 'if (!IsEraseTarget(hwnd, target) || GetWindowThreadProcessId(hwnd, nullptr) != GetCurrentThreadId()) return false;',
+                 'for (const Session& s : g_sessions) if (s.hwnd == hwnd) return 0;',
+                 'if (!IsEraseTarget(hwnd, target) || GetWindowThreadProcessId(hwnd, nullptr) != GetCurrentThreadId())',
                  'const int clipKind = GetClipBox(dc, &clip);',
                  'const bool whole = IsFullClient(hwnd, dc, r) && clipKind > NULLREGION',
                  '&& clip.left >= r->left && clip.top >= r->top && clip.right <= r->right && clip.bottom <= r->bottom;',
-                 'const bool cleared = whole && IsSystemBrush(brush, target.windowOnly)',
-                 '&& (!target.number || GlassShared::HasDelphiInputDefaultBackground(hwnd))',
-                 '&& PatBlt(dc, r->left, r->top, r->right-r->left, r->bottom-r->top, BLACKNESS);',
+                 'int cleared = 0;',
+                 'if (whole && (!target.number || GlassShared::HasDelphiInputDefaultBackground(hwnd)))',
+                 'if (IsSystemBrush(brush, target.windowOnly))',
+                 'cleared = PatBlt(dc, r->left, r->top, r->right-r->left, r->bottom-r->top, BLACKNESS) ? 1 : 0;',
+                 'else if (target.windowOnly)',
+                 'cleared = Tint(dc, r, brush);',
                  'return cleared;')
         positions = [outside.index(marker) for marker in gates]
         self.assertEqual(positions, sorted(positions))
@@ -3377,14 +3381,16 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('L"[GlassCore][DelphiBackground] erase-outside hwnd=0x%p class=%s dc=0x%p rect=[%ld,%ld,%ld,%ld] '
                       'client=[%ld,%ld] clip=%d[%ld,%ld,%ld,%ld] whole=%d style=%d rgb=0x%06X cleared=%d"', outside)
         self.assertIn('budget = 32', outside)
-        self.assertEqual(outside.count('#if defined(_DEBUG)'), 1)
-        self.assertEqual(outside.count('#endif'), 1)
-        debug = outside.split('#if defined(_DEBUG)', 1)[1].split('#endif', 1)[0]
-        self.assertLess(outside.index('const bool cleared = whole && IsSystemBrush('), outside.index('#if defined(_DEBUG)'))
+        # Two Debug blocks: the report about a window that is not in the table, and this line.
+        self.assertEqual(outside.count('#if defined(_DEBUG)'), 2)
+        self.assertEqual(outside.count('#endif'), 2)
+        debug = outside.rsplit('#if defined(_DEBUG)', 1)[1].split('#endif', 1)[0]
+        self.assertLess(outside.index('cleared = Tint(dc, r, brush);'), outside.rindex('#if defined(_DEBUG)'))
         # Nothing the release build decides on is computed there, and nothing is drawn or returned.
-        for forbidden in ('PatBlt', 'return', 'whole =', 'cleared =', 'SetLastError'):
+        for forbidden in ('PatBlt', 'return', 'whole =', 'cleared =', 'SetLastError', 'Tint('):
             self.assertNotIn(forbidden, debug)
-        self.assertEqual(outside.count('return false;'), 3)
+        self.assertEqual(outside.count('return 0;'), 3)
+        self.assertNotIn('return false;', outside)
 
         fill = code.split('int WINAPI ObserveFill(HDC dc, const RECT* r, HBRUSH brush)\n        {', 1)[1].split(
             'bool EraseAgain(', 1)[0]
@@ -3393,7 +3399,7 @@ class DelphiPipelineContract(unittest.TestCase):
         order = ('if (!orig) return FillRect(dc, r, brush);',
                  'if (g_shutdown.load(std::memory_order_acquire) || g_inside) return orig(dc, r, brush);',
                  'const DWORD entryError = GetLastError();',
-                 'const bool erased = EraseOutside(dc, r, brush);',
+                 'const bool erased = EraseOutside(dc, r, brush) != 0;',
                  'SetLastError(entryError);',
                  'if (erased) return 1;',
                  'if (g_sessions.empty()) return orig(dc, r, brush);',
@@ -3402,13 +3408,13 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertEqual(positions, sorted(positions))
         self.assertEqual(code.count('EraseOutside(dc, r, brush)'), 1)
 
-        # The classes are the classifier's VCL names of the five kinds whose client Glass paints, each under
+        # The classes are the classifier's VCL names of the six kinds whose client Glass paints, each under
         # its own kind: a class added there has to be decided here.
         table = code.split('constexpr EraseClass kEraseClasses[] = {', 1)[1].split('        };', 1)[0]
         rows = re.findall(r'\{ L"(\w+)", GlassShared::GlassControlKind::(\w+), (true|false) \},', table)
-        self.assertEqual(len(rows), 21)
-        self.assertEqual(len({name for name, _, _ in rows}), 21)
-        self.assertEqual(table.count('{ L"'), 21)
+        self.assertEqual(len(rows), 23)
+        self.assertEqual(len({name for name, _, _ in rows}), 23)
+        self.assertEqual(table.count('{ L"'), 23)
         classifier = read('WndCompat/Tracker/WindowClassifier.cpp')
         blocks = {
             'Edit': classifier.split('// ── Edit ─', 1)[1].split('return ControlKind::Edit;', 1)[0],
@@ -3417,6 +3423,7 @@ class DelphiPipelineContract(unittest.TestCase):
             'ListBox': classifier.split('// ── ListBox ─', 1)[1].split('return ControlKind::ListBox;', 1)[0],
             'ListView': classifier.split('// ── ListView ─', 1)[1].split('return ControlKind::ListView;', 1)[0],
             'TreeView': classifier.split('// ── TreeView ─', 1)[1].split('return ControlKind::TreeView;', 1)[0],
+            'TabControl': classifier.split('// ── TabControl ─', 1)[1].split('return ControlKind::TabControl;', 1)[0],
         }
         for kind, block in blocks.items():
             with self.subTest(kind=kind):
@@ -3485,7 +3492,7 @@ class DelphiPipelineContract(unittest.TestCase):
                        'inline DWORD GetObjectType(HDC dc) { return !dc ? 0 : dc->owner || dc->screen ? OBJ_DC : OBJ_MEMDC; }',
                        'inline DWORD GetCurrentThreadId() { return BgTest::thread; }',
                        '{ *out = dc->frame ? dc->frameClip : dc->owner ? dc->owner->client : RECT{}; return dc->clipKind; }',
-                       'enum class GlassControlKind { None, ListBox, Edit, ComboBox, RichEdit50W, ListView, TreeView };'):
+                       'enum class GlassControlKind { None, ListBox, Edit, ComboBox, RichEdit50W, ListView, TreeView, TabControl };'):
             self.assertIn(marker, shim)
         test = read('WndCompat/tests/vcl_background_rendering_tests.cpp')
         for case in ('erase-outside', 'outside-gates', 'kept-import', 'outside-diagnostics'):
@@ -3494,6 +3501,203 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertNotIn('kEraseClasses', test)
         self.assertEqual(sorted({name for name in re.findall(r'\{L"(\w+)", GlassControlKind::\w+, (?:true|false)\}', test)
                                  if name != 'tedit'}), sorted(name for name, _, _ in rows))
+
+    def test_vcl_erase_keeps_a_memo_colour_as_the_tint_of_its_paint_and_reports_other_fills(self):
+        code = read('GlassCore/src/Hooks/delphi/TBackgroundHooks.cpp')
+        self.assertIn('#include <WinApiUtils.h>', code)
+        tint = code.split('int Tint(HDC dc, const RECT* r, HBRUSH brush) noexcept', 1)[1].split('#if defined(_DEBUG)', 1)[0]
+        # A solid brush only; the brush for the tint first, so that a failure leaves nothing drawn; the base,
+        # then the colour; the brush does not outlive the call.
+        order = ('if (!brush || GetObjectW(brush, sizeof(lb), &lb) != sizeof(lb) || lb.lbStyle != BS_SOLID) return 0;',
+                 'const COLORREF rgb = lb.lbColor & 0xFFFFFFu;',
+                 'const HBRUSH tint = Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(rgb,',
+                 'rgb == (GetSysColor(COLOR_HIGHLIGHT) & 0xFFFFFFu) ? 255 : 100);',
+                 'if (!tint) return 0;',
+                 'if (PatBlt(dc, r->left, r->top, r->right-r->left, r->bottom-r->top, BLACKNESS))',
+                 'drawn = FillRect(dc, r, tint) ? 2 : 1;',
+                 'DeleteObject(tint);',
+                 'return drawn;')
+        positions = [tint.index(marker) for marker in order]
+        self.assertEqual(positions, sorted(positions))
+        for forbidden in ('orig(', 'SendMessage', 'g_sessions', 'Acquire', 'EnableHook', 'SetLastError', 'DebugLog'):
+            self.assertNotIn(forbidden, tint)
+        self.assertEqual(code.count('CreateSolidColorBrushWithAlpha('), 1)
+        self.assertEqual(code.count('DeleteObject('), 1)
+        self.assertEqual(code.count('Tint(dc, r, brush)'), 1)
+        # The recipe is the edit hooks' own for the background of a memo in WM_PAINT: the transparent base,
+        # then the colour at alpha 100, the selection colour opaque.
+        edit = read('GlassCore/src/Hooks/EditHooks.cpp')
+        replay = edit.split('static void ReplayMemoBackgrounds(HDC dc, const EditBufferedSession& buf) noexcept', 1)[1].split(
+            '    // ── FlushEditBuffer', 1)[0]
+        for marker in ('PatBlt(dc, r.left, r.top, r.right - r.left, r.bottom - r.top, BLACKNESS);',
+                       'Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(op.color,',
+                       '(op.color & 0xFFFFFFu) == (GetSysColor(COLOR_HIGHLIGHT) & 0xFFFFFFu) ? 255 : 100) };',
+                       'if (brush) FillRect(dc, &r, brush.get());'):
+            self.assertIn(marker, replay)
+        # It is laid only for the two classes whose colour those hooks keep, on the same gates as the base.
+        outside = code.split('int EraseOutside(HDC dc, const RECT* r, HBRUSH brush) noexcept', 1)[1].split(
+            'int WINAPI ObserveFill(HDC dc, const RECT* r, HBRUSH brush)\n        {', 1)[0]
+        self.assertIn('                if (IsSystemBrush(brush, target.windowOnly))\n'
+                      '                    cleared = PatBlt(dc, r->left, r->top, r->right-r->left, r->bottom-r->top, BLACKNESS) ? 1 : 0;\n'
+                      '                else if (target.windowOnly)\n'
+                      '                    cleared = Tint(dc, r, brush);\n', outside)
+
+        # A tab control is repainted whole by its WM_PAINT; a toolbar is not decided here: its own erase is
+        # either forwarded to its parent or, with Transparent off, left by its paint as VCL made it.
+        table = code.split('constexpr EraseClass kEraseClasses[] = {', 1)[1].split('        };', 1)[0]
+        for row in ('{ L"TTabControl", GlassShared::GlassControlKind::TabControl, false },',
+                    '{ L"TPageControl", GlassShared::GlassControlKind::TabControl, false },'):
+            self.assertEqual(table.count(row), 1)
+        self.assertIn('&& kind != Kind::ListView && kind != Kind::TreeView && kind != Kind::TabControl)', code)
+        for absent in ('L"TToolBar"', 'L"TPanel"', 'L"TButton"', 'L"TComboBox"', 'Kind::Toolbar', 'Kind::Button',
+                       'Kind::ComboBox'):
+            self.assertNotIn(absent, code)
+
+        # The report about a fill that reached another VCL window: Debug only, and only a line.
+        self.assertEqual(code.count('ReportOther('), 2)
+        head, report = code.split('        void ReportOther(HWND hwnd, HDC dc, const RECT* r, HBRUSH brush) noexcept', 1)
+        self.assertNotIn('#endif', head.rsplit('#if defined(_DEBUG)', 1)[1])
+        report = report.split('#endif', 1)[0]
+        order = ('if (!hwnd || !GlassCore::Root::IsFullInjectionMode()',
+                 '|| GetWindowThreadProcessId(hwnd, nullptr) != GetCurrentThreadId()',
+                 "|| !GetClassNameW(hwnd, cls, _countof(cls)) || cls[0] != L'T') return;",
+                 'if (!epoch || now - epoch >= 1000) { epoch = now; budget = 64; }',
+                 'if (!budget) return;',
+                 'GetViewportOrgEx(dc, &viewport);',
+                 'GetWindowOrgEx(dc, &window);',
+                 'DebugLog(DBG_NORMAL, L"[GlassCore][DelphiBackground] erase-other hwnd=0x%p class=%s kind=%u dc=0x%p '
+                 'rect=[%ld,%ld,%ld,%ld] client=[%ld,%ld] clip=%d[%ld,%ld,%ld,%ld] org=[%ld,%ld,%ld,%ld] style=%d rgb=0x%06X",')
+        positions = [report.index(marker) for marker in order]
+        self.assertEqual(positions, sorted(positions))
+        for forbidden in ('PatBlt', 'FillRect(', 'orig(', 'Tint(', 'SendMessage', 'g_sessions', 'SetLastError', 'return 0',
+                          'return 1', 'return true', 'IsEraseTarget', 'Acquire'):
+            self.assertNotIn(forbidden, report)
+        self.assertIn('            {\n#if defined(_DEBUG)\n                ReportOther(hwnd, dc, r, brush);\n#endif\n                return 0;\n            }\n',
+                      outside)
+
+        # The suite: the shim's brush for a tint remembers its colour and alpha and has to be deleted; the two
+        # new cases run in both configurations.
+        shim = read('WndCompat/tests/vcl_background_test_shim.h')
+        for marker in ('inline HBRUSH CreateSolidColorBrushWithAlpha(COLORREF color, UCHAR alpha)',
+                       'assert(it != BgTest::tints.end());      // the unit deletes only what it made',
+                       '{ e.tintAlpha = it->second.alpha; e.tintColor = it->second.color; }',
+                       'return BgTest::failDirectFill ? 0 : 1;'):
+            self.assertIn(marker, shim)
+        test = read('WndCompat/tests/vcl_background_rendering_tests.cpp')
+        for case in ('own-colour', 'other-diagnostics'):
+            self.assertEqual(test.count('name == "%s"' % case), 1)
+        self.assertIn('assert(BgTest::tints.empty() && BgTest::tintsMade == BgTest::tintsDeleted);', test)
+        self.assertIn("'WinApiUtils.h'", read('WndCompat/tests/vcl_background_rendering_test.py'))
+
+    def test_restore_probe_is_debug_only_reads_the_surface_and_draws_nothing(self):
+        probe = read('WndCompat/Root/DelphiRestoreProbe.h')
+        self.assertEqual(probe.count('#if defined(_DEBUG)'), 1)
+        self.assertEqual(probe.count('#else'), 1)
+        body, release = probe.split('#if defined(_DEBUG)', 1)[1].split('#else', 1)
+        # A release build has the one function, and it does nothing.
+        self.assertEqual(release.strip(),
+                         '[[nodiscard]] inline bool OnRootMessage(HWND, UINT, WPARAM, LPARAM) noexcept { return false; }\n'
+                         '#endif\n}')
+        # It reads and writes lines. It draws nothing, sends nothing to a window, invalidates nothing, hooks
+        # nothing, and its DC is the top-level window's own without child clipping.
+        for forbidden in ('PatBlt', 'FillRect', 'BitBlt', 'SetPixel', 'SendMessage', 'InvalidateRect', 'RedrawWindow',
+                          'UpdateWindow', 'ValidateRect', 'BeginPaint', 'SetWindowsHookEx', 'SetWindowSubclass', 'ShowWindow',
+                          'SetWindowPos', 'GetWindowDC', 'DCX_CLIPCHILDREN', 'DCX_PARENTCLIP', 'DCX_USESTYLE', 'DefSubclassProc',
+                          'GetProcAddress', 'TRUE);'):
+            self.assertNotIn(forbidden, probe)
+        report = body.split('inline void Report(HWND root, const wchar_t* name)', 1)[1].split(
+            '[[nodiscard]] inline bool OnRootMessage(', 1)[0]
+        order = ('const HDC dc = GetDCEx(root, nullptr, DCX_CACHE);',
+                 'if (!dc) return;',
+                 'EnumChildWindows(root, ReportChild, reinterpret_cast<LPARAM>(&moment));',
+                 'ReleaseDC(root, dc);')
+        positions = [report.index(marker) for marker in order]
+        self.assertEqual(positions, sorted(positions))
+        child = body.split('inline BOOL CALLBACK ReportChild(HWND child, LPARAM lParam)', 1)[1].split(
+            'inline void Report(HWND root, const wchar_t* name)', 1)[0]
+        for marker in ('if (!IsWindowVisible(child)) return TRUE;',
+                       'MapWindowPoints(HWND_DESKTOP, moment->root, reinterpret_cast<POINT*>(&rc), 2);',
+                       'if (rc.right <= rc.left || rc.bottom <= rc.top) return TRUE;',
+                       'const COLORREF centre = GetPixel(moment->dc, (rc.left + rc.right) / 2, y);',
+                       'const COLORREF quarter = GetPixel(moment->dc, rc.left + width / 4, y);',
+                       'const COLORREF corner = GetPixel(moment->dc, rc.left + (width > 8 ? 4 : width / 2),\n'
+                       '            rc.top + (height > 8 ? 4 : height / 2));',
+                       'const BOOL pending = GetUpdateRect(child, &update, FALSE);',
+                       'L"[WndCompat][DelphiRestore] %s hwnd=0x%p class=%s parent=0x%p pclass=%s kind=%u style=0x%08X '
+                       'rect=[%ld,%ld,%ld,%ld] px=0x%08X/0x%08X/0x%08X pending=%d",'):
+            self.assertIn(marker, child)
+        self.assertEqual(child.count('GetPixel('), 3)
+        # The header names what it uses: it does not lean on the precompiled header of the unit.
+        self.assertTrue(probe.startswith('#pragma once\n#include <windows.h>\n#include <DebugLog.h>\n'
+                                         '#include <GlassControlKind.h>\n'))
+        self.assertIn('L"[WndCompat][DelphiRestore] %s root=0x%p class=%s visible=%d iconic=%d foreground=%d",', report)
+        # Three moments: armed when a VCL top-level window is being shown or leaves the taskbar; the first on
+        # its frame or erase, the second through the queue, the third on a timer. Only the last two messages
+        # are the probe's own.
+        handler = body.split('[[nodiscard]] inline bool OnRootMessage(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)', 1)[1]
+        order = ('case WM_WINDOWPOSCHANGING:',
+                 'if (!pos || (!(pos->flags & SWP_SHOWWINDOW) && !IsIconic(hwnd))) return false;',
+                 'if (GetAncestor(hwnd, GA_ROOT) != hwnd) return false;',
+                 "|| cls[0] != L'T') return false;",
+                 'if (state.startedAt && GetTickCount64() - state.startedAt < kQuietMs) return false;',
+                 'case WM_NCPAINT:',
+                 'case WM_ERASEBKGND:',
+                 'if (state.stage != Stage::Armed || state.root != hwnd || !IsWindowVisible(hwnd) || IsIconic(hwnd))',
+                 'Report(hwnd, L"shown");',
+                 'if (!PostMessageW(hwnd, WM_NULL, kPostedWParam, kPostedLParam)) state.stage = Stage::Idle;',
+                 'case WM_NULL:',
+                 'Report(hwnd, L"erased");',
+                 'if (!SetTimer(hwnd, kTimerId, kPaintedAfterMs, nullptr)) state.stage = Stage::Idle;',
+                 'case WM_TIMER:',
+                 'KillTimer(hwnd, kTimerId);',
+                 'Report(hwnd, L"painted");',
+                 'case WM_NCDESTROY:')
+        positions = [handler.index(marker) for marker in order]
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(handler.count('return true;'), 2)
+        self.assertEqual(body.count('Report(hwnd, L"'), 3)
+        self.assertIn('inline constexpr unsigned kLinesPerMoment = 200;', body)
+        self.assertIn('inline constexpr ULONGLONG kQuietMs = 3000;', body)
+
+        # One call, in Debug only, on the Full-mode path after the shutdown gate and before any handler of
+        # the root: the messages it watches are passed on unchanged.
+        root = read('WndCompat/Root/RootSubclass.cpp')
+        self.assertEqual(root.count('#include "Root/DelphiRestoreProbe.h"'), 1)
+        self.assertEqual(root.count('DelphiRestoreProbe::'), 1)
+        self.assertIn('#if defined(_DEBUG)\n'
+                      '        // Только Debug: что лежит на поверхности VCL-формы под каждым её контролом\n'
+                      '        // сразу после показа/разворачивания, после системного стирания и после\n'
+                      '        // перерисовки. Ничего не рисует; своё сообщение и свой таймер дальше не идут.\n'
+                      '        if (WndCompat::DelphiRestoreProbe::OnRootMessage(hWnd, uMsg, wParam, lParam))\n'
+                      '            return 0;\n'
+                      '#endif\n', root)
+        shared = root.split('LRESULT CALLBACK RootSubclassProcShared(', 1)[1]
+        self.assertLess(shared.index('if (WndCompat::IsShuttingDown())'), shared.index('DelphiRestoreProbe::OnRootMessage('))
+        self.assertLess(shared.index('DelphiRestoreProbe::OnRootMessage('), shared.index('WndCompat::TryHandleDelphiPanelPaint('))
+        for project in ('WndCompat/WndCompat.vcxproj', 'WndCompat/WndCompat.vcxproj.filters'):
+            text = read(project)
+            self.assertEqual(text.count(r'Root\DelphiRestoreProbe.h'), 1)
+            ET.fromstring(text.encode('utf-8'))
+
+        # The suite compiles the header itself in both configurations.
+        test = read('WndCompat/tests/restore_probe_tests.cpp')
+        self.assertTrue(test.startswith('#include "restore_probe_test_shim.h"\n#include "../Root/DelphiRestoreProbe.h"\n\n'
+                                        '#define CHECK(expr)'))
+        self.assertEqual(test.count('#include "'), 2)
+        shim = read('WndCompat/tests/restore_probe_test_shim.h')
+        self.assertEqual(shim.count('#include "'), 0)
+        for marker in ('if (dc->flags != DCX_CACHE || !PrbTest::surface) return CLR_INVALID;',
+                       'if (erase) ++PrbTest::updateErases;',
+                       'assert(!proc);'):
+            self.assertIn(marker, shim)
+        runner = read('WndCompat/tests/restore_probe_test.py')
+        for marker in ("'Release'", "'Debug'", "'-D_DEBUG'", "'-Werror'", "'-std=c++20'"):
+            self.assertIn(marker, runner)
+        for forbidden in ('read_text', 'source.split(', 'code.split(', '-Wno-error'):
+            self.assertNotIn(forbidden, runner)
+        cases = sorted(set(re.findall(r'name == "([a-z-]+)"', test)))
+        self.assertEqual(cases, ['absent', 'children', 'gates', 'limits', 'restore', 'sequence'])
+        self.assertEqual(cases, sorted(re.findall(r"self\.run_case\('([a-z-]+)'\)", runner)))
 
 if __name__ == "__main__":
     unittest.main()

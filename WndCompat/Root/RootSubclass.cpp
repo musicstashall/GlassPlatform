@@ -52,6 +52,7 @@
 #include "Root/ExplorerRootSubclass.h"
 #include "Root/RootSubclassShared.h"
 #include "Root/DelphiPanelPaint.h"
+#include "Root/DelphiRestoreProbe.h"
 #include "Root/RootBackdropRefreshThrottle.h"
 #include "Root/TaskbarHost.h"
 #include <string>
@@ -994,6 +995,14 @@ namespace
 
         if (WndCompat::IsShuttingDown())
             return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+
+#if defined(_DEBUG)
+        // Только Debug: что лежит на поверхности VCL-формы под каждым её контролом
+        // сразу после показа/разворачивания, после системного стирания и после
+        // перерисовки. Ничего не рисует; своё сообщение и свой таймер дальше не идут.
+        if (WndCompat::DelphiRestoreProbe::OnRootMessage(hWnd, uMsg, wParam, lParam))
+            return 0;
+#endif
 
         // VCL-панелям нужен исходный Brush.Color: безусловный BLACKNESS в
         // WM_ERASEBKGND ниже уничтожает его до вызова родного VCL-обработчика.

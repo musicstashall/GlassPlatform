@@ -37,7 +37,9 @@ namespace
         {
             using namespace BgTest;
             full = true; insideDraw = false; topWindow = nullptr; paintDcs.clear();
-            windowColor = 0xffffff; faceColor = 0xf0f0f0; failBlack = failObject = false;
+            windowColor = 0xffffff; faceColor = 0xf0f0f0; highlightColor = 0xd77800;
+            failBlack = failObject = failTint = failDirectFill = false;
+            assert(tints.empty()); tintsMade = tintsDeleted = 0;
             nativeFillResult = 1; duringErase = {}; duringNativeFill = {};
             thread = 1; windowLookups = classLookups = 0; beforeExclusive = {};
             static ULONGLONG epoch = 0;
@@ -66,6 +68,7 @@ namespace
             BgTest::duringErase = {}; BgTest::duringNativeFill = {}; BgTest::beforeExclusive = {};
             Bg::Shutdown();
             assert(Bg::g_sessions.empty() && exe.hooks.empty() && !Bg::g_kept.load());
+            assert(BgTest::tints.empty() && BgTest::tintsMade == BgTest::tintsDeleted);
         }
         // One reference outlives the sessions once a control whose erase can be
         // replaced has been seen; `Refs` counts what the open sessions hold.
@@ -559,6 +562,7 @@ namespace
 
     // The classes whose erase is replaced, with the kind the classifier marks
     // them with; `face`: COLOR_BTNFACE counts as their default background too.
+    // Where it does not, it is a colour of the control's own and is kept as a tint.
     struct EraseRow { LPCWSTR cls; GlassControlKind kind; bool face; };
     const EraseRow kEraseRows[] = {
         {L"TListBox", GlassControlKind::ListBox, true}, {L"TCheckListBox", GlassControlKind::ListBox, true},
@@ -573,7 +577,16 @@ namespace
         {L"TMemo", GlassControlKind::Edit, false}, {L"TRichEdit", GlassControlKind::RichEdit50W, false},
         {L"TListView", GlassControlKind::ListView, true}, {L"TSystemListView", GlassControlKind::ListView, true},
         {L"TTreeView", GlassControlKind::TreeView, true}, {L"TResTreeView", GlassControlKind::TreeView, true},
+        {L"TTabControl", GlassControlKind::TabControl, true}, {L"TPageControl", GlassControlKind::TabControl, true},
     };
+    // A tint: the transparent base, then the colour through a brush made for
+    // it, which is gone afterwards. Nothing else is drawn.
+    bool Tinted(const std::vector<Event>& e, size_t at, HDC dc, const RECT& rect, COLORREF color, int alpha)
+    {
+        return e.size() == at + 2 && e[at].kind == Kind::Black && e[at].dc == dc && Same(e[at].rect, rect)
+            && e[at + 1].kind == Kind::DirectFill && e[at + 1].dc == dc && Same(e[at + 1].rect, rect)
+            && e[at + 1].tintColor == color && e[at + 1].tintAlpha == alpha && BgTest::tints.empty();
+    }
 
     // The window comes back from the taskbar. Windows erases every control at
     // once, outside any paint, and paints them only later; until then a control
@@ -621,11 +634,13 @@ namespace
             e = Take();
             CHECK(e.size() == 2 && e[1].kind == Kind::Black && e[1].dc == &dc && Same(e[1].rect, w.client));
             // COLOR_BTNFACE is the other default background - except where it is a
-            // colour of its own, which the edit hooks keep.
+            // colour of its own, which the edit hooks keep: there it stays, as a tint.
             w.brush = &f.face;
+            const int before = BgTest::tintsMade;
             f.EraseOutsidePaint(w, dc);
             e = Take();
-            CHECK(e.size() == 2 && e[1].kind == (row.face ? Kind::Black : Kind::NativeFill) && e[1].dc == &dc);
+            if (row.face) CHECK((e.size() == 2 && e[1].kind == Kind::Black && e[1].dc == &dc && BgTest::tintsMade == before));
+            else CHECK((Tinted(e, 1, &dc, w.client, 0xf0f0f0, 100) && BgTest::tintsMade == before + 1));
         }
         // A number box only once its default background was confirmed.
         TestWindow number; number.cls = L"TNumberBox"; number.kind = GlassControlKind::Edit; number.brush = &f.window;
@@ -710,6 +725,137 @@ namespace
         CHECK(f.Idle() && f.Kept());
     }
 
+    // A memo with a colour its application gave it. VCL erases with that colour,
+    // opaque; the edit hooks then paint it in WM_PAINT as a tint over the
+    // transparent base. The erase Windows sends on its own lays the same tint,
+    // so the memo looks the same before and after its paint.
+    void OwnColour()
+    {
+        Fixture f;
+        CHECK(f.Begin(f.list, f.paintDc, true)); f.End(f.list, f.paintDc); Take();
+        TestWindow memo; memo.cls = L"TMemo"; memo.kind = GlassControlKind::Edit; memo.client = RECT{0, 0, 1064, 78};
+        LOGBRUSH yellow{BS_SOLID, 0xe1ffff}, flagged{BS_SOLID, 0x02e1ffff}, black{BS_SOLID, 0}, selection{BS_SOLID, 0xd77800};
+        memo.brush = &yellow;
+        TestDC dc; dc.owner = &memo; dc.bitmap = &f.surface;
+        BgTest::nativeFillResult = 7;
+        SetLastError(0x66);
+        f.EraseOutsidePaint(memo, dc);
+        auto e = Take();
+        CHECK(e[0].kind == Kind::EraseMessage && e[0].hwnd == &memo);
+        CHECK(Tinted(e, 1, &dc, memo.client, 0xe1ffff, 100));   // no native colour in between, and no white
+        CHECK(GetLastError() == 0x66 && BgTest::tintsMade == 1 && BgTest::tintsDeleted == 1);
+        CHECK(Bg::g_sessions.empty() && f.Idle());
+        CHECK(f.Fill(&dc, memo.client, &yellow) == 1);          // the application is told its fill succeeded
+        CHECK(Tinted(Take(), 0, &dc, memo.client, 0xe1ffff, 100));
+        // The colour is the 24 bits; COLOR_BTNFACE is such a colour for a memo;
+        // black is a colour, not the absence of one; the selection colour stays opaque.
+        CHECK(f.Fill(&dc, memo.client, &flagged) == 1);
+        CHECK(Tinted(Take(), 0, &dc, memo.client, 0xe1ffff, 100));
+        CHECK(f.Fill(&dc, memo.client, &f.face) == 1);
+        CHECK(Tinted(Take(), 0, &dc, memo.client, 0xf0f0f0, 100));
+        CHECK(f.Fill(&dc, memo.client, &black) == 1);
+        CHECK(Tinted(Take(), 0, &dc, memo.client, 0x000000, 100));
+        CHECK(f.Fill(&dc, memo.client, &selection) == 1);
+        CHECK(Tinted(Take(), 0, &dc, memo.client, 0xd77800, 255));
+        BgTest::highlightColor = 0x112233;
+        CHECK(f.Fill(&dc, memo.client, &selection) == 1);
+        CHECK(Tinted(Take(), 0, &dc, memo.client, 0xd77800, 100));   // the current selection colour, not a constant
+        BgTest::highlightColor = 0xd77800;
+        // Its default background is still the transparent base alone.
+        int made = BgTest::tintsMade;
+        CHECK(f.Fill(&dc, memo.client, &f.window) == 1);
+        e = Take();
+        CHECK(e.size() == 1 && e[0].kind == Kind::Black && Same(e[0].rect, memo.client) && BgTest::tintsMade == made);
+        BgTest::windowColor = 0xe1ffff;                         // ...whatever the system says it is today
+        CHECK(f.Fill(&dc, memo.client, &yellow) == 1);
+        e = Take();
+        CHECK(e.size() == 1 && e[0].kind == Kind::Black && BgTest::tintsMade == made);
+        CHECK(f.Fill(&dc, memo.client, &f.window) == 1);        // 0xffffff is a colour of its own now
+        CHECK(Tinted(Take(), 0, &dc, memo.client, 0xffffff, 100));
+        BgTest::windowColor = 0xffffff;
+        // The rich edit follows the same rule in the edit hooks, and here.
+        TestWindow rich; rich.cls = L"TRichEdit"; rich.kind = GlassControlKind::RichEdit50W; rich.brush = &yellow;
+        TestDC richDc; richDc.owner = &rich;
+        f.EraseOutsidePaint(rich, richDc);
+        CHECK(Tinted(Take(), 1, &richDc, rich.client, 0xe1ffff, 100));
+
+        // No other class has a colour kept for it: what its application chose stays native.
+        made = BgTest::tintsMade;
+        for (const EraseRow& row : kEraseRows)
+        {
+            if (!row.face) continue;
+            TestWindow w; w.cls = row.cls; w.kind = row.kind; w.brush = &yellow; w.inputDefault = true;
+            TestDC wdc; wdc.owner = &w;
+            f.EraseOutsidePaint(w, wdc);
+            e = Take();
+            CHECK(e.size() == 2 && e[1].kind == Kind::NativeFill && e[1].brush == &yellow && e[1].dc == &wdc);
+        }
+        CHECK(BgTest::tintsMade == made);
+        // What is not a colour stays the application's: a pattern, no brush, a
+        // brush that tells nothing about itself. No brush is made for them.
+        const auto native = [&](HDC target, const RECT& rect, HBRUSH brush) {
+            CHECK(f.Fill(target, rect, brush) == 7);
+            const auto ev = Take();
+            CHECK(ev.size() == 1 && ev[0].kind == Kind::NativeFill && ev[0].dc == target);
+            CHECK(Same(ev[0].rect, rect) && ev[0].brush == brush);
+        };
+        native(&dc, memo.client, &f.hatch);
+        native(&dc, memo.client, nullptr);
+        BgTest::failObject = true; native(&dc, memo.client, &yellow); BgTest::failObject = false;
+        CHECK(BgTest::tintsMade == made);
+        // The same gates as for the default background: the whole client on the
+        // DC of the erase, the window's own thread, Full mode, glass on its root,
+        // and no session of the window.
+        native(&dc, RECT{0, 0, 1064, 77}, &yellow);
+        native(&dc, RECT{0, 16, 1064, 32}, &yellow);
+        dc.viewport = POINT{0, 4}; native(&dc, memo.client, &yellow); dc.viewport = POINT{};
+        dc.window = POINT{3, 0}; native(&dc, memo.client, &yellow); dc.window = POINT{};
+        dc.map = MM_ANISOTROPIC; native(&dc, memo.client, &yellow); dc.map = MM_TEXT;
+        dc.frame = true; dc.frameClip = RECT{-2, -2, 1066, 80}; native(&dc, memo.client, &yellow); dc.frame = false;
+        dc.clipKind = NULLREGION; native(&dc, memo.client, &yellow); dc.clipKind = SIMPLEREGION;
+        BgTest::thread = 2; native(&dc, memo.client, &yellow); BgTest::thread = 1;
+        BgTest::full = false; native(&dc, memo.client, &yellow); BgTest::full = true;
+        memo.backdrop = false; native(&dc, memo.client, &yellow); memo.backdrop = true;
+        memo.kind = GlassControlKind::RichEdit50W; native(&dc, memo.client, &yellow); memo.kind = GlassControlKind::Edit;
+        f.BeginDc(memo); native(&dc, memo.client, &yellow); f.EndDc(memo);
+        CHECK(!f.Begin(memo, dc, false)); native(&dc, memo.client, &yellow); f.End(memo, dc);
+        TestDC buffer; buffer.bitmap = &f.buffer;
+        native(&buffer, memo.client, &yellow);
+        CHECK(BgTest::tintsMade == made && f.Idle());
+        // The erase of a part of the client is tinted like the whole one: the
+        // clip is the update region.
+        dc.frame = true; dc.frameClip = RECT{10, 20, 60, 40};
+        CHECK(f.Fill(&dc, memo.client, &yellow) == 1);
+        CHECK(Tinted(Take(), 0, &dc, memo.client, 0xe1ffff, 100));
+        dc.frame = false;
+
+        // No brush: the application's fill runs, and nothing was drawn before it.
+        made = BgTest::tintsMade;
+        BgTest::failTint = true;
+        DWORD seen = 0;
+        BgTest::duringNativeFill = [&] { seen = GetLastError(); };
+        SetLastError(0x55);
+        native(&dc, memo.client, &yellow);
+        CHECK(seen == 0x55 && GetLastError() == 0xb102 && BgTest::tintsMade == made);
+        BgTest::failTint = false;
+        // The base could not be laid: the same, and the brush is not left behind.
+        BgTest::failBlack = true;
+        SetLastError(0x56);
+        native(&dc, memo.client, &yellow);
+        CHECK(seen == 0x56 && BgTest::tintsMade == made + 1 && BgTest::tintsDeleted == BgTest::tintsMade);
+        BgTest::failBlack = false; BgTest::duringNativeFill = {};
+        // The base is there but the colour did not go on: the memo is transparent
+        // rather than opaque, and the application is not asked to fill over it.
+        BgTest::failDirectFill = true;
+        SetLastError(0x57);
+        CHECK(f.Fill(&dc, memo.client, &yellow) == 1);
+        e = Take();
+        CHECK(e.size() == 2 && e[0].kind == Kind::Black && e[1].kind == Kind::DirectFill && e[1].tintAlpha == 100);
+        CHECK(GetLastError() == 0x57 && BgTest::tints.empty());
+        BgTest::failDirectFill = false;
+        CHECK(f.Idle() && f.Kept());
+    }
+
     // Only that fill. Everything else stays what the application made it.
     void OutsideGates()
     {
@@ -778,7 +924,10 @@ namespace
                               Pair{L"RICHEDIT50W", GlassControlKind::RichEdit50W},
                               Pair{L"TEdit2", GlassControlKind::Edit}, Pair{L"MyTEdit", GlassControlKind::Edit},
                               Pair{L"TEdi", GlassControlKind::Edit}, Pair{L"", GlassControlKind::Edit},
-                              Pair{L"TComboBox", GlassControlKind::ComboBox}, Pair{L"TPanel", GlassControlKind::None}})
+                              Pair{L"TComboBox", GlassControlKind::ComboBox}, Pair{L"TPanel", GlassControlKind::None},
+                              Pair{L"TTabControl", GlassControlKind::ListBox}, Pair{L"TPageControl", GlassControlKind::None},
+                              Pair{L"SysTabControl32", GlassControlKind::TabControl}, Pair{L"TToolBar", GlassControlKind::TabControl},
+                              Pair{L"TListBox", GlassControlKind::TabControl}, Pair{L"TTabSheet", GlassControlKind::TabControl}})
         {
             f.list.cls = x.cls; f.list.kind = x.kind;
             native(&f.eraseDc, f.client, &f.window);
@@ -786,14 +935,19 @@ namespace
         f.list.cls = L"TListBox"; f.list.kind = GlassControlKind::ListBox;
         f.list.valid = false; native(&f.eraseDc, f.client, &f.window); f.list.valid = true;
         // Most windows are of another kind, and every fill of the EXE comes
-        // through here: such a window is not asked for its class.
+        // through here: such a window is not asked for its class. (A Debug build
+        // asks once, for the line it writes about the fill.)
         for (const GlassControlKind kind : {GlassControlKind::None, GlassControlKind::ComboBox})
         {
             f.list.kind = kind; BgTest::classLookups = 0;
             native(&f.eraseDc, f.client, &f.window);
+#if defined(_DEBUG)
+            CHECK(BgTest::classLookups == 1);
+#else
             CHECK(BgTest::classLookups == 0);
+#endif
         }
-        f.list.kind = GlassControlKind::ListBox;
+        f.list.kind = GlassControlKind::ListBox; BgTest::classLookups = 0;
         black(&f.eraseDc);
         CHECK(BgTest::classLookups == 1);
 
@@ -999,6 +1153,27 @@ namespace
         CHECK(lines[6].numbers == line(&f.tree, &f.treeDc, big, SIMPLEREGION, big, 1, -1, 0, 0));
         CHECK(lines[7].numbers == line(&f.tree, &f.treeDc, big, 3, RECT{10, 20, 60, 40}, 1, 0, 0xffffff, 1));
         CHECK(BgTest::logs.size() == 8);            // nothing else is written for them
+        // A memo's own colour: 2 is the tint, 1 the base alone, 0 the application's fill.
+        {
+            BgTest::clock += 1000; BgTest::logs.clear();
+            TestWindow memo; memo.cls = L"TMemo"; memo.kind = GlassControlKind::Edit;
+            LOGBRUSH yellow{BS_SOLID, 0xe1ffff};
+            TestDC memoDc; memoDc.owner = &memo;
+            CHECK(f.Fill(&memoDc, memo.client, &yellow) == 1);
+            CHECK(f.Fill(&memoDc, memo.client, &f.window) == 1);
+            CHECK(f.Fill(&memoDc, memo.client, &f.hatch) == 1);
+            BgTest::failDirectFill = true;
+            CHECK(f.Fill(&memoDc, memo.client, &yellow) == 1);
+            BgTest::failDirectFill = false;
+            const auto memoLines = Logs(L"] erase-outside ");
+            CHECK(memoLines.size() == 4 && BgTest::logs.size() == 4);
+            CHECK(memoLines[0].texts == std::vector<std::wstring>{L"TMemo"});
+            CHECK(memoLines[0].numbers == line(&memo, &memoDc, memo.client, SIMPLEREGION, memo.client, 1, 0, 0xe1ffff, 2));
+            CHECK(memoLines[1].numbers == line(&memo, &memoDc, memo.client, SIMPLEREGION, memo.client, 1, 0, 0xffffff, 1));
+            CHECK(memoLines[2].numbers == line(&memo, &memoDc, memo.client, SIMPLEREGION, memo.client, 1, 2, 0xffffff, 0));
+            CHECK(memoLines[3].numbers == line(&memo, &memoDc, memo.client, SIMPLEREGION, memo.client, 1, 0, 0xe1ffff, 1));
+            Take();
+        }
         // A fill that is not the erase is reported too, and says why: a part
         // of the client, a window DC of the frame, nothing to erase, no rectangle.
         BgTest::clock += 1000; BgTest::logs.clear();
@@ -1043,6 +1218,103 @@ namespace
         Take();
         CHECK(f.Idle() && f.Kept());
     }
+
+    // A fill of the EXE that reached a VCL window which is not in the table,
+    // outside the sessions of that window: what a parent erased into the DC of
+    // its child, or the erase of a class that is not decided here. One Debug
+    // line each, 64 a second, with the origins of the DC. Nothing is drawn for
+    // it: the fill stays the application's.
+    void OtherDiagnostics()
+    {
+        Fixture f;
+        CHECK(f.Begin(f.list, f.paintDc, true)); f.End(f.list, f.paintDc); Take();
+        BgTest::clock += 1000; BgTest::logs.clear();
+        BgTest::nativeFillResult = 7;
+        const auto native = [&](HDC dc, const RECT& rect, HBRUSH brush) {
+            CHECK(f.Fill(dc, rect, brush) == 7);
+            const auto e = Take();
+            CHECK(e.size() == 1 && e[0].kind == Kind::NativeFill && e[0].dc == dc && Same(e[0].rect, rect) && e[0].brush == brush);
+        };
+        // A panel asked its parent for the background: the parent's client, in
+        // the panel's DC with an origin moved by the panel's place in it.
+        f.other.client = RECT{0, 0, 185, 41};
+        const RECT parent{0, 0, 640, 480};
+        f.foreignDc.viewport = POINT{-20, -30};
+        native(&f.foreignDc, parent, &f.face);
+        f.foreignDc.viewport = POINT{}; f.foreignDc.window = POINT{20, 30};
+        native(&f.foreignDc, parent, &f.custom);
+        f.foreignDc.window = POINT{};
+        // The erase of a class which is not in the table, marked or not.
+        TestWindow combo; combo.cls = L"TComboBox"; combo.kind = GlassControlKind::ComboBox; combo.client = RECT{0, 0, 145, 21};
+        TestDC comboDc; comboDc.owner = &combo; comboDc.clipKind = 3;
+        native(&comboDc, combo.client, &f.window);
+        native(&comboDc, combo.client, &f.hatch);
+        BgTest::failObject = true; native(&comboDc, combo.client, &f.window); BgTest::failObject = false;
+        CHECK(ExeFillRect(f.exe, &comboDc, nullptr, &f.window) == 7); Take();
+        [[maybe_unused]] auto lines = Logs(L"] erase-other ");
+#if defined(_DEBUG)
+        // hwnd, kind, dc, the rectangle, the client's size, the clip, the origins, the brush
+        const auto line = [](HWND w, int kind, HDC dc, const RECT& rect, int clipKind, POINT viewport, POINT window,
+                             int style, long long rgb) {
+            return std::vector<long long>{Number(w), kind, Number(dc), rect.left, rect.top, rect.right, rect.bottom,
+                w->client.right, w->client.bottom, clipKind, w->client.left, w->client.top, w->client.right, w->client.bottom,
+                viewport.x, viewport.y, window.x, window.y, style, rgb};
+        };
+        CHECK(lines.size() == 6 && BgTest::logs.size() == 6);
+        CHECK(lines[0].format == L"[GlassCore][DelphiBackground] erase-other hwnd=0x%p class=%s kind=%u dc=0x%p rect=[%ld,%ld,%ld,%ld] "
+                                 L"client=[%ld,%ld] clip=%d[%ld,%ld,%ld,%ld] org=[%ld,%ld,%ld,%ld] style=%d rgb=0x%06X");
+        CHECK(lines[0].texts == std::vector<std::wstring>{L"TPanel"});
+        CHECK(lines[0].numbers == line(&f.other, 0, &f.foreignDc, parent, SIMPLEREGION, POINT{-20, -30}, POINT{}, 0, 0xf0f0f0));
+        CHECK(lines[1].numbers == line(&f.other, 0, &f.foreignDc, parent, SIMPLEREGION, POINT{}, POINT{20, 30}, 0, 0x00c0ff));
+        CHECK(lines[2].texts == std::vector<std::wstring>{L"TComboBox"});
+        const int comboKind = static_cast<int>(GlassControlKind::ComboBox);
+        CHECK(lines[2].numbers == line(&combo, comboKind, &comboDc, combo.client, 3, POINT{}, POINT{}, 0, 0xffffff));
+        CHECK(lines[3].numbers == line(&combo, comboKind, &comboDc, combo.client, 3, POINT{}, POINT{}, 2, 0xffffff));
+        CHECK(lines[4].numbers == line(&combo, comboKind, &comboDc, combo.client, 3, POINT{}, POINT{}, -1, 0));
+        CHECK(lines[5].numbers == line(&combo, comboKind, &comboDc, RECT{}, 3, POINT{}, POINT{}, 0, 0xffffff));
+        // Not reported: a window which is not VCL's, one that cannot tell its
+        // class, another thread, another mode, a buffer, the screen, a session of
+        // the window - and a control of the table, which has a line of its own.
+        BgTest::clock += 1000; BgTest::logs.clear();
+        for (LPCWSTR cls : {L"Edit", L"ComboBox", L"SysTabControl32", L"tPanel", L""})
+        { combo.cls = cls; native(&comboDc, combo.client, &f.window); }
+        combo.cls = L"TComboBox";
+        combo.valid = false; native(&comboDc, combo.client, &f.window); combo.valid = true;
+        BgTest::thread = 2; native(&comboDc, combo.client, &f.window); BgTest::thread = 1;
+        combo.thread = 2; native(&comboDc, combo.client, &f.window); combo.thread = 1;
+        BgTest::full = false; native(&comboDc, combo.client, &f.window); BgTest::full = true;
+        native(&f.memoryDc, combo.client, &f.window);
+        TestDC screen; screen.screen = true;
+        native(&screen, combo.client, &f.window);
+        f.BeginDc(combo); native(&comboDc, combo.client, &f.window); f.EndDc(combo);
+        CHECK(!f.Begin(combo, comboDc, false)); native(&comboDc, combo.client, &f.window); f.End(combo, comboDc);
+        CHECK(BgTest::logs.empty());
+        CHECK(f.Fill(&f.eraseDc, f.client, &f.window) == 1); Take();
+        CHECK(Logs(L"] erase-other ").empty() && Logs(L"] erase-outside ").size() == 1);
+        // A window without glass on its root is reported: the line is about the
+        // fill, not about what the platform would do with it.
+        BgTest::clock += 1000; BgTest::logs.clear();
+        combo.backdrop = false; native(&comboDc, combo.client, &f.window); combo.backdrop = true;
+        CHECK(Logs(L"] erase-other ").size() == 1);
+        // 64 a second, apart from the budget of the other line.
+        BgTest::clock += 1000; BgTest::logs.clear();
+        for (int i = 0; i < 80; ++i) native(&comboDc, combo.client, &f.window);
+        CHECK(Logs(L"] erase-other ").size() == 64);
+        for (int i = 0; i < 40; ++i) { CHECK(f.Fill(&f.eraseDc, f.client, &f.window) == 1); Take(); }
+        CHECK(Logs(L"] erase-outside ").size() == 32 && Logs(L"] erase-other ").size() == 64);
+        BgTest::clock += 999;
+        native(&comboDc, combo.client, &f.window);
+        CHECK(Logs(L"] erase-other ").size() == 64);
+        BgTest::clock += 1;
+        native(&comboDc, combo.client, &f.window);
+        CHECK(Logs(L"] erase-other ").size() == 65);
+#else
+        CHECK(lines.empty() && BgTest::logs.empty());
+#endif
+        CHECK(BgTest::Count(Kind::Black) == 0 && BgTest::tintsMade == 0);
+        Take();
+        CHECK(f.Idle() && f.Kept());
+    }
 }
 
 int main(int argc, char** argv)
@@ -1061,9 +1333,11 @@ int main(int argc, char** argv)
         else if (name == "lifecycle") Lifecycle();
         else if (name == "diagnostics") Diagnostics();
         else if (name == "erase-outside") EraseOutside();
+        else if (name == "own-colour") OwnColour();
         else if (name == "outside-gates") OutsideGates();
         else if (name == "kept-import") KeptImport();
         else if (name == "outside-diagnostics") OutsideDiagnostics();
+        else if (name == "other-diagnostics") OtherDiagnostics();
         else throw std::runtime_error("unknown case");
         std::cout << "PASS " << name << '\n';
     }
