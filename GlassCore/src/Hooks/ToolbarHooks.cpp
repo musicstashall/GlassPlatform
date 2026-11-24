@@ -686,10 +686,19 @@ namespace GlassCore::ToolbarControl
         g_modStack.push_back(session);
         EnableToolbarHooksForModule(hWnd, callerMod, true, session.vclIcons);
 
+#if defined(_DEBUG)
+        // Что отличает тулбар, подписи которого система сама рисует с альфой
+        // (адресная строка проводника), от TToolBar: не стиль окна — у TToolBar
+        // с подписями TBSTYLE_TRANSPARENT стоит всегда, — а composited-класс темы.
+        BOOL composited = FALSE;
+        if (const HTHEME theme = GetWindowTheme(hWnd))
+            GetThemeBool(theme, TP_BUTTON, 0, TMT_COMPOSITED, &composited);
         DebugLog(DBG_NORMAL,
-            L"[GlassCore][Toolbar] Begin: callerMod=0x%p hWnd=0x%p depth=%zu vclIcons=%d maskModules=[0x%p,0x%p] textModule=0x%p",
+            L"[GlassCore][Toolbar] Begin: callerMod=0x%p hWnd=0x%p depth=%zu vclIcons=%d maskModules=[0x%p,0x%p] textModule=0x%p style=0x%08X composited=%d",
             callerMod, hWnd, g_modStack.size(), session.vclIcons ? 1 : 0,
-            session.iconModules[0], session.iconModules[1], session.textModule);
+            session.iconModules[0], session.iconModules[1], session.textModule,
+            static_cast<unsigned>(GetWindowLongW(hWnd, GWL_STYLE)), composited ? 1 : 0);
+#endif
     }
 
     static void OnEndGlobal(HWND hWnd, HMODULE /*callerMod*/)

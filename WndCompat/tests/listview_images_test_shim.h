@@ -11,7 +11,6 @@ inline constexpr int COLOR_SCROLLBAR = 0, SM_CXVSCROLL = 2, SM_CYHSCROLL = 3;
 inline constexpr UINT ETO_IGNORELANGUAGE = 0x1000;
 inline constexpr UINT DT_LEFT = 0, DT_TOP = 0, DT_SINGLELINE = 0x20, DT_NOCLIP = 0x100;
 inline constexpr UINT OBJ_PEN = 1, PS_NULL = 5;
-inline constexpr COLORREF CLR_INVALID = 0xffffffff;
 struct PAINTSTRUCT { HDC hdc{}; BOOL fErase{}; RECT rcPaint{}; };
 using LPPAINTSTRUCT = PAINTSTRUCT*;
 struct LOGPEN { UINT lopnStyle{}; POINT lopnWidth{}; COLORREF lopnColor{}; };
@@ -28,7 +27,6 @@ namespace ListViewImageTest
     inline std::vector<HMODULE> stack;
     inline std::wstring themeClass = L"ListView";
 }
-inline int GetSystemMetrics(int) { return 17; }
 inline int GetClipBox(HDC, LPRECT rc) { *rc = {0, 0, 200, 60}; return 1; }
 inline COLORREF SetBkColor(HDC dc, COLORREF color) { return std::exchange(dc->background, color); }
 inline COLORREF ListView_GetBkColor(HWND w) { return ListViewImageTest::backgrounds[w]; }

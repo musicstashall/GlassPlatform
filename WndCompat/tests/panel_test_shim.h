@@ -41,6 +41,23 @@ inline constexpr UINT DIB_RGB_COLORS = 0;
 inline constexpr BYTE AC_SRC_OVER = 0, AC_SRC_ALPHA = 1;
 inline constexpr int COLOR_MENUBAR = 30;
 inline const HGDIOBJ HGDI_ERROR = reinterpret_cast<HGDIOBJ>(static_cast<std::intptr_t>(-1));
+inline constexpr COLORREF CLR_INVALID = 0xffffffff;
+struct DIBSECTION { BITMAP dsBm{}; BITMAPINFOHEADER dsBmih{}; };
+// Icons. Only the types live here: TPanelDraw compiles its icon path in every
+// suite, but only the VCL image suite draws one, and its shim holds the model.
+// A pixel is covered by an alpha, cut (alpha 0), or inverts what is under it.
+struct TestIcon
+{
+    struct Pixel { BYTE r{}, g{}, b{}, alpha{}; bool inverts{}; };
+    int width{}, height{};
+    bool colour = true;     // false: a monochrome cursor, its two masks in one bitmap
+    bool alpha = true;      // false: mask and colour only - GDI leaves A=0 under it
+    std::vector<Pixel> pixels;
+};
+using HICON = TestIcon*;
+struct ICONINFO { BOOL fIcon{}; DWORD xHotspot{}, yHotspot{}; HBITMAP hbmMask{}, hbmColor{}; };
+inline constexpr UINT DI_MASK = 1, DI_IMAGE = 2, DI_NORMAL = 3, DI_COMPAT = 4, DI_DEFAULTSIZE = 8, DI_NOMIRROR = 16;
+inline constexpr int SM_CXICON = 11, SM_CYICON = 12;
 inline BYTE GetRValue(COLORREF c) { return c & 255; }
 inline BYTE GetGValue(COLORREF c) { return (c >> 8) & 255; }
 inline BYTE GetBValue(COLORREF c) { return (c >> 16) & 255; }
@@ -90,8 +107,14 @@ inline int GetObjectW(HGDIOBJ object, int bytes, void* out)
 }
 inline BOOL StretchBlt(HDC, int, int, int, int, HDC, int, int, int, int, DWORD) { return TRUE; }
 #if !defined(GLASS_TEST_REAL_OPAQUE_BITMAP)
-// Background/caption suite never prepares images. The dedicated VCL image
-// suite defines this macro and compiles the real source/selection helper.
+// Background/caption suite never prepares images or draws icons. The dedicated
+// VCL image suite defines this macro and compiles the real helpers over models.
+inline constexpr DWORD SRCCOPY = 0x00cc0020;
+inline BOOL GdiFlush() { return TRUE; }
+inline int GetSystemMetrics(int) { return 32; }
+inline DWORD GetLayout(HDC) { return 0; }
+inline BOOL GetIconInfo(HICON, ICONINFO*) { return FALSE; }
+inline BOOL DrawIconEx(HDC, int, int, HICON, int, int, UINT, HBRUSH, UINT) { return TRUE; }
 namespace GlassCore::GdiUtils
 {
     struct OpaqueBitmapSource

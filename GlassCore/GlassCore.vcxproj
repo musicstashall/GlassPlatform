@@ -296,6 +296,7 @@
     <ClInclude Include="Include\Hooks\TaskbarHooks.h" />
     <ClInclude Include="Include\Subsystems\GdiHookUtils.h" />
     <ClInclude Include="Include\Subsystems\OpaqueBitmapSource.h" />
+    <ClInclude Include="Include\Subsystems\PictureAlpha.h" />
     <ClInclude Include="Include\Hooks\UiRibbonHooks.h" />
     <ClInclude Include="Include\Hooks\Static.h" />
     <ClInclude Include="Include\Hooks\TreeView.h" />

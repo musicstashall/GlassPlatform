@@ -546,6 +546,9 @@
     <ClInclude Include="Include\Subsystems\OpaqueBitmapSource.h">
       <Filter>Include\Subsystems</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Subsystems\PictureAlpha.h">
+      <Filter>Include\Subsystems</Filter>
+    </ClInclude>
     <ClInclude Include="Include\Subsystems\Menu.h">
       <Filter>Include\Subsystems</Filter>
     </ClInclude>

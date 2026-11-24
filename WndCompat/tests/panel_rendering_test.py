@@ -119,8 +119,11 @@ class PanelRenderingTest(unittest.TestCase):
     def test_ansi_export_route_needs_neither_exe_import_nor_iat_acquisition(self):
         self.run_case('ansi-route')
 
-    def test_ansi_detour_is_exact_tpanel_paint_print_only(self):
+    def test_ansi_detour_is_exact_tpanel_and_tscrollbox_paint_print_only(self):
         self.run_case('ansi-classes')
+
+    def test_scroll_box_labels_are_drawn_like_panel_captions(self):
+        self.run_case('scroll-labels')
 
     def test_ansi_bounded_embedded_nul_dbcs_and_utf16_lengths(self):
         self.run_case('ansi-lengths')

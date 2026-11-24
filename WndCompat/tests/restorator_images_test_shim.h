@@ -25,6 +25,7 @@ namespace RestoratorTest
     inline int countQueries = 0;
     inline thread_local ULONGLONG clock = 100;
     inline thread_local std::vector<std::wstring> logFormats, logStrings;
+    inline thread_local std::vector<size_t> logSizes; // every %zu argument, in order
     inline thread_local int dibQueries = 0;
     inline int copyFault = 0; // corrupts what the second DIBSECTION query of a blit (the prepared copy) reports
 }
@@ -159,7 +160,8 @@ inline ULONGLONG RestoratorTickCount64() { return RestoratorTest::clock; }
 template <typename T> inline void RestoratorCaptureLogString(T value)
 {
     if constexpr (std::is_convertible_v<T, LPCWSTR>)
-        if (value) RestoratorTest::logStrings.emplace_back(value);
+    { if (value) RestoratorTest::logStrings.emplace_back(value); }
+    else if constexpr (std::is_same_v<T, size_t>) RestoratorTest::logSizes.push_back(value);
 }
 template <typename... Args> inline void RestoratorDebugLog(int, LPCWSTR format, Args... args)
 {

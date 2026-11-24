@@ -542,7 +542,9 @@ namespace
             c.window.cls = name;
             for (UINT msg : {WM_PAINT, WM_PRINTCLIENT, WM_ERASEBKGND})
             {
-                const bool expected = _wcsicmp(name, L"TPanel") == 0 && msg != WM_ERASEBKGND;
+                // A panel, and a scroll box: the labels of the graphic controls it holds.
+                const bool expected = (_wcsicmp(name, L"TPanel") == 0 || _wcsicmp(name, L"TScrollBox") == 0)
+                    && msg != WM_ERASEBKGND;
                 const bool began = BeginPaint(&c.window, msg, msg == WM_PRINTCLIENT ? &c.memory : nullptr);
                 CHECK(bool(PanelTest::textDetour) == expected);
                 CHECK(!c.module.hooks.count("DrawTextA"));
@@ -551,6 +553,50 @@ namespace
             }
         }
         CHECK(!GlassShared::IsDelphiPanelClassName(L"TPage"));
+        for (LPCWSTR name : {L"TScrollBox2", L"MyTScrollBox", L"TScrollBo", L"TScrollingWinControl"})
+        {
+            c.window.cls = name;
+            CHECK(!BeginPaint(&c.window, WM_PAINT, nullptr) && !PanelTest::textDetour);
+        }
+    }
+    void ScrollBoxLabelsAreDrawnLikePanelCaptions()
+    {
+        // What a TScrollBox shows under its pictures are labels: graphic controls
+        // painted inside its own paint with the application's DrawTextA.
+        Context c{true}; c.window.cls = L"tScrollBOX";
+        TestFont cyrillic{204}; c.dc.font = &cyrillic; PanelTest::fontCharsets[&cyrillic] = 204;
+        RECT rect{8,4,180,17};
+        const char label[]{char(0xc8),char(0xea),char(0xee),char(0xed),char(0xea),char(0xe0),' ','6','4','x','6','4'};
+        Test::duringNativePaint = [&](HWND w, UINT msg, WPARAM, LPARAM) {
+            CHECK(w == &c.window && msg == WM_PAINT && g_ansiTextRefs == 1 && PanelTest::attaches == 1);
+            c.Refs(1); // the background imports of a panel class, as before
+            CHECK(::DrawTextA(&c.dc, label, static_cast<int>(sizeof(label)), &rect, 0x40) == 15);
+        };
+        CHECK(c.Message(WM_PAINT));
+        CHECK(Test::alphaText == 1 && PanelTest::nativeAnsi == 0 && PanelTest::alphaDc == &c.dc);
+        CHECK(PanelTest::alphaText == L"\u0418\u043a\u043e\u043d\u043a\u0430 64x64" && PanelTest::alphaCount == 12);
+        CHECK(PanelTest::alphaFlags == 0x40 && PanelTest::codepage == 1251);
+        CHECK(rect.left == 8 && rect.top == 4 && rect.right == 180 && rect.bottom == 17);
+        CHECK(!PanelTest::textDetour && PanelTest::detaches == 1); c.Refs(0);
+        // A print of it is the same text; its erase is the background alone.
+        Test::duringNativePaint = [&](HWND, UINT msg, WPARAM wp, LPARAM) {
+            CHECK(msg == WM_PRINTCLIENT && reinterpret_cast<HDC>(wp) == &c.memory);
+            CHECK(::DrawTextA(&c.memory, "Print", 5, &rect, 0) == 15);
+        };
+        CHECK(c.Message(WM_PRINTCLIENT, &c.memory, 4));
+        CHECK(Test::alphaText == 2 && PanelTest::alphaDc == &c.memory && PanelTest::alphaText == L"Print");
+        Test::duringNativePaint = [&](HWND, UINT msg, WPARAM, LPARAM) {
+            CHECK(msg == WM_ERASEBKGND && !PanelTest::textDetour);
+            CHECK(::DrawTextA(&c.dc, "Erase", 5, &rect, 0) == 43); // nobody's hook: the export itself
+            c.Fill();
+        };
+        const int blends = PanelTest::blends;
+        CHECK(c.Message()); CHECK(PanelTest::blends == blends + 1 && PanelTest::nativeAnsi == 1 && Test::alphaText == 2);
+        // Another window's DC inside its paint is not its label.
+        Test::duringNativePaint = [&](HWND, UINT, WPARAM, LPARAM) {
+            CHECK(::DrawTextA(&c.foreign, "Other", 5, &rect, 0) == 43);
+        };
+        CHECK(c.Message(WM_PAINT)); CHECK(PanelTest::nativeAnsi == 2 && Test::alphaText == 2);
     }
     void AnsiCountsAndUtf16Length()
     {
@@ -1520,6 +1566,7 @@ int main(int argc, char** argv)
         {"themed-native-semantics", ThemedNativeSemanticsAndFailure},
         {"card-and-radio-captions", CardAndRadioGroupProbe},
         {"ansi-route", AnsiExportWithoutImportRoute}, {"ansi-classes", AnsiExactClassesAndMessages},
+        {"scroll-labels", ScrollBoxLabelsAreDrawnLikePanelCaptions},
         {"ansi-lengths", AnsiCountsAndUtf16Length}, {"ansi-codepages", AnsiSelectedFontCodepage},
         {"ansi-dcs", AnsiDcOwnership}, {"ansi-gates", AnsiRuntimeGates},
         {"ansi-native-args", AnsiNativeArgumentSemantics}, {"ansi-state", AnsiPreservesDcClippingAndBackground},

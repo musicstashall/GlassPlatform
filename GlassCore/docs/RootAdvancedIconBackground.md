@@ -36,7 +36,9 @@ Menu-ключи на эти поверхности **не** влияют (см. 
 | TreeView (MaskBlt non-alpha) | `TreeViewHooks.cpp` | black-key | `SpriteEffect` |
 | ToolbarWindow32 (MaskBlt/BitBlt non-alpha) | `ToolbarHooks.cpp` | black-key | `SpriteEffect` |
 | TToolBar (VCL native MaskBlt) | `ToolbarHooks.cpp` + `OpaqueBitmapSource` | opaque 32bpp copy, настоящая маска/ROP | тот же native mask-путь, не chroma |
-| Restorator: TResTreeView / TImgViewBox (EXE SRCCOPY BitBlt/StretchBlt) | `delphi/RestoratorImages.cpp` + `OpaqueBitmapSource` | локальная альфа-маска по яркости для картинки на чёрном | тот же путь, настройка не применяется |
+| Restorator: TResTreeView / TImgViewBox (EXE SRCCOPY BitBlt/StretchBlt) | `delphi/RestoratorImages.cpp` + `OpaqueBitmapSource` + `PictureAlpha.h` | opaque 32bpp copy как есть; от контура вырезается только цвет окна, если его называет canvas bitmap | тот же путь, настройка не применяется |
+| TScrollBox: изображения графических контролов (EXE SRCCOPY StretchBlt) | `delphi/TPanelDraw.cpp` + `OpaqueBitmapSource` + `PictureAlpha.h` | та же opaque-копия и вырез цвета окна от контура; источник размером с клиент — native | тот же путь, настройка не применяется |
+| TScrollBox: значки и курсоры (EXE DrawIconEx) | `delphi/TPanelDraw.cpp` + `PictureAlpha.h` | значок рисуется оригиналом на чёрном и на белом и смешивается с собственной прозрачностью | тот же путь, настройка не применяется |
 | Button (comctl32 BitBlt non-alpha) | `ButtonHooks.cpp` | black-key | `SpriteEffect` |
 | MFC Afx toolbar (16×16) | `RootGdiHooks.cpp` | black-key (без настройки/UI) | — |
 | Static с изображением | `WndCompat/Controls/StaticSubclass.cpp` | только `Promise32BPP` (alpha=255, цвет не удаляется) | `SpriteEffect` |
@@ -63,13 +65,19 @@ caller текущего BeginPaint** (new либо legacy) и доказанны
 DoubleBuffered; см. [Delphi-VCL, тест 101](Delphi-VCL.md#тест-101-непрозрачность-изображений-ttoolbar-и-вложенного-tpanel--native-bwm-пути)
 и [тест 102](Delphi-VCL.md#тест-102-tlistview--native-maskblt-паритет-restorator).
 
-Стартовые картинки Restorator (`RestoratorImages`) — тоже отдельный путь: альфа
-копии — попиксельная маска по яркости (A = max канала, RGB без изменений),
-построенная в самом модуле; порогов для содержимого и областей нет,
-`ApplyBlackKeyAlpha` и chroma-настройка не используются. Маршрут — в
+Картинки Restorator (`RestoratorImages`: стартовые подсказки и графические
+ресурсы в `TResTreeView` / `TImgViewBox`) — тоже отдельный путь: копия с A=255
+рисуется как есть, вместе с собственным фоном картинки (чёрным у подсказок).
+Маски по яркости больше нет. Вырезается только цвет окна, на котором EXE собрал
+картинку: если кисть canvas её bitmap — `COLOR_BTNFACE`, пиксели точно этого
+цвета, достижимые от контура, становятся прозрачными
+(`Subsystems/PictureAlpha.h`). `ApplyBlackKeyAlpha` и chroma-настройка не
+используются. Так же обрабатываются изображения графических контролов в
+`TScrollBox` (`TPanelDraw.cpp`), а значки и курсоры в нём (`DrawIconEx` из EXE)
+смешиваются с собственной прозрачностью. Маршрут — в
 [Delphi-VCL, тест 119](Delphi-VCL.md#тест-119-restorator--стартовые-картинки-trestreeview-и-timgviewbox-без-чёрной-подложки),
-маска — в
-[тесте 120](Delphi-VCL.md#тест-120-restorator--альфа-маска-по-яркости-вместо-блочной-политики).
+политика — в
+[тесте 131](Delphi-VCL.md#тест-131-стили-ttoolbar-restorator--картинки-значки-и-подписи-tscrollbox).
 
 ### Static (`STM_SETIMAGE`)
 

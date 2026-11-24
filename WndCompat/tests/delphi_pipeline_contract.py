@@ -2383,31 +2383,226 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('if (g_modStack.back().vclIcons)\n            return orig(', bit)
         self.assertIn('GdiAlphaBlend', bit)  # existing common-controls renderer retained
 
-    def test_panel_image_slot_is_paint_only_exact_nested_exe_tpanel_and_preserves_native_stretch(self):
+    def test_panel_image_slot_is_paint_only_nested_exe_tpanel_or_exe_tscrollbox_and_preserves_native_stretch(self):
         code = read('GlassCore/src/Hooks/delphi/TPanelDraw.cpp')
         enum = code.split('enum : size_t {', 1)[1].split('Count };', 1)[0]
         table = code.split('g_dep{{', 1)[1].split('}};', 1)[0]
         self.assertEqual(len(re.findall(r'\b\w+Slot\b', enum)), 4)
         self.assertEqual(re.findall(r'"([A-Za-z0-9]+)", reinterpret_cast<PVOID>', table),
                          ['FillRect', 'PatBlt', 'ExtTextOutW', 'StretchBlt'])
-        gate = code.split('bool IsNestedImagePanel(', 1)[1].split('bool IsPanelDc(', 1)[0]
+        gate = code.split('bool IsNestedImagePanel(', 1)[1].split('bool IsImageScrollBox(', 1)[0]
         for marker in ('g_entryPointModule', 'GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)',
                        '_wcsicmp(name, L"TPanel") == 0', 'GetParent(hwnd)',
                        '_wcsicmp(parentName, L"TPanel") == 0'):
             self.assertIn(marker, gate)
         self.assertNotIn('wcsstr', gate)
-        self.assertIn('i == StretchSlot && (message != WM_PAINT || !IsNestedImagePanel(hwnd))', code)
-        image = code.split('BOOL WINAPI PanelStretch(HDC dc,', 1)[1].split('BOOL WINAPI PanelExt(HDC dc,', 1)[0]
+        # The second host: the exact class of the EXE itself, compared whole.
+        scroll = code.split('bool IsImageScrollBox(', 1)[1].split('ImageHost ImageHostOf(', 1)[0]
+        for marker in ('g_entryPointModule', 'exe && IsWindow(hwnd)',
+                       'GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)) == exe', '_wcsicmp(name, L"TScrollBox") == 0'):
+            self.assertIn(marker, scroll)
+        for forbidden in ('wcsstr', 'wcsncmp', 'GetParent', 'GlassGetWindowKind'):
+            self.assertNotIn(forbidden, scroll)
+        self.assertIn('enum class ImageHost { None, NestedPanel, ScrollBox };', code)
+        self.assertIn('return IsNestedImagePanel(hwnd) ? ImageHost::NestedPanel\n'
+                      '                : IsImageScrollBox(hwnd) ? ImageHost::ScrollBox : ImageHost::None;', code)
+        self.assertIn('const ImageHost images = message == WM_PAINT ? ImageHostOf(hwnd) : ImageHost::None;', code)
+        self.assertIn('if (i == StretchSlot && images == ImageHost::None) continue;', code)
+        image = code.split('BOOL WINAPI PanelStretch(HDC dc,', 1)[1].split('BOOL WINAPI PanelIcon(HDC dc,', 1)[0]
         for marker in ('Original<StretchSlot, decltype(&::StretchBlt)>', 'IsPanelDc(dc)',
-                       'g_stack.back().acquired[StretchSlot]', 'IsNestedImagePanel(g_stack.back().hwnd)',
+                       'g_stack.back().acquired[StretchSlot]',
+                       '(host = ImageHostOf(g_stack.back().hwnd)) == ImageHost::None',
+                       '(host == ImageHost::ScrollBox && rop != SRCCOPY)',
                        'IsTopWindowDrawingSession', 'IsPaintStackDcForHwnd', 'GetMapMode(source) != MM_TEXT',
                        'bitmap.bmWidth == client.right-client.left', 'bitmap.bmHeight == client.bottom-client.top',
                        'OpaqueBitmapSource image{source}', 'source, sx, sy, sw, sh, rop)',
                        'SetLastError(error)', 'TakeDiag(3)'):
             self.assertIn(marker, image)
-        for forbidden in ('GdiAlphaBlend', 'ApplyBlackKeyAlpha', 'HasAlphaChannel', '_ReturnAddress'):
+        # Only a scroll box loses the window's colour, only from the prepared copy - never from
+        # the caller's own bitmap - and only where the canvas of that bitmap names the colour.
+        order = ('GlassCore::GdiUtils::OpaqueBitmapSource image{source};', 'prepared = static_cast<bool>(image);',
+                 'if (prepared && host == ImageHost::ScrollBox && GlassCore::GdiUtils::WindowBackgroundKey(source, key))',
+                 'edge = GlassCore::GdiUtils::CutSelectedEdgeBackground(source, bitmap, key);',
+                 'result = native();')
+        positions = [image.index(marker) for marker in order]
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(image.count('CutSelectedEdgeBackground('), 1)
+        for forbidden in ('GdiAlphaBlend', 'ApplyBlackKeyAlpha', 'HasAlphaChannel', '_ReturnAddress', 'CutEdgeBackground(pixels'):
             self.assertNotIn(forbidden, image)
         self.assertEqual(image.count('result = native()'), 1)
+
+    def test_scroll_box_icons_take_their_own_exe_import_and_are_blended_by_the_shared_helper(self):
+        code = read('GlassCore/src/Hooks/delphi/TPanelDraw.cpp')
+        # An import of its own, apart from the panel slots and their masks.
+        table = code.split('g_iconDep{{', 1)[1].split('}};', 1)[0]
+        self.assertEqual(re.findall(r'"([A-Za-z0-9]+)", reinterpret_cast<PVOID>\((\w+)\)', table),
+                         [('DrawIconEx', 'PanelIcon')])
+        self.assertIn('"user32.dll"sv', table)
+        for marker in ('HookDispatcher<1, 3> g_iconDispatcher{g_iconDep, nullptr};',
+                       'constexpr unsigned kIconMask = 1u << (Count + 2);', 'bool iconAcquired = false;',
+                       'BOOL WINAPI PanelIcon(HDC, int, int, HICON, int, int, UINT, HBRUSH, UINT);'):
+            self.assertIn(marker, code)
+        acquire = code.split('bool AcquireIcon() noexcept', 1)[1].split('void ReleaseSession(', 1)[0]
+        for marker in ('if (!g_iconDispatcher.moduleAddress) return false;',
+                       'const int before = g_iconDispatcher.GetRef(0);', 'g_iconDispatcher.EnableHook(0, true);',
+                       'return g_iconDispatcher.GetRef(0) > before;'):
+            self.assertIn(marker, acquire)
+        release = code.split('void ReleaseSession(const Session& s) noexcept', 1)[1].split('decltype(&::DrawTextA) AnsiTextOriginal()', 1)[0]
+        self.assertIn('if (s.iconAcquired) g_iconDispatcher.EnableHook(0, false);', release)
+        begin = code.split('bool BeginPaint(HWND hwnd, UINT message, HDC suppliedDc) noexcept', 1)[1].split('void EndPaint() noexcept', 1)[0]
+        order = ('const ImageHost images = message == WM_PAINT ? ImageHostOf(hwnd) : ImageHost::None;',
+                 'auto lock = g_lock.lock_exclusive();',
+                 's.iconAcquired = images == ImageHost::ScrollBox && AcquireIcon();',
+                 'if (s.iconAcquired) mask |= kIconMask;', 'if (!mask) return false;', 'g_stack.push_back(s)')
+        positions = [begin.index(marker) for marker in order]
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(code.count('AcquireIcon()'), 2)
+        startup = code.split('    void Startup() noexcept', 1)[1].split('    void Shutdown() noexcept', 1)[0]
+        self.assertIn('g_iconDispatcher.moduleAddress = GlassCore::ModuleHandler::g_entryPointModule;', startup)
+        self.assertIn('g_iconDispatcher.CacheHookData();', startup)
+        self.assertIn('g_iconDispatcher.DisableAllHooks();', code.split('    void Shutdown() noexcept', 1)[1])
+        # The hook: the caller's own call on every refusal, the shared helper otherwise, the DC
+        # untouched before the blend, and the entry LastError on both paths.
+        icon = code.split('BOOL WINAPI PanelIcon(HDC dc,', 1)[1].split('BOOL WINAPI PanelExt(HDC dc,', 1)[0]
+        order = ('const DWORD entryError = GetLastError();', 'const auto orig = IconOriginal();',
+                 'SetLastError(entryError);\n                return orig ? orig(dc, x, y, icon, cx, cy, step, flicker, flags)',
+                 ': ::DrawIconEx(dc, x, y, icon, cx, cy, step, flicker, flags);',
+                 'if (!orig || g_inHook || flicker || (flags & DI_NORMAL) != DI_NORMAL',
+                 '|| !IsPanelDc(dc) || !g_stack.back().iconAcquired',
+                 '|| !GlassCore::PaintDispatcher::IsTopWindowDrawingSession(g_stack.back().hwnd)',
+                 '|| !GlassCore::PaintDispatcher::IsPaintStackDcForHwnd(g_stack.back().hwnd, dc)',
+                 '|| GetMapMode(dc) != MM_TEXT || GetLayout(dc) != 0',
+                 '|| !GlassCore::GdiUtils::IconDrawSize(icon, cx, cy, flags, width, height))',
+                 'return native();', 'g_inHook = true;',
+                 'drawn = GlassCore::GdiUtils::DrawIconAlpha(orig, dc, x, y, icon, width, height, step, flags);',
+                 'TakeDiag(6)', 'if (!drawn) return native();', 'SetLastError(entryError);\n            return TRUE;')
+        positions = [icon.index(marker) for marker in order]
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(icon.count('return native();'), 2)
+        for forbidden in ('GdiAlphaBlend', 'CreateDIBSection', 'CreateCompatibleDC', 'GetIconInfo', 'SelectObject',
+                          '_ReturnAddress', 'IsNestedImagePanel', 'PatBlt', 'DrawIcon('):
+            self.assertNotIn(forbidden, icon)
+        self.assertIn('L"[GlassCore][DelphiPanel] icon api=DrawIconEx hwnd=0x%p dc=0x%p icon=0x%p at=[%d,%d] '
+                      'size=[%d,%d] flags=0x%X alpha=%d",', icon)
+        # The labels under those icons are the ANSI text of a panel: the same exact-class gate.
+        ansi = code.split('bool IsAnsiTextPanel(HWND hwnd, UINT message) noexcept', 1)[1].split('bool IsAnsiTextRect(', 1)[0]
+        self.assertIn('(message == WM_PAINT || message == WM_PRINTCLIENT)', ansi)
+        self.assertIn('&& (_wcsicmp(name, L"TPanel") == 0 || _wcsicmp(name, L"TScrollBox") == 0);', ansi)
+        self.assertEqual(code.count('L"TScrollBox"'), 2)
+
+        test = read('WndCompat/tests/vcl_images_rendering_tests.cpp')
+        for marker in ('struct Scroll : Fixture', 'GlassCore::DelphiPanel::PanelIcon(target?target:&dc,21,13,icon,cx,cy,5,flicker,flags);',
+                       'ImageTest::dirtyDib=true;', 'exe.originals["DrawIconEx"]=reinterpret_cast<void*>(ChainedIcon);',
+                       'void Blended(HICON icon, int w, int h, UINT flags, const std::vector<Bgra>& picture)',
+                       'void Face(int x0, int y0, int x1, int y1, bool expectCut)'):
+            self.assertIn(marker, test)
+        # The expected pictures are stated by the tests; the helper is not called or copied by them.
+        for forbidden in ('IconPixel', 'CutEdgeBackground', 'WindowBackgroundKey', 'IconDrawSize', 'DrawIconAlpha'):
+            self.assertNotIn(forbidden, test)
+        shim = read('WndCompat/tests/vcl_images_test_shim.h')
+        for marker in ('namespace IconTest', 'inline BOOL DrawIconEx(HDC dc, int x, int y, HICON icon, int cx, int cy, '
+                       'UINT step, HBRUSH flicker, UINT flags)', 'inline BOOL GetIconInfo(HICON icon, ICONINFO* info)',
+                       'if (icon->alpha) d[3] =', 'else if (p.alpha) d[3] = 0;',
+                       'if (ImageTest::dirtyDib) std::fill(bmp->pixels.begin(), bmp->pixels.end(), BYTE(0xcd));'):
+            self.assertIn(marker, shim)
+        panel = read('WndCompat/tests/panel_rendering_tests.cpp')
+        runner = read('WndCompat/tests/panel_rendering_test.py')
+        self.assertIn('{"scroll-labels", ScrollBoxLabelsAreDrawnLikePanelCaptions},', panel)
+        self.assertIn("self.run_case('scroll-labels')", runner)
+        self.assertIn('struct TestIcon', read('WndCompat/tests/panel_test_shim.h'))
+
+    def test_picture_alpha_helpers_are_one_header_that_knows_no_window_and_draws_nothing_but_the_blend(self):
+        header = read('GlassCore/Include/Subsystems/PictureAlpha.h')
+        self.assertIn('namespace GlassCore::GdiUtils', header)
+        self.assertEqual(re.findall(r'\n    (?:\[\[nodiscard\]\] )?(?:inline|template <typename Original>\n    \[\[nodiscard\]\]) (?:bool|size_t|DWORD) (\w+)\(', header),
+                         ['WindowBackgroundKey', 'CutEdgeBackground', 'CutSelectedEdgeBackground', 'IconDrawSize',
+                          'IconPixel', 'DrawIconAlpha'])
+        # No window, class, session or module is known here: the callers gate.
+        for forbidden in ('HWND', 'GetClassName', 'WindowFromDC', 'TScrollBox', 'TImgViewBox', 'TResTreeView',
+                          'g_stack', 'g_sessions', 'PaintDispatcher', 'ModuleHandler', 'DebugLog', 'thread_local'):
+            self.assertNotIn(forbidden, header)
+        key = header.split('inline bool WindowBackgroundKey(HDC source, COLORREF& key) noexcept', 1)[1].split(
+            'inline constexpr std::uint64_t kMaxEdgePixels', 1)[0]
+        for marker in ('const COLORREF background = GetBkColor(source);', 'if (background == CLR_INVALID) return false;',
+                       'key = background & 0xFFFFFFu;', 'return key == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFFu);'):
+            self.assertIn(marker, key)
+        for forbidden in ('COLOR_WINDOW', 'GetPixel', 'GetObjectW'):
+            self.assertNotIn(forbidden, key)
+        cut = header.split('inline size_t CutEdgeBackground(DWORD* pixels, size_t width, size_t height, COLORREF key) noexcept', 1)[1].split(
+            'inline size_t CutSelectedEdgeBackground(', 1)[0]
+        order = ('> kMaxEdgePixels) return 0;', 'const DWORD background = 0xFF000000u |',
+                 'try { walk.reserve(count); }', 'catch (...) { return 0; }',
+                 'if (pixels[index] != background) return;', 'pixels[index] = 0;',
+                 'reach(x); reach(count - width + x);', 'reach(y * width); reach(y * width + width - 1);',
+                 'if (x) reach(index - 1);', 'if (x + 1 < width) reach(index + 1);',
+                 'if (index >= width) reach(index - width);', 'if (index + width < count) reach(index + width);',
+                 'return walk.size();')
+        positions = [cut.index(marker) for marker in order]
+        self.assertEqual(positions, sorted(positions))
+        # Exact colour, four neighbours, nothing written but the cut itself, and no way to fail half-way.
+        self.assertEqual(cut.count('pixels[index] ='), 1)
+        self.assertEqual(cut.count('reach(index'), 4)
+        for forbidden in ('threshold', 'ColorNear', 'abs(', '|= 0xFF000000', 'push_back(static_cast<std::uint32_t>(index));\n            pixels'):
+            self.assertNotIn(forbidden, cut)
+        self.assertIn('inline constexpr std::uint64_t kMaxEdgePixels = 1u << 22;', header)
+        selected = header.split('inline size_t CutSelectedEdgeBackground(HDC source, const BITMAP& original, COLORREF key) noexcept', 1)[1].split(
+            'inline constexpr int kMaxIconSide', 1)[0]
+        for marker in ('GetCurrentObject(source, OBJ_BITMAP)', 'GetObjectW(copy, sizeof(dib), &dib) != sizeof(dib)',
+                       'info.bmPlanes != 1 || info.bmBitsPixel != 32',
+                       'info.bmWidth != original.bmWidth || info.bmHeight != original.bmHeight'):
+            self.assertIn(marker, selected)
+        size = header.split('inline bool IconDrawSize(HICON icon, int cx, int cy, UINT flags, int& width, int& height) noexcept', 1)[1].split(
+            'inline DWORD IconPixel(', 1)[0]
+        for marker in ('if (flags & DI_DEFAULTSIZE)', 'if (!cx) cx = GetSystemMetrics(SM_CXICON);',
+                       'if (!cy) cy = GetSystemMetrics(SM_CYICON);', 'if (!GetIconInfo(icon, &shape)) return false;',
+                       'if (shape.hbmColor) DeleteObject(shape.hbmColor);', 'if (shape.hbmMask) DeleteObject(shape.hbmMask);',
+                       'if (!cy) cy = colour ? bitmap.bmHeight : bitmap.bmHeight / 2;',
+                       'if (cx <= 0 || cy <= 0 || cx > kMaxIconSide || cy > kMaxIconSide) return false;'):
+            self.assertIn(marker, size)
+        self.assertLess(size.index('DeleteObject(shape.hbmMask)'), size.index('if (!known) return false;'))
+        pixel = header.split('inline DWORD IconPixel(DWORD onBlack, DWORD onWhite) noexcept', 1)[1].split(
+            'template <typename Original>', 1)[0]
+        for marker in ('if (light < dark) return 0xFF000000u | (onBlack & 0x00FFFFFFu);',
+                       'const unsigned covered = 255u - (light - dark);', 'if (covered > alpha) alpha = covered;',
+                       'return (alpha << 24) | (onBlack & 0x00FFFFFFu);'):
+            self.assertIn(marker, pixel)
+        draw = header.split('bool DrawIconAlpha(const Original& original, HDC dc, int x, int y, HICON icon,', 1)[1]
+        order = ('const HDC memory = CreateCompatibleDC(dc);', 'if (!memory) return false;',
+                 'info.bmiHeader.biHeight = -height;', 'info.bmiHeader.biBitCount = 32;',
+                 'if (blackBits && whiteBits)',
+                 '{ onBlack[i] = 0; onWhite[i] = 0x00FFFFFFu; }',
+                 'const HGDIOBJ previous = SelectObject(memory, black);',
+                 'bool twice = original(memory, 0, 0, icon, width, height, step, nullptr, flags) != FALSE;',
+                 'const HGDIOBJ first = SelectObject(memory, white);',
+                 '&& original(memory, 0, 0, icon, width, height, step, nullptr, flags) != FALSE;',
+                 'if (twice && GdiFlush())', 'onBlack[i] = IconPixel(onBlack[i], onWhite[i]);',
+                 'const HGDIOBJ second = SelectObject(memory, black);',
+                 'const BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};',
+                 'drawn = GdiAlphaBlend(dc, x, y, width, height, memory, 0, 0, width, height, blend) != FALSE;',
+                 'DeleteDC(memory);', 'if (black) DeleteObject(black);', 'if (white) DeleteObject(white);',
+                 'return drawn;')
+        positions = [draw.index(marker) for marker in order]
+        self.assertEqual(positions, sorted(positions))
+        # The caller's DC is written exactly once: by the blend. The original draws into `memory` only.
+        self.assertEqual(draw.count('original(memory, 0, 0,'), 2)
+        self.assertNotIn('original(dc', draw)
+        self.assertEqual(header.count('GdiAlphaBlend('), 1)
+        statements = re.sub(r'//[^\n]*', '', header)
+        for forbidden in ('PatBlt', 'BitBlt', 'FillRect', 'SetPixel', 'DrawIconEx', 'DrawIcon('):
+            self.assertNotIn(forbidden, statements)
+        # One header, two users, registered once in each project file; the opaque-copy helper is as it was.
+        for project in ('GlassCore/GlassCore.vcxproj', 'GlassCore/GlassCore.vcxproj.filters'):
+            text = read(project)
+            self.assertEqual(text.count(r'Include\Subsystems\PictureAlpha.h'), 1)
+            self.assertNotIn('PictureAlpha.cpp', text)
+            ET.fromstring(text.encode('utf-8'))
+        for user in ('GlassCore/src/Hooks/delphi/TPanelDraw.cpp', 'GlassCore/src/Hooks/delphi/RestoratorImages.cpp'):
+            self.assertEqual(read(user).count('#include <Subsystems/PictureAlpha.h>'), 1)
+        for other in ('GlassCore/src/Subsystems/OpaqueBitmapSource.cpp', 'GlassCore/Include/Subsystems/OpaqueBitmapSource.h',
+                      'GlassCore/src/Hooks/ToolbarHooks.cpp', 'GlassCore/src/Hooks/ListViewHooks.cpp',
+                      'GlassCore/src/Hooks/delphi/TListBoxDraw.cpp'):
+            for forbidden in ('PictureAlpha', 'CutEdgeBackground', 'DrawIconAlpha'):
+                self.assertNotIn(forbidden, read(other))
 
     def test_vcl_images_reuse_one_helper_and_compile_full_production_with_strict_wil_double(self):
         for project in ('GlassCore/GlassCore.vcxproj', 'GlassCore/GlassCore.vcxproj.filters'):
@@ -2615,7 +2810,7 @@ class DelphiPipelineContract(unittest.TestCase):
         for marker in ('g_inside', 'g_sessions.empty()', '!g_sessions.back().leased', 'g_shutdown.load',
                        'exe && DetourGetContainingModule(returnAddress) == exe ? g_sessions.back().hwnd : nullptr'):
             self.assertIn(marker, session)
-        reject = code.split('LPCWSTR Reject(const Blit& blit, BITMAP& info) noexcept', 1)[1].split('bool CutSelectedCopy(', 1)[0]
+        reject = code.split('LPCWSTR Reject(const Blit& blit, BITMAP& info) noexcept', 1)[1].split('HWND SessionWindow(', 1)[0]
         for marker in ('if (blit.rop != SRCCOPY) return L"rop";', 'GlassCore::Root::IsFullInjectionMode()',
                        '!IsWindow(blit.hwnd)', 'GlassShared::GlassIsBackdropAllowedForHwnd(blit.hwnd)',
                        'WindowFromDC(blit.dc) != blit.hwnd',
@@ -2633,12 +2828,14 @@ class DelphiPipelineContract(unittest.TestCase):
                        'LPCWSTR reason = extents ? Reject(blit, info) : L"extents";',
                        'GlassCore::GdiUtils::OpaqueBitmapSource picture{blit.source};',
                        'if (!picture) reason = L"copy";',
-                       'else if (!CutSelectedCopy(blit.source, info)) reason = L"background";',
-                       'else { result = native(); error = GetLastError(); }',
+                       'result = native(); error = GetLastError();',
                        'if (reason) { result = native(); error = GetLastError(); }',
                        'TakeDiag(1)', 'SetLastError(error);'):
             self.assertIn(marker, draw)
         self.assertEqual(draw.count('native()'), 2)
+        # The copy is drawn as it is. Nothing here refuses a picture for what it looks like.
+        self.assertEqual(re.findall(r'reason = L"(\w+)"', draw), ['copy'])
+        self.assertNotIn('L"background"', code)
         self.assertLess(draw.index('TakeDiag(1)'), draw.index('SetLastError(error);'))
         # The return address is the detour's own caller: taken in each detour body, nowhere else.
         self.assertEqual(code.count('_ReturnAddress()'), 2)
@@ -2659,27 +2856,33 @@ class DelphiPipelineContract(unittest.TestCase):
                           'DeleteObject(', 'CreateCompatibleDC('):
             self.assertNotIn(forbidden, code)
 
-    def test_restorator_image_policy_is_a_module_local_brightness_mask_over_the_shared_opaque_copy(self):
+    def test_restorator_image_policy_is_the_opaque_copy_less_the_windows_colour_at_its_outline(self):
         code = read('GlassCore/src/Hooks/delphi/RestoratorImages.cpp')
-        for marker in ('constexpr unsigned kBackground = 16;', 'constexpr std::uint64_t kMaxPixels = 1u << 22;',
-                       'return (std::max)({pixel & 0xFFu, (pixel >> 8) & 0xFFu, (pixel >> 16) & 0xFFu});'):
-            self.assertIn(marker, code)
-        policy = code.split('bool CutBlackBackground(DWORD* pixels, size_t width, size_t height) noexcept', 1)[1].split('struct Blit', 1)[0]
-        for marker in ('if (Level(pixels[y * width + x]) <= kBackground) ++dark;',
-                       'if (dark * 4 < outline * 3) return false;',
-                       'const DWORD mask = Level(pixels[i]);',
-                       'pixels[i] = (pixels[i] & 0x00FFFFFFu) | (mask << 24);'):
-            self.assertIn(marker, policy)
-        # The outline test comes before the only pixel write.
-        self.assertLess(policy.index('return false;'), policy.index('pixels[i] ='))
-        self.assertEqual(policy.count('pixels[i] ='), 1)
-        # The mask is per pixel: no thresholds on content, no neighbourhoods, no regions,
-        # nothing forced opaque or keyed out, and therefore nothing to allocate.
-        for forbidden in ('std::vector', 'pending', '0xFF000000', ': 0u', 'x + 1', 'i - 1', 'i + width'):
-            self.assertNotIn(forbidden, policy)
-        self.assertEqual(policy.count('kBackground'), 1)
-        for forbidden in ('kInk', 'kSolidSide', 'Solid', 'Weak', 'Corner', 'std::uint32_t'):
+        self.assertIn('constexpr std::uint64_t kMaxPixels = 1u << 22;', code)
+        # The brightness mask is gone, with everything that judged a picture by its darkness.
+        for forbidden in ('CutBlackBackground', 'kBackground', 'CutSelectedCopy', 'Level(', 'mask << 24', 'std::max',
+                          'outline * 3', '#include <algorithm>'):
             self.assertNotIn(forbidden, code)
+        draw = code.split('BOOL DrawPicture(const Blit& blit, bool extents, const Native& native)', 1)[1].split('template <typename Fn> Fn Actual(', 1)[0]
+        # Opaque first; the cut only on that copy, only where the bitmap's canvas names the window's
+        # colour; then the caller's own blit, once.
+        order = ('GlassCore::GdiUtils::OpaqueBitmapSource picture{blit.source};', 'if (!picture) reason = L"copy";',
+                 'else\n                {',
+                 'if (GlassCore::GdiUtils::WindowBackgroundKey(blit.source, key))',
+                 'edge = GlassCore::GdiUtils::CutSelectedEdgeBackground(blit.source, info, key);',
+                 'result = native(); error = GetLastError();',
+                 '} // The copy is deleted and the caller\'s bitmap selected again.',
+                 'if (reason) { result = native(); error = GetLastError(); }')
+        positions = [draw.index(marker) for marker in order]
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(code.count('WindowBackgroundKey('), 1)
+        self.assertEqual(code.count('CutSelectedEdgeBackground('), 1)
+        # No pixel is read or written in this unit: the two shared helpers do that.
+        for forbidden in ('pixels[', 'static_cast<DWORD*>', '0xFF000000', 'COLOR_BTNFACE', 'GetSysColor', 'std::vector<std::uint32_t>'):
+            self.assertNotIn(forbidden, code)
+        self.assertIn('rop=0x%08X bk=0x%06X opaque=%d edge=%zu reason=%s result=%d",', draw)
+        self.assertIn('static_cast<unsigned>(GetBkColor(blit.source) & 0xFFFFFFu),\n'
+                      '                    reason ? 0 : 1, edge, reason ? reason : L"none", result);', draw)
         bitmap = code.split('LPCWSTR RejectBitmap(HDC source, BITMAP& info) noexcept', 1)[1].split('LPCWSTR Reject(const Blit& blit', 1)[0]
         for marker in ('GetObjectW(bitmap, sizeof(dib), &dib)', 'size != sizeof(dib) && size != sizeof(BITMAP)',
                        'info.bmWidth <= 0 || info.bmHeight <= 0', '> kMaxPixels', 'return L"size";',
@@ -2687,23 +2890,21 @@ class DelphiPipelineContract(unittest.TestCase):
                        'if (bytes[i * 4 + 3]) return L"alpha";'):
             self.assertIn(marker, bitmap)
         self.assertLess(bitmap.index('return L"size";'), bitmap.index('GdiFlush()'))
-        copy = code.split('bool CutSelectedCopy(HDC source, const BITMAP& original) noexcept', 1)[1].split('HWND SessionWindow(', 1)[0]
-        for marker in ('GetObjectW(copy, sizeof(dib), &dib) != sizeof(dib)', 'info.bmBitsPixel != 32',
-                       'info.bmWidth != original.bmWidth || info.bmHeight != original.bmHeight',
-                       'return CutBlackBackground(static_cast<DWORD*>(info.bmBits),'):
-            self.assertIn(marker, copy)
-        self.assertNotIn('catch', copy)
         for forbidden in ('ApplyBlackKeyAlpha', 'ApplyIconBackgroundAlpha', 'SpriteEffect', 'Promise32BPP',
                           'HasAlphaChannel(', 'PrepareBitmapForAlphaBlend', 'QueryIconBackgroundColorRemoval',
                           'Gdip', 'TreeViewControl::', 'DelphiPanel::', 'ToolbarControl::', 'ListViewControl::'):
             self.assertNotIn(forbidden, code)
-        # The policy lives only here: shared helpers and the tree hooks do not learn about it.
+        # The helpers know nothing of this unit, and neither do the tree hooks and the panels.
         for path in ('GlassCore/src/Subsystems/OpaqueBitmapSource.cpp', 'GlassCore/src/Subsystems/GdiHookUtils.cpp',
                      'GlassShared/src/BitmapUtils.cpp', 'GlassCore/src/Hooks/TreeViewHooks.cpp',
-                     'GlassCore/src/Hooks/delphi/TPanelDraw.cpp', 'GlassCore/src/Hooks/RootGdiHooks.cpp'):
+                     'GlassCore/src/Hooks/delphi/TPanelDraw.cpp', 'GlassCore/src/Hooks/RootGdiHooks.cpp',
+                     'GlassCore/Include/Subsystems/PictureAlpha.h'):
             for forbidden in ('RestoratorImages', 'CutBlackBackground', 'TImgViewBox'):
                 self.assertNotIn(forbidden, read(path))
         self.assertNotIn('OHK_BITBLT', read('GlassCore/src/Hooks/TreeViewHooks.cpp'))
+        header = read('GlassCore/Include/Hooks/delphi/RestoratorImages.h')
+        self.assertNotIn('brightness', header)
+        self.assertIn('drawn as it is, opaque', header)
 
     def test_restorator_images_are_registered_and_bracketed_by_the_paint_dispatcher_lifetime(self):
         for project in ('GlassCore/GlassCore.vcxproj', 'GlassCore/GlassCore.vcxproj.filters'):
@@ -2740,12 +2941,14 @@ class DelphiPipelineContract(unittest.TestCase):
             self.assertIn(marker, shim)
         # The expected bytes are stated by the tests; the algorithm is not copied into them.
         for text in (test, shim):
-            for forbidden in ('bool CutBlackBackground', 'kBackground', 'Ri::Level', 'Ri::CutBlackBackground',
-                              'std::max', 'operator new'):
+            for forbidden in ('CutEdgeBackground', 'WindowBackgroundKey', 'CutSelectedEdgeBackground', 'kMaxEdgePixels',
+                              'kBackground', 'std::max', 'operator new'):
                 self.assertNotIn(forbidden, text)
-        # Every painted pixel states its alpha, and nothing dark may come out opaque.
-        self.assertIn('void Put(int x, int y, BYTE r, BYTE g, BYTE b, BYTE expected)', test)
-        self.assertIn('const bool bright=out[3]!=255 || out[0]==255 || out[1]==255 || out[2]==255;', test)
+        # Every test says which pixels are cut; all the others must come out as they went in, opaque.
+        self.assertIn('void Face(int x0, int y0, int x1, int y1, bool expectCut)', test)
+        self.assertIn(': out[0]==in[0] && out[1]==in[1] && out[2]==in[2] && out[3]==255;', test)
+        self.assertIn('? !out[0] && !out[1] && !out[2] && !out[3]', test)
+        self.assertNotIn('bright', test)
         runner = read('WndCompat/tests/restorator_images_rendering_test.py')
         for marker in ("'Release'", "'Debug'", "'-D_DEBUG'", "'-DGLASS_DELPHI_DRAW_PROBE'", "'-Werror'",
                        "'-std=c++20'"):
@@ -2753,7 +2956,9 @@ class DelphiPipelineContract(unittest.TestCase):
         for forbidden in ('read_text', 'source.split(', 'code.split(', '-Wno-error'):
             self.assertNotIn(forbidden, runner)
         cases = re.findall(r'\{"([a-z-]+)",\w+\}', test)
-        self.assertEqual(len(cases), 12)
+        self.assertEqual(len(cases), 11)
+        for case in ('policy-opaque', 'policy-edge', 'policy-canvas'):
+            self.assertIn(case, cases)
         self.assertEqual(sorted(cases), sorted(re.findall(r"self\.run_case\('([a-z-]+)'\)", runner)))
 
     def test_hex_dump_is_registered_and_bracketed_by_the_paint_dispatcher_lifetime(self):
@@ -3803,16 +4008,32 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertEqual(code.count('.texts'), 2)
         # The two lines the session always wrote say what was taken and how many captions were drawn.
         self.assertIn('L"[GlassCore][Toolbar] Begin: callerMod=0x%p hWnd=0x%p depth=%zu vclIcons=%d '
-                      'maskModules=[0x%p,0x%p] textModule=0x%p",', code)
+                      'maskModules=[0x%p,0x%p] textModule=0x%p style=0x%08X composited=%d",', code)
         self.assertIn('L"[GlassCore][Toolbar] End: hWnd=0x%p depth=%zu text=%u", hWnd, g_modStack.size(), session.texts);', code)
         self.assertEqual(code.count('DebugLog('), 4)
+        # What tells a toolbar whose captions the system draws with alpha from a VCL one - the window
+        # style and the composited class of its theme - is read for that line only, in Debug only,
+        # and decides nothing: the caption hook is taken as before.
+        readout = begin.split('#if defined(_DEBUG)', 1)[1].split('#endif', 1)[0]
+        for marker in ('BOOL composited = FALSE;', 'if (const HTHEME theme = GetWindowTheme(hWnd))',
+                       'GetThemeBool(theme, TP_BUTTON, 0, TMT_COMPOSITED, &composited);',
+                       'static_cast<unsigned>(GetWindowLongW(hWnd, GWL_STYLE)), composited ? 1 : 0);',
+                       'L"[GlassCore][Toolbar] Begin:'):
+            self.assertIn(marker, readout)
+        self.assertEqual(begin.count('#if defined(_DEBUG)'), 1)
+        for marker in ('GetThemeBool(', 'GetWindowLongW(hWnd, GWL_STYLE)', 'composited'):
+            self.assertNotIn(marker, re.sub(r'//[^\n]*', '', begin.replace(readout, '')))
+        self.assertEqual(code.count('GetThemeBool('), 1)
+        self.assertNotIn('TBSTYLE_TRANSPARENT)', code)
 
         test = read('WndCompat/tests/vcl_images_rendering_tests.cpp')
         runner = read('WndCompat/tests/vcl_images_rendering_test.py')
         cases = re.findall(r'name=="([a-z-]+)"', test)
-        self.assertEqual(len(cases), 15)
+        self.assertEqual(len(cases), 21)
         self.assertEqual(sorted(cases), sorted(re.findall(r"self\.run_case\('([a-z-]+)'\)", runner)))
-        self.assertIn('toolbar-captions', cases)
+        for case in ('toolbar-captions', 'toolbar-readout', 'scroll-pictures', 'scroll-picture-scope', 'scroll-icons',
+                     'scroll-icon-scope', 'scroll-icon-failures'):
+            self.assertIn(case, cases)
         captions = test.split('    void ToolbarCaptionsOnTheExeRoute()\n', 1)[1].split('    void PanelNativeImageAndMirroring()\n', 1)[0]
         for marker in ('Overall_MyDrawThemeText(nullptr,&f.dc,1,1,L"Open",4,flags,0,where?where:&rect);',
                        'f.BeginToolbar(&f.exe);', 'f.BeginToolbar(&f.modern);', 'f.BeginToolbar(&f.legacy);',

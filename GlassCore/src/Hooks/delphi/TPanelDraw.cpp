@@ -2,6 +2,10 @@
 // available. Only client-background fills are replaced; bevels and other
 // controls' DCs are not recoloured. The root themed-text slot also shares this
 // session/DC gate and the existing transparent compositor. No alpha pattern brushes.
+// What the graphic controls of a TScrollBox draw inside its paint is the EXE's
+// own too: a bitmap copied as it is lands opaque, without the window's colour
+// it was composed on; an icon or a cursor is blended with its transparency;
+// a label is the ANSI text of a panel.
 #include "CorePch.h"
 #include <Hooks/delphi/TPanelDraw.h>
 #include <Core/Intercept/HookDispatcher.h>
@@ -10,6 +14,7 @@
 #include <Subsystems/PaintDispatcher.h>
 #include <Subsystems/RenderText.h>
 #include <Subsystems/OpaqueBitmapSource.h>
+#include <Subsystems/PictureAlpha.h>
 #include <Subsystems/RootSwcaGradient.h>
 #include <GlassDelphiPanel.h>
 #include <GlassBackdropMark.h>
@@ -34,13 +39,19 @@ namespace GlassCore::DelphiPanel
         enum : size_t { FillSlot, PatSlot, ExtSlot, StretchSlot, Count };
         constexpr unsigned kAnsiTextMask = 1u << Count; // separate export detour, not an IAT slot
         constexpr unsigned kPageAnsiTextMask = 1u << (Count + 1);
+        constexpr unsigned kIconMask = 1u << (Count + 2); // its own EXE import, not a panel slot
         enum class AnsiTextRoute { PanelExport, PageIat };
+        // Whose pictures the EXE draws itself: the donor's TPanel inside a TPanel
+        // (the picture as it is, any ROP) and a TScrollBox (pictures and icons of
+        // graphic controls laid out in it).
+        enum class ImageHost { None, NestedPanel, ScrollBox };
         int WINAPI PanelFill(HDC, const RECT*, HBRUSH);
         BOOL WINAPI PanelPat(HDC, int, int, int, int, DWORD);
         BOOL WINAPI PanelExt(HDC, int, int, UINT, const RECT*, LPCWSTR, UINT, const INT*);
         BOOL WINAPI PanelStretch(HDC, int, int, int, int, HDC, int, int, int, int, DWORD);
         int WINAPI PanelDrawTextA(HDC, LPCSTR, int, LPRECT, UINT);
         int WINAPI PageDrawTextA(HDC, LPCSTR, int, LPRECT, UINT);
+        BOOL WINAPI PanelIcon(HDC, int, int, HICON, int, int, UINT, HBRUSH, UINT);
         const HookDispatcherDependency<Count, 3> g_dep{{
             std::tuple{std::array{"user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv},
                 "FillRect", reinterpret_cast<PVOID>(PanelFill)},
@@ -63,6 +74,13 @@ namespace GlassCore::DelphiPanel
                 "DrawTextA", reinterpret_cast<PVOID>(PageDrawTextA)},
         }};
         HookDispatcher<1, 3> g_pageTextDispatcher{g_pageTextDep, nullptr};
+        // Icons and cursors a TScrollBox shows are drawn by the EXE with
+        // DrawIconEx. Again a named import of its own, apart from the panel slots.
+        const HookDispatcherDependency<1, 3> g_iconDep{{
+            std::tuple{std::array{"user32.dll"sv, "ext-ms-win-ntuser-draw-l1-1-0.dll"sv, "ext-ms-win-ntuser-misc-l1-1-0.dll"sv},
+                "DrawIconEx", reinterpret_cast<PVOID>(PanelIcon)},
+        }};
+        HookDispatcher<1, 3> g_iconDispatcher{g_iconDep, nullptr};
         wil::srwlock g_lock;
         std::atomic<bool> g_shutdown{true};
         decltype(&::DrawTextA) g_actualDrawTextA{};
@@ -77,6 +95,7 @@ namespace GlassCore::DelphiPanel
             bool ansiTextPaint = false; // Class/message checked once at BeginPaint, for either hook.
             bool ansiTextAcquired = false;
             bool pageAnsiTextAcquired = false;
+            bool iconAcquired = false;
             bool panelBackground = false;
         };
         thread_local std::vector<Session> g_stack;
@@ -85,8 +104,8 @@ namespace GlassCore::DelphiPanel
 
         bool TakeDiag(size_t channel) noexcept
         {
-            static thread_local ULONGLONG epoch[6]{};
-            static thread_local unsigned budget[6]{};
+            static thread_local ULONGLONG epoch[7]{};
+            static thread_local unsigned budget[7]{};
             const ULONGLONG now = GetTickCount64();
             if (!epoch[channel] || now - epoch[channel] >= 1000)
             { epoch[channel] = now; budget[channel] = 16; }
@@ -145,8 +164,17 @@ namespace GlassCore::DelphiPanel
                 hwnd, g_pageTextDispatcher.moduleAddress, acquired ? 1 : 0, refs);
             return acquired;
         }
+        // Caller holds g_lock. Only the ref delta says whether this session owns a lease.
+        bool AcquireIcon() noexcept
+        {
+            if (!g_iconDispatcher.moduleAddress) return false;
+            const int before = g_iconDispatcher.GetRef(0);
+            g_iconDispatcher.EnableHook(0, true);
+            return g_iconDispatcher.GetRef(0) > before;
+        }
         void ReleaseSession(const Session& s) noexcept
         {
+            if (s.iconAcquired) g_iconDispatcher.EnableHook(0, false);
             if (s.pageAnsiTextAcquired)
             {
                 g_pageTextDispatcher.EnableHook(0, false);
@@ -168,6 +196,11 @@ namespace GlassCore::DelphiPanel
             auto lock = g_lock.lock_shared();
             return g_pageTextDispatcher.GetOrg<0, decltype(&::DrawTextA)>();
         }
+        decltype(&::DrawIconEx) IconOriginal() noexcept
+        {
+            auto lock = g_lock.lock_shared();
+            return g_iconDispatcher.GetOrg<0, decltype(&::DrawIconEx)>();
+        }
         bool IsNestedImagePanel(HWND hwnd) noexcept
         {
             wchar_t name[64]{}, parentName[64]{};
@@ -178,6 +211,22 @@ namespace GlassCore::DelphiPanel
                 && _wcsicmp(name, L"TPanel") == 0
                 && GetClassNameW(GetParent(hwnd), parentName, static_cast<int>(_countof(parentName)))
                 && _wcsicmp(parentName, L"TPanel") == 0;
+        }
+        // The exact VCL class, registered by the EXE itself: VCL is linked into
+        // it, and only then do its graphic controls draw through the EXE's imports.
+        bool IsImageScrollBox(HWND hwnd) noexcept
+        {
+            wchar_t name[64]{};
+            const HMODULE exe = GlassCore::ModuleHandler::g_entryPointModule;
+            return exe && IsWindow(hwnd)
+                && reinterpret_cast<HMODULE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)) == exe
+                && GetClassNameW(hwnd, name, static_cast<int>(_countof(name)))
+                && _wcsicmp(name, L"TScrollBox") == 0;
+        }
+        ImageHost ImageHostOf(HWND hwnd) noexcept
+        {
+            return IsNestedImagePanel(hwnd) ? ImageHost::NestedPanel
+                : IsImageScrollBox(hwnd) ? ImageHost::ScrollBox : ImageHost::None;
         }
         bool IsPanelDc(HDC dc) noexcept
         {
@@ -296,8 +345,8 @@ namespace GlassCore::DelphiPanel
             auto leave = wil::scope_exit([]() noexcept { g_inHook = false; });
             return ApplyBackground(dc, r, color, L"PatBlt") ? TRUE : orig(dc, x, y, w, h, rop);
         }
-        // BWM window + caller EXE, exact TPanel внутри TPanel. Это подготовка
-        // отдельного изображения, не общий финальный blit DoubleBuffered.
+        // BWM window + caller EXE: exact TPanel внутри TPanel и TScrollBox. Это
+        // подготовка отдельного изображения, не общий финальный blit DoubleBuffered.
         BOOL WINAPI PanelStretch(HDC dc, int x, int y, int w, int h,
             HDC source, int sx, int sy, int sw, int sh, DWORD rop)
         {
@@ -308,8 +357,13 @@ namespace GlassCore::DelphiPanel
                 return orig ? orig(dc, x, y, w, h, source, sx, sy, sw, sh, rop)
                     : ::StretchBlt(dc, x, y, w, h, source, sx, sy, sw, sh, rop);
             };
+            ImageHost host = ImageHost::None;
             if (g_inHook || !IsPanelDc(dc) || !g_stack.back().acquired[StretchSlot]
-                || g_stack.back().message != WM_PAINT || !IsNestedImagePanel(g_stack.back().hwnd)
+                || g_stack.back().message != WM_PAINT
+                || (host = ImageHostOf(g_stack.back().hwnd)) == ImageHost::None
+                // В TScrollBox рисует любой графический контрол: изображение «как
+                // есть» — только прямая копия; маски и прочие ROP остаются native.
+                || (host == ImageHost::ScrollBox && rop != SRCCOPY)
                 || !GlassCore::PaintDispatcher::IsTopWindowDrawingSession(g_stack.back().hwnd)
                 || !GlassCore::PaintDispatcher::IsPaintStackDcForHwnd(g_stack.back().hwnd, dc)
                 || !source || source == dc || !w || !h || !sw || !sh
@@ -333,19 +387,64 @@ namespace GlassCore::DelphiPanel
             g_inHook = true;
             auto leave = wil::scope_exit([]() noexcept { g_inHook = false; });
             BOOL result{}; DWORD error{}; bool prepared{};
+            size_t edge = 0; // пикселей цвета окна, вырезанных вокруг изображения
             {
                 GlassCore::GdiUtils::OpaqueBitmapSource image{source};
                 prepared = static_cast<bool>(image);
+                // Изображение TScrollBox приложение собирает на цвете окна: его
+                // называет canvas bitmap. Этот цвет от контура — тот же фон окна.
+                COLORREF key{};
+                if (prepared && host == ImageHost::ScrollBox && GlassCore::GdiUtils::WindowBackgroundKey(source, key))
+                    edge = GlassCore::GdiUtils::CutSelectedEdgeBackground(source, bitmap, key);
                 result = native(); // mask/ROP, масштаб и знаки extents сохраняются
                 error = GetLastError();
             }
             if (TakeDiag(3))
                 DebugLog(DBG_NORMAL,
-                    L"[GlassCore][DelphiPanel] image api=StretchBlt hwnd=0x%p dc=0x%p src=0x%p bpp=%u dst=[%d,%d,%d,%d] srcRect=[%d,%d,%d,%d] rop=0x%08X opaqueCopy=%d result=%d",
+                    L"[GlassCore][DelphiPanel] image api=StretchBlt hwnd=0x%p dc=0x%p src=0x%p bpp=%u dst=[%d,%d,%d,%d] srcRect=[%d,%d,%d,%d] rop=0x%08X bk=0x%06X opaqueCopy=%d edge=%zu result=%d",
                     hwnd, dc, source, unsigned(bitmap.bmBitsPixel),
-                    x, y, w, h, sx, sy, sw, sh, rop, prepared ? 1 : 0, result);
+                    x, y, w, h, sx, sy, sw, sh, rop, static_cast<unsigned>(GetBkColor(source) & 0xFFFFFFu),
+                    prepared ? 1 : 0, edge, result);
             SetLastError(error);
             return result;
+        }
+        // Значок или курсор, который EXE рисует сам (графический контрол в
+        // TScrollBox): GDI оставляет A=0 под значком без собственной альфы. Значок
+        // рисуется оригиналом в свои буферы и смешивается с DC уже с прозрачностью.
+        BOOL WINAPI PanelIcon(HDC dc, int x, int y, HICON icon, int cx, int cy, UINT step, HBRUSH flicker, UINT flags)
+        {
+            const DWORD entryError = GetLastError();
+            const auto orig = IconOriginal();
+            const auto native = [&] {
+                SetLastError(entryError);
+                return orig ? orig(dc, x, y, icon, cx, cy, step, flicker, flags)
+                    : ::DrawIconEx(dc, x, y, icon, cx, cy, step, flicker, flags);
+            };
+            int width{}, height{};
+            // Кисть «без мерцания» — это заливка под значком, а отдельные проходы
+            // маски и изображения приложение смешивает само: такие вызовы его.
+            // The lease itself says whose paint this is: only the paint of a scroll box takes it.
+            if (!orig || g_inHook || flicker || (flags & DI_NORMAL) != DI_NORMAL
+                || !IsPanelDc(dc) || !g_stack.back().iconAcquired
+                || !GlassCore::PaintDispatcher::IsTopWindowDrawingSession(g_stack.back().hwnd)
+                || !GlassCore::PaintDispatcher::IsPaintStackDcForHwnd(g_stack.back().hwnd, dc)
+                || GetMapMode(dc) != MM_TEXT || GetLayout(dc) != 0
+                || !GlassCore::GdiUtils::IconDrawSize(icon, cx, cy, flags, width, height))
+                return native();
+            const HWND hwnd = g_stack.back().hwnd;
+            bool drawn = false;
+            {
+                g_inHook = true;
+                auto leave = wil::scope_exit([]() noexcept { g_inHook = false; });
+                drawn = GlassCore::GdiUtils::DrawIconAlpha(orig, dc, x, y, icon, width, height, step, flags);
+            }
+            if (TakeDiag(6))
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiPanel] icon api=DrawIconEx hwnd=0x%p dc=0x%p icon=0x%p at=[%d,%d] size=[%d,%d] flags=0x%X alpha=%d",
+                    hwnd, dc, icon, x, y, width, height, flags, drawn ? 1 : 0);
+            if (!drawn) return native();
+            SetLastError(entryError);
+            return TRUE;
         }
         BOOL WINAPI PanelExt(HDC dc, int x, int y, UINT options, const RECT* r,
             LPCWSTR text, UINT count, const INT* dx)
@@ -365,9 +464,11 @@ namespace GlassCore::DelphiPanel
         bool IsAnsiTextPanel(HWND hwnd, UINT message) noexcept
         {
             wchar_t name[64]{};
+            // TScrollBox: подписи графических контролов внутри него — тот же
+            // DrawTextA приложения, что и у подписей TPanel.
             return (message == WM_PAINT || message == WM_PRINTCLIENT)
                 && GetClassNameW(hwnd, name, static_cast<int>(_countof(name)))
-                && _wcsicmp(name, L"TPanel") == 0;
+                && (_wcsicmp(name, L"TPanel") == 0 || _wcsicmp(name, L"TScrollBox") == 0);
         }
         bool IsAnsiTextRect(const RECT* rect) noexcept
         {
@@ -538,14 +639,15 @@ namespace GlassCore::DelphiPanel
         s.panelBackground = background;
         s.ansiTextPaint = panelText || pageText;
         unsigned mask = 0;
+        // Только paint-путь изображения: донорский TPanel в TPanel и TScrollBox.
+        // Erase/PrintClient, frames и остальные panel-классы его не приобретают.
+        const ImageHost images = message == WM_PAINT ? ImageHostOf(hwnd) : ImageHost::None;
         {
             auto lock = g_lock.lock_exclusive();
             if (g_shutdown.load(std::memory_order_acquire)) return false;
             for (size_t i = 0; background && g_dispatcher.moduleAddress && i < Count; ++i)
             {
-                // Только донорский paint-путь изображения. Erase/PrintClient,
-                // frames и остальные panel-классы этот импорт не приобретают.
-                if (i == StretchSlot && (message != WM_PAINT || !IsNestedImagePanel(hwnd))) continue;
+                if (i == StretchSlot && images == ImageHost::None) continue;
                 const int before = g_dispatcher.GetRef(i);
                 g_dispatcher.EnableHook(i, true);
                 s.acquired[i] = g_dispatcher.GetRef(i) > before;
@@ -555,6 +657,8 @@ namespace GlassCore::DelphiPanel
             if (s.ansiTextAcquired) mask |= kAnsiTextMask;
             s.pageAnsiTextAcquired = pageText && AcquirePageAnsiText(hwnd);
             if (s.pageAnsiTextAcquired) mask |= kPageAnsiTextMask;
+            s.iconAcquired = images == ImageHost::ScrollBox && AcquireIcon();
+            if (s.iconAcquired) mask |= kIconMask;
             if (!mask) return false; // TPanel export OR TPage IAT text can own a text-only session.
             try { g_stack.push_back(s); }
             catch (...) { ReleaseSession(s); return false; }
@@ -582,6 +686,8 @@ namespace GlassCore::DelphiPanel
         g_dispatcher.CacheHookData();
         g_pageTextDispatcher.moduleAddress = GlassCore::ModuleHandler::g_entryPointModule;
         g_pageTextDispatcher.CacheHookData();
+        g_iconDispatcher.moduleAddress = GlassCore::ModuleHandler::g_entryPointModule;
+        g_iconDispatcher.CacheHookData();
         // Do not replace a retained trampoline if an earlier Detach failed.
         if (!g_ansiTextAttached)
         {
@@ -600,6 +706,7 @@ namespace GlassCore::DelphiPanel
         auto lock = g_lock.lock_exclusive();
         g_dispatcher.DisableAllHooks();
         g_pageTextDispatcher.DisableAllHooks();
+        g_iconDispatcher.DisableAllHooks();
         g_ansiTextRefs = 0;
         DetachAnsiText(); // Also retries a failed last-session Detach.
         g_stack.clear();
