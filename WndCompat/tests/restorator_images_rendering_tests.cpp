@@ -21,7 +21,6 @@ namespace
     {
         using namespace RestoratorTest;
         failBegin = failCommit = false; failAttachAt = failDetachAt = 0;
-        copyFault = 0;
     }
     bool Attached() { return RestoratorTest::bitDetour && RestoratorTest::stretchDetour; }
     bool Detached()
@@ -39,10 +38,7 @@ namespace
         LOGBRUSH brush{BS_SOLID, RGB(9,8,7)};
         HBITMAP picture{}, surface{}, memoryBitmap{};
         COLORREF canvas{RGB(50,60,70)}; // the brush colour of the bitmap's canvas: not the window's
-        std::vector<BYTE> bytes; // the caller's bitmap, as it must remain
-        // Which pixels must be cut, stated by each test and never derived from the
-        // algorithm. Everything else must come out as it went in, opaque.
-        std::vector<bool> cut;
+        std::vector<BYTE> bytes; // the caller's bitmap, as it must remain - and as it must be shown
         int width, height;
 
         explicit Fixture(int w = 64, int h = 40, int bpp = 24, bool dib = true) : width(w), height(h)
@@ -71,14 +67,13 @@ namespace
             RestoratorTest::pending.clear(); RestoratorTest::items.clear();
             static ULONGLONG epoch=0;
             RestoratorTest::clock=epoch+=100000; // a fresh rate-limit window for every fixture
-            RestoratorTest::logFormats.clear(); RestoratorTest::logStrings.clear(); RestoratorTest::logSizes.clear();
-            RestoratorTest::dibQueries=0;
+            RestoratorTest::logFormats.clear(); RestoratorTest::logStrings.clear();
+            RestoratorTest::arms.clear();
             CHECK(!RestoratorTest::bitDetour && !RestoratorTest::stretchDetour);
             tree.cls=L"TResTreeView"; viewer.cls=L"TImgViewBox"; other.cls=L"TButton";
             treeDc.owner=&tree; treeCanvasDc.owner=&tree; viewerDc.owner=&viewer; foreign.owner=&other;
             picture=MakeBitmap(w,h,bpp,dib); surface=MakeBitmap(8,8); memoryBitmap=MakeBitmap(8,8);
-            cut.assign(static_cast<size_t>(w)*h, false); // a black picture, and all of it stays
-            bytes=picture->pixels;
+            bytes=picture->pixels; // a black picture, and all of it stays
             source.brush=&brush; source.font=&font; source.text=RGB(20,30,40);
             source.background=RGB(50,60,70); source.bkMode=OPAQUE;
             PanelTest::bitmaps[&treeDc]=surface; PanelTest::bitmaps[&treeCanvasDc]=surface;
@@ -112,18 +107,19 @@ namespace
             const size_t at=(static_cast<size_t>(y)*width+x)*4;
             for (auto* pixels : {&picture->pixels, &bytes})
             { (*pixels)[at]=b; (*pixels)[at+1]=g; (*pixels)[at+2]=r; }
-            cut[at/4]=false;
         }
         void Grey(int x, int y, BYTE level) { Put(x,y,level,level,level); }
         // [x0,x1) x [y0,y1)
         void Box(int x0, int y0, int x1, int y1, BYTE r, BYTE g, BYTE b)
         { for (int y=y0;y<y1;++y) for (int x=x0;x<x1;++x) Put(x,y,r,g,b); }
         // The same area in the colour of the window (the button face of this
-        // fixture, 240,240,240), and what the test expects of it.
-        void Face(int x0, int y0, int x1, int y1, bool expectCut)
+        // fixture, 240,240,240). It is a colour like any other: it stays.
+        void Face(int x0, int y0, int x1, int y1) { Box(x0,y0,x1,y1,240,240,240); }
+        // What RestoratorCheckerboard lays under a picture: squares of four pixels.
+        void Board(int x0, int y0, int x1, int y1)
         {
-            Box(x0,y0,x1,y1,240,240,240);
-            for (int y=y0;y<y1;++y) for (int x=x0;x<x1;++x) cut[static_cast<size_t>(y)*width+x]=expectCut;
+            for (int y=y0;y<y1;++y) for (int x=x0;x<x1;++x)
+                Grey(x,y,BYTE((x/4+y/4)%2==0?205:255));
         }
         void Canvas(COLORREF colour) { canvas=source.background=colour; }
         // The EXE composed the picture on the window's colour: its canvas keeps it.
@@ -154,25 +150,22 @@ namespace
             CHECK(ImageTest::alphaBlends==0 && ImageTest::keys==0 && ImageTest::nativeMasks==0);
         }
         // The native blit read our copy: every pixel is the caller's colour with
-        // A=255, whatever that colour is - black included - except the pixels the
-        // test said are cut: those are transparent black.
+        // A=255, whatever that colour is - black, the window's colour, the
+        // checkerboard. Not one pixel is transparent, and not one is changed.
         void Prepared()
         {
             const auto& p=ImageTest::last.pixels;
             // `selected` is only an identity here: the copy is gone by now.
             CHECK(ImageTest::last.selected && ImageTest::last.selected!=picture && p.size()==bytes.size());
-            for (size_t i=0;i<cut.size();++i)
+            for (size_t i=0;i<p.size()/4;++i)
             {
                 const BYTE* out=p.data()+i*4; const BYTE* in=bytes.data()+i*4;
-                const bool ok=cut[i]
-                    ? !out[0] && !out[1] && !out[2] && !out[3]
-                    : out[0]==in[0] && out[1]==in[1] && out[2]==in[2] && out[3]==255;
-                if (!ok)
+                if (out[0]!=in[0] || out[1]!=in[1] || out[2]!=in[2] || out[3]!=255)
                 {
-                    std::cerr<<"pixel "<<i%width<<","<<i/width<<" expected "<<(cut[i]?"cut":"opaque")
+                    std::cerr<<"pixel "<<i%width<<","<<i/width
                         <<" in="<<int(in[2])<<","<<int(in[1])<<","<<int(in[0])
                         <<" out="<<int(out[2])<<","<<int(out[1])<<","<<int(out[0])<<","<<int(out[3])<<"\n";
-                    CHECK(ok);
+                    CHECK(false);
                 }
             }
             CHECK(ImageTest::last.entryError==0x29 && GetLastError()==0x51);
@@ -188,8 +181,7 @@ namespace
     };
 
     // A hand-made miniature of the real placeholders (64x40): lossy text on black
-    // above a banner that reaches both edges. Nothing in it is the window's
-    // colour, so nothing of it is cut: every pixel comes out as it is, opaque.
+    // above a banner that reaches both edges. Every pixel comes out as it is, opaque.
     void PaintPlaceholder(Fixture& f)
     {
         CHECK(f.width==64 && f.height==40);
@@ -253,8 +245,7 @@ namespace
             f.End(viewer?f.viewer:f.tree);
         }
         {
-            // Even where the canvas of such a bitmap is the window's colour: black is
-            // not that colour, and its outline holds none of it.
+            // Whatever the canvas of such a bitmap says about what it was composed on.
             Fixture f; PaintPlaceholder(f); f.OnWindowColour();
             f.Begin(f.tree); CHECK(f.Bit()); f.Prepared(); f.End(f.tree);
         }
@@ -279,152 +270,83 @@ namespace
         f.End(f.tree);
     }
 
-    void PolicyEdge()
+    void PolicyBackground()
     {
         // A picture the EXE composed on the colour of its window. That colour is
-        // cut where it reaches the outline, and nowhere else.
+        // not cut out of it, anywhere: the picture is already flattened onto it,
+        // every soft edge is a blend with it, and no cut could follow such an edge.
         for (bool viewer : {false,true})
         {
             Fixture f(16,12); f.OnWindowColour();
-            f.Face(0,0,16,12,true);                       // the margin all around...
+            f.Face(0,0,16,12);                            // the margin all around...
             f.Box(3,2,13,10,200,30,30);                   // ...a red body...
-            f.Face(6,4,9,7,false);                        // ...whose hole of the same colour is its own...
-            f.Face(13,5,14,7,true);                       // ...and a notch open to the margin is not.
-            f.Put(0,0,240,240,241); f.Put(15,11,239,240,240); // almost that colour, in two corners: the picture's
+            f.Face(6,4,9,7);                              // ...a hole of the same colour in it...
+            f.Face(13,5,14,7);                            // ...a notch open to the margin...
+            f.Put(2,2,230,170,170); f.Put(13,10,236,205,205); // ...and soft corners: red blended with the margin.
             f.Begin(viewer?f.viewer:f.tree);
             if (viewer) CHECK(f.Stretch()); else CHECK(f.Bit());
             f.Prepared();
             const auto* margin=ImageTest::last.pixels.data()+(1u*16+1)*4;
-            CHECK(!margin[0] && !margin[1] && !margin[2] && !margin[3]);
+            CHECK(margin[0]==240 && margin[1]==240 && margin[2]==240 && margin[3]==255);
+            const auto* corner=ImageTest::last.pixels.data();
+            CHECK(corner[0]==240 && corner[1]==240 && corner[2]==240 && corner[3]==255);
             const auto* hole=ImageTest::last.pixels.data()+(5u*16+7)*4;
             CHECK(hole[0]==240 && hole[1]==240 && hole[2]==240 && hole[3]==255);
+            const auto* soft=ImageTest::last.pixels.data()+(2u*16+2)*4;
+            CHECK(soft[0]==170 && soft[1]==170 && soft[2]==230 && soft[3]==255);
             const auto* body=ImageTest::last.pixels.data()+(3u*16+4)*4;
             CHECK(body[0]==30 && body[1]==30 && body[2]==200 && body[3]==255);
             f.End(viewer?f.viewer:f.tree);
         }
-        {
-            // The walk goes through four neighbours: what touches the margin only
-            // by a corner is not reached.
-            Fixture f(9,9); f.OnWindowColour();
-            f.Face(0,0,9,9,true); f.Box(2,2,7,7,10,90,170);
-            f.Face(1,1,2,2,true);                         // still margin
-            f.Box(1,1,3,2,10,90,170); f.Box(1,2,2,3,10,90,170); // a step of the body up to the margin's corner
-            f.Face(2,2,3,3,false);                        // behind the step: corner to corner with the margin
-            f.Begin(f.tree); CHECK(f.Bit()); f.Prepared(); f.End(f.tree);
-        }
-        {
-            // A wall one pixel thick is a wall, from every side: what it encloses
-            // is not reached over it.
-            Fixture f(7,7); f.OnWindowColour();
-            f.Face(0,0,7,7,true); f.Box(2,2,5,5,10,90,170); f.Face(3,3,4,4,false);
-            f.Begin(f.tree); CHECK(f.Bit()); f.Prepared(); f.End(f.tree);
-        }
-        // Each side of the outline starts the walk by itself.
-        for (int side=0;side<4;++side)
-        {
-            Fixture f(9,7); f.OnWindowColour();
-            f.Box(0,0,9,7,60,60,60);
-            switch (side)
-            {
-            case 0:f.Face(4,0,5,4,true);break;            // from the top row
-            case 1:f.Face(4,3,5,7,true);break;            // from the bottom row
-            case 2:f.Face(0,3,5,4,true);break;            // from the left column
-            case 3:f.Face(4,3,9,4,true);break;            // from the right column
-            }
-            f.Begin(f.tree); CHECK(f.Bit()); f.Prepared(); f.End(f.tree);
-        }
-        {
-            // A long way round: the margin is followed through a corridor to its end.
-            Fixture f(11,9); f.OnWindowColour();
-            f.Box(0,0,11,9,20,20,20);
-            f.Face(0,1,10,2,true); f.Face(9,2,10,8,true); f.Face(1,7,10,8,true); f.Face(1,3,2,7,true); f.Face(2,3,8,4,true);
-            f.Face(4,5,7,6,false);                        // an island the corridor does not touch
-            f.Begin(f.viewer); CHECK(f.Stretch()); f.Prepared(); f.End(f.viewer);
-        }
-        {
-            // That colour only inside the picture: none of it is the background.
-            Fixture f(9,9); f.OnWindowColour();
-            f.Box(0,0,9,9,0,0,0); f.Face(1,1,8,8,false);
-            f.Begin(f.tree); CHECK(f.Bit()); f.Prepared(); f.End(f.tree);
-        }
-        {
-            // Nothing but that colour: the whole picture is the window's background.
-            Fixture f(7,5); f.OnWindowColour(); f.Face(0,0,7,5,true);
-            f.Begin(f.tree); CHECK(f.Bit()); f.Prepared(); f.End(f.tree);
-        }
-        // One pixel wide or high, and a single pixel: all of it is outline.
-        for (int which=0;which<6;++which)
-        {
-            Fixture f(which<2?1:which<4?7:1, which<2?1:which<4?1:7); f.OnWindowColour();
-            const bool face=which%2==1;
-            if (face) { f.Face(0,0,f.width,f.height,true); if (f.width*f.height>1) f.Put(f.width/2,f.height/2,9,9,9); }
-            f.Begin(f.tree); CHECK(f.Bit()); f.Prepared(); f.End(f.tree);
-        }
-        {
-            // The largest picture that is prepared at all is still walked: 2^22 pixels.
-            Fixture f(2048,2048); f.OnWindowColour();
-            f.Face(0,0,2048,2048,true); f.Box(500,400,1500,1700,90,120,60); f.Face(900,900,950,950,false);
-            f.Begin(f.tree); CHECK(f.Bit()); f.Prepared(); f.End(f.tree);
-        }
-    }
-
-    void PolicyCanvas()
-    {
-        // The same picture with the same margin. Whether the margin is the
-        // window's colour is said by the canvas of the bitmap, not by the pixels.
-        struct Case { COLORREF canvas; COLORREF face; COLORREF window; bool expectCut; };
+        // Nothing depends on what the canvas of the bitmap says, nor on which
+        // colours the system has: the same picture comes out the same.
+        struct Case { COLORREF canvas; COLORREF face; COLORREF window; };
         for (const Case c : {
-            Case{RGB(240,240,240), RGB(240,240,240), RGB(255,255,255), true},   // composed on the button face
-            Case{RGB(255,255,255), RGB(240,240,240), RGB(255,255,255), false},  // a canvas nobody set: white
-            Case{RGB(50,60,70),    RGB(240,240,240), RGB(255,255,255), false},  // some other brush
-            Case{RGB(240,240,240), RGB(212,208,200), RGB(255,255,255), false},  // the system's face is another colour
-            Case{RGB(240,240,240), RGB(212,208,200), RGB(240,240,240), false},  // the window colour is not the key
-            Case{0x02f0f0f0u,      RGB(240,240,240), RGB(255,255,255), true},   // only the colour bits are compared
+            Case{RGB(240,240,240), RGB(240,240,240), RGB(255,255,255)},   // composed on the button face
+            Case{RGB(255,255,255), RGB(240,240,240), RGB(255,255,255)},   // a canvas nobody set: white
+            Case{RGB(50,60,70),    RGB(240,240,240), RGB(255,255,255)},   // some other brush
+            Case{RGB(240,240,240), RGB(212,208,200), RGB(240,240,240)},   // the picture's grey is the window colour
+            Case{RGB(212,208,200), RGB(212,208,200), RGB(255,255,255)},   // the face of other systems
+            Case{0xffffffffu,      RGB(255,255,255), RGB(255,255,255)},   // a colour that could not be read
         })
         {
             Fixture f(10,8); f.Canvas(c.canvas);
             PanelTest::faceColor=c.face; PanelTest::windowColor=c.window;
-            f.Face(0,0,10,8,c.expectCut); f.Box(2,2,8,6,30,160,90);
+            f.Face(0,0,10,8); f.Box(2,2,8,6,30,160,90);
+            f.Box(0,0,10,1,212,208,200); f.Box(0,7,10,8,255,255,255); // rows of the other candidate colours
             f.Begin(f.viewer); CHECK(f.Stretch()); f.Prepared(); f.End(f.viewer);
             PanelTest::faceColor=0xf0f0f0; PanelTest::windowColor=0xffffff;
         }
+        for (int side : {7,1})
         {
-            // No background colour could be read. Its bits look like white, and
-            // white happens to be this system's face: still nothing is cut.
-            Fixture f(10,8); f.Canvas(0xffffffffu); PanelTest::faceColor=RGB(255,255,255);
-            f.Box(0,0,10,8,255,255,255); f.Box(2,2,8,6,30,160,90);
-            f.Begin(f.viewer); CHECK(f.Stretch()); f.Prepared(); f.End(f.viewer);
-            PanelTest::faceColor=0xf0f0f0;
-        }
-        {
-            // The key is the colour the system has now, whatever it is - and then
-            // the light grey of other systems is a colour of the picture.
-            Fixture f(10,8); f.Canvas(RGB(212,208,200)); PanelTest::faceColor=RGB(212,208,200);
-            f.Box(0,0,10,8,212,208,200);
-            for (size_t i=0;i<f.cut.size();++i) f.cut[i]=true;
-            f.Box(2,2,8,6,30,160,90); f.Face(4,0,6,2,false);
+            // Nothing but that colour, down to a single pixel of it.
+            Fixture f(side,side==7?5:1); f.OnWindowColour(); f.Face(0,0,f.width,f.height);
             f.Begin(f.tree); CHECK(f.Bit()); f.Prepared(); f.End(f.tree);
-            PanelTest::faceColor=0xf0f0f0;
+        }
+        for (bool viewer : {false,true})
+        {
+            // A picture the EXE composed on the checkerboard: both of its colours,
+            // the picture over them and the blends between stay what they are.
+            Fixture f(24,16); f.OnWindowColour();
+            f.Board(0,0,24,16);
+            f.Box(6,4,18,12,20,90,200);
+            f.Put(5,4,138,173,228); f.Put(18,11,112,147,202); // the edge, blended with the white and with the grey square
+            f.Begin(viewer?f.viewer:f.tree);
+            if (viewer) CHECK(f.Stretch()); else CHECK(f.Bit());
+            f.Prepared();
+            const auto* dark=ImageTest::last.pixels.data();
+            CHECK(dark[0]==205 && dark[1]==205 && dark[2]==205 && dark[3]==255);
+            const auto* light=ImageTest::last.pixels.data()+4u*4;
+            CHECK(light[0]==255 && light[1]==255 && light[2]==255 && light[3]==255);
+            const auto* edge=ImageTest::last.pixels.data()+(4u*24+5)*4;
+            CHECK(edge[0]==228 && edge[1]==173 && edge[2]==138 && edge[3]==255);
+            f.End(viewer?f.viewer:f.tree);
         }
         {
-            // A white canvas and a white picture with white margins: a bitmap that
-            // was only loaded. It is shown whole.
-            Fixture f(10,8); f.Canvas(RGB(255,255,255));
-            f.Box(0,0,10,8,255,255,255); f.Box(3,3,7,5,0,0,0);
-            f.Begin(f.viewer); CHECK(f.Stretch()); f.Prepared(); f.End(f.viewer);
-        }
-        for (int fault=1;fault<=7;++fault)
-        {
-            // The copy is cut only if it is what the shared helper promised: a
-            // 32bpp single-plane DIB of the caller's size with accessible bits.
-            // Otherwise it is drawn as it is - opaque, margin and all.
-            Fixture f(10,8); f.OnWindowColour();
-            f.Face(0,0,10,8,false); f.Box(2,2,8,6,30,160,90);
-            f.Begin(f.tree);
-            RestoratorTest::copyFault=fault;
-            CHECK(f.Bit());
-            RestoratorTest::copyFault=0;
-            CHECK(ImageTest::reads==1 && ImageTest::calls.size()==1); f.Prepared(); f.End(f.tree);
+            // The largest picture that is prepared at all: 2^22 pixels, as it is.
+            Fixture f(2048,2048); f.OnWindowColour();
+            f.Face(0,0,2048,2048); f.Box(500,400,1500,1700,90,120,60); f.Face(900,900,950,950);
+            f.Begin(f.tree); CHECK(f.Bit()); f.Prepared(); f.End(f.tree);
         }
     }
 
@@ -924,19 +846,15 @@ namespace
             CHECK(f.Stretch()); CHECK(LastReason()==L"alpha"); f.End(f.viewer);
         }
         {
-            // A picture that is not on black is prepared like any other.
+            // A picture that is not on black is prepared like any other, and so is
+            // one on the colour of the window: nothing about a background is said.
             Fixture f(12,12); f.Box(0,0,12,12,200,200,200); f.Begin(f.viewer);
-            CHECK(f.Stretch()); CHECK(LastReason()==L"none" && RestoratorTest::logSizes.back()==0); f.End(f.viewer);
-        }
-        {
-            // The line says how much of the window's colour was cut around the picture.
-            Fixture f(12,12); f.OnWindowColour();
-            f.Face(0,0,12,12,true); f.Box(2,2,10,10,200,30,30); f.Face(5,5,7,7,false);
-            f.Begin(f.viewer);
-            CHECK(f.Stretch()); f.Prepared();
-            CHECK(LastReason()==L"none" && RestoratorTest::logSizes.back()==80); // 144 less the 8 by 8 body
-            CHECK(f.Bit(&f.memory)); CHECK(LastReason()==L"dc" && RestoratorTest::logSizes.back()==0);
+            CHECK(f.Stretch()); CHECK(LastReason()==L"none");
+            f.OnWindowColour(); f.Face(0,0,12,12); f.Box(2,2,10,10,200,30,30);
+            CHECK(f.Stretch()); f.Prepared(); CHECK(LastReason()==L"none");
             f.End(f.viewer);
+            for (const auto& format : RestoratorTest::logFormats)
+                CHECK(format.find(L"edge=")==std::wstring::npos && format.find(L"bk=")==std::wstring::npos);
         }
         {
             // Sixteen lines a second per channel; no bitmap or window text is ever logged.
@@ -948,6 +866,105 @@ namespace
             f.End(f.tree);
             for (const auto& s : RestoratorTest::logStrings)
                 CHECK(s==L"TResTreeView" || s==L"BitBlt" || s==L"rop" || s==L"none");
+        }
+    }
+
+    void Arming()
+    {
+        // Every paint of a tree or a viewer of this EXE on glass tells the
+        // checkerboard unit - and names the window - so that what the EXE composes
+        // its pictures on is watched from then on. The call is idempotent on the
+        // other side.
+        for (bool viewer : {false,true})
+        {
+            Fixture f; PaintPlaceholder(f); TestWindow& host=viewer?f.viewer:f.tree;
+            CHECK(RestoratorTest::arms.empty());
+            f.Begin(host);
+            CHECK(RestoratorTest::arms==std::vector<HWND>{&host} && Ri::g_sessions.back().leased);
+            // Nothing a blit does, and no end of a paint, says it again.
+            if (viewer) CHECK(f.Stretch()); else CHECK(f.Bit());
+            f.Prepared(); CHECK(RestoratorTest::arms.size()==1);
+            f.End(host); CHECK(RestoratorTest::arms.size()==1);
+            f.Begin(host); CHECK((RestoratorTest::arms==std::vector<HWND>{&host,&host})); f.End(host);
+        }
+        {
+            // A populated tree shows no picture of ours and takes no lease, yet it
+            // says so too: the picture a viewer shows next is composed before
+            // that viewer paints for the first time.
+            Fixture f; PaintPlaceholder(f); RestoratorTest::items[&f.tree]=3;
+            f.Begin(f.tree);
+            CHECK(RestoratorTest::arms==std::vector<HWND>{&f.tree});
+            CHECK(!Ri::g_sessions.back().leased && Ri::g_refs==0 && RestoratorTest::writes==0);
+            f.End(f.tree);
+        }
+        for (bool viewer : {false,true})
+        {
+            // Whoever begins the paint: comctl32 paints a populated tree itself. No
+            // lease then, no count of items asked - only the word.
+            Fixture f; PaintPlaceholder(f); TestWindow& host=viewer?f.viewer:f.tree;
+            RestoratorTest::items[&f.tree]=3;
+            f.Begin(host,&f.comctl);
+            CHECK(RestoratorTest::arms==std::vector<HWND>{&host});
+            CHECK(!Ri::g_sessions.back().leased && Ri::g_refs==0 && RestoratorTest::writes==0);
+            CHECK(RestoratorTest::countQueries==0);
+            f.End(host);
+            f.Begin(host,&f.otherModule); CHECK(RestoratorTest::arms.size()==2); f.End(host);
+            f.Begin(host,nullptr); CHECK(RestoratorTest::arms.size()==3); f.End(host);
+        }
+        {
+            // So does a paint whose lease failed: the pictures are then drawn by
+            // the EXE alone, the board among them.
+            Fixture f; PaintPlaceholder(f); RestoratorTest::failCommit=true;
+            f.Begin(f.tree);
+            CHECK(RestoratorTest::arms==std::vector<HWND>{&f.tree} && !Ri::g_sessions.back().leased);
+            f.End(f.tree);
+        }
+        // Nothing else does: no glass, another injection mode, a class of another
+        // module's, another class, a unit shut down - whoever paints.
+        for (int which=0;which<10;++which)
+        {
+            Fixture f; PaintPlaceholder(f); TestWindow* host=which%2?&f.viewer:&f.tree;
+            const HMODULE module=which>=5?&f.comctl:&f.exe;
+            switch (which%5)
+            {
+            case 0:host->backdrop=false;break;
+            case 1:Test::full=false;break;
+            case 2:PanelTest::instances[host]=&f.otherModule;break;
+            case 3:host->cls=which%2?L"TImgViewBoxEx":L"TTreeView";break;
+            case 4:Ri::g_shutdown.store(true);break;
+            }
+            Test::topWindow=host;
+            f.Provider().onBegin(host,module);
+            CHECK(RestoratorTest::arms.empty() && Ri::g_refs==0);
+            Ri::g_shutdown.store(false);
+            f.Provider().onEnd(host,module);
+        }
+        {
+            // A window of neither class says nothing.
+            Fixture f; PaintPlaceholder(f);
+            Test::topWindow=&f.other;
+            f.Provider().onBegin(&f.other,&f.exe);
+            CHECK(RestoratorTest::arms.empty());
+            f.Provider().onEnd(&f.other,&f.exe);
+        }
+        {
+            // Without the module of the EXE there is no class of its own.
+            Fixture f; PaintPlaceholder(f);
+            GlassCore::ModuleHandler::g_entryPointModule=nullptr;
+            PanelTest::instances[&f.tree]=nullptr;
+            Test::topWindow=&f.tree;
+            f.Provider().onBegin(&f.tree,nullptr);
+            CHECK(RestoratorTest::arms.empty());
+            f.Provider().onEnd(&f.tree,nullptr);
+            GlassCore::ModuleHandler::g_entryPointModule=&f.exe;
+        }
+        {
+            // Nested paints say it each, comctl32's in between included.
+            Fixture f; PaintPlaceholder(f);
+            f.Begin(f.tree); f.Begin(f.tree,&f.comctl); f.Begin(f.viewer);
+            CHECK((RestoratorTest::arms==std::vector<HWND>{&f.tree,&f.tree,&f.viewer}) && Ri::g_refs==2);
+            f.End(f.viewer); f.End(f.tree); f.End(f.tree);
+            CHECK(RestoratorTest::arms.size()==3 && Detached());
         }
     }
 
@@ -983,9 +1000,10 @@ int main(int argc, char** argv)
 {
     const std::string name=argc==2?argv[1]:"";
     const std::pair<const char*, void(*)()> cases[]{
-        {"policy-opaque",PolicyOpaque}, {"policy-edge",PolicyEdge}, {"policy-canvas",PolicyCanvas},
+        {"policy-opaque",PolicyOpaque}, {"policy-background",PolicyBackground},
         {"routes",Routes}, {"scope",Scope}, {"isolation",Isolation}, {"sources",Sources},
         {"leases",Leases}, {"failures",Failures}, {"diagnostics",Diagnostics}, {"buffered",Buffered},
+        {"arming",Arming},
     };
     for (const auto& [id,run] : cases)
     {

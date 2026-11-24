@@ -1,83 +1,15 @@
 #pragma once
 #include <windows.h>
 #include <cstddef>
-#include <cstdint>
-#include <vector>
 
 namespace GlassCore::GdiUtils
 {
-    // What an application draws itself into a window on glass lands with A=0:
-    // a picture copied from a bitmap, an icon that carries no alpha of its own.
-    // OpaqueBitmapSource gives a picture A=255; these helpers do the rest for
-    // the callers that may ask for it. None of them knows a window: the caller
-    // checks the class, the session and the DC.
-
-    // A picture an application composes for its own window is laid on the
-    // window's colour: the bitmap's canvas keeps that colour as its brush, and
-    // the memory DC shows it as its background colour. Glass makes that colour of
-    // the window transparent, and the same colour around the picture is the same
-    // background. True: `key` is that colour - the button face. Any other canvas
-    // colour, white where nothing was composed, says nothing about the picture.
-    [[nodiscard]] inline bool WindowBackgroundKey(HDC source, COLORREF& key) noexcept
-    {
-        const COLORREF background = GetBkColor(source);
-        if (background == CLR_INVALID) return false;
-        key = background & 0xFFFFFFu;
-        return key == (GetSysColor(COLOR_BTNFACE) & 0xFFFFFFu);
-    }
-
-    // A larger picture keeps its background: the walk below needs a word per pixel.
-    inline constexpr std::uint64_t kMaxEdgePixels = 1u << 22;
-
-    // Top-down BGRA, A=255 in every pixel on entry. Pixels of exactly `key` that
-    // reach the outline through pixels of that colour (four neighbours) become
-    // transparent black. Nothing else changes: the same colour enclosed by the
-    // picture is the picture's own, and so is every other colour, black included.
-    // Returns how many pixels were cut; without memory for the walk, none are.
-    inline size_t CutEdgeBackground(DWORD* pixels, size_t width, size_t height, COLORREF key) noexcept
-    {
-        if (!pixels || !width || !height
-            || static_cast<std::uint64_t>(width) * static_cast<std::uint64_t>(height) > kMaxEdgePixels) return 0;
-        const DWORD background = 0xFF000000u | (static_cast<DWORD>(GetRValue(key)) << 16)
-            | (static_cast<DWORD>(GetGValue(key)) << 8) | static_cast<DWORD>(GetBValue(key));
-        const size_t count = width * height;
-        // A pixel enters the walk once, when it is cut: with room for all of
-        // them reserved, nothing after this point can fail half-way.
-        std::vector<std::uint32_t> walk;
-        try { walk.reserve(count); }
-        catch (...) { return 0; }
-        const auto reach = [&](size_t index) {
-            if (pixels[index] != background) return;
-            pixels[index] = 0;
-            walk.push_back(static_cast<std::uint32_t>(index));
-        };
-        for (size_t x = 0; x < width; ++x) { reach(x); reach(count - width + x); }
-        for (size_t y = 0; y < height; ++y) { reach(y * width); reach(y * width + width - 1); }
-        for (size_t head = 0; head < walk.size(); ++head)
-        {
-            const size_t index = walk[head], x = index % width;
-            if (x) reach(index - 1);
-            if (x + 1 < width) reach(index + 1);
-            if (index >= width) reach(index - width);
-            if (index + width < count) reach(index + width);
-        }
-        return walk.size();
-    }
-
-    // `source` now holds OpaqueBitmapSource's copy of the bitmap `original`
-    // describes. The copy is touched only if it is what that helper promises: a
-    // single-plane 32bpp DIB of the same size (its bits are checked by the cut).
-    inline size_t CutSelectedEdgeBackground(HDC source, const BITMAP& original, COLORREF key) noexcept
-    {
-        DIBSECTION dib{};
-        const auto copy = static_cast<HBITMAP>(GetCurrentObject(source, OBJ_BITMAP));
-        if (!copy || GetObjectW(copy, sizeof(dib), &dib) != sizeof(dib)) return 0;
-        const BITMAP& info = dib.dsBm;
-        if (info.bmPlanes != 1 || info.bmBitsPixel != 32 || info.bmWidth <= 0 || info.bmHeight <= 0
-            || info.bmWidth != original.bmWidth || info.bmHeight != original.bmHeight) return 0;
-        return CutEdgeBackground(static_cast<DWORD*>(info.bmBits),
-            static_cast<size_t>(info.bmWidth), static_cast<size_t>(info.bmHeight), key);
-    }
+    // An icon or a cursor an application draws itself into a window on glass
+    // lands with A=0 wherever it carries no alpha of its own. These helpers
+    // draw it with its transparency. None of them knows a window: the caller
+    // checks the class, the session and the DC. (A picture copied from a bitmap
+    // gets A=255 from OpaqueBitmapSource and is drawn as it is: nothing is cut
+    // out of it by colour.)
 
     // An icon or a cursor larger than this is the application's own call.
     inline constexpr int kMaxIconSide = 1024;

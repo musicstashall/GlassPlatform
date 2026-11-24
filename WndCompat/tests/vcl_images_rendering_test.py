@@ -3,7 +3,7 @@
 
 Both optimized and Debug/probe configurations exercise bytes, native parameters,
 thread/session/DC gates and resource ownership, the pictures and icons of a
-scroll box included: the copy that loses the window's colour at its outline
+scroll box included: the opaque copy drawn as it is, nothing cut out of it,
 and the icon blended with its own transparency. This is NOT Windows GDI/DWM
 rasterization (DrawIconEx is a narrow model), a real PE/IAT test or a
 Windows/MSVC build acceptance.
@@ -109,7 +109,7 @@ class VclImagesRenderingTest(unittest.TestCase):
     def test_panel_native_failure_error_cleanup_and_reentry(self):
         self.run_case('panel-failures')
 
-    def test_scroll_box_picture_is_opaque_and_loses_the_windows_colour_around_it(self):
+    def test_scroll_box_picture_is_opaque_as_it_is_and_nothing_is_cut_out_of_it(self):
         self.run_case('scroll-pictures')
 
     def test_scroll_box_pictures_are_plain_copies_into_its_own_paint_dc_only(self):

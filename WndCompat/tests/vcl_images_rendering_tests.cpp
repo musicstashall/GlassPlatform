@@ -626,18 +626,17 @@ namespace
         CHECK(f.Stretch()); CHECK(ImageTest::nativeStretches==2 && ImageTest::reads==1); f.Prepared(); f.EndPanel();
     }
     // A scroll box of the EXE, a picture of a chosen size for it, and an icon
-    // import. Which pixels must be cut is stated by each test; everything else
-    // must reach the native call as it is, opaque.
+    // import. Every pixel of the picture must reach the native call as it is,
+    // opaque: nothing is cut out of it, whatever colour it is.
     struct Scroll : Fixture
     {
         int width, height;
-        std::vector<bool> cut;
         explicit Scroll(int w=12, int h=8) : width(w), height(h)
         {
             panel.cls=L"TScrollBox"; PanelTest::parents.erase(&panel);
             PanelTest::bitmaps[&source]=PanelTest::stockBitmap; ImageDeleteObject(original);
             original=ImageTest::MakeBitmap(w,h); PanelTest::bitmaps[&source]=original;
-            bytes=original->pixels; cut.assign(static_cast<size_t>(w)*h,false);
+            bytes=original->pixels;
             exe.originals["DrawIconEx"]=reinterpret_cast<void*>(ChainedIcon);
             ImageTest::dirtyDib=true; // a new buffer holds whatever was there before
         }
@@ -647,16 +646,18 @@ namespace
             const size_t at=(static_cast<size_t>(y)*width+x)*4;
             for (auto* pixels : {&original->pixels, &bytes})
             { (*pixels)[at]=b; (*pixels)[at+1]=g; (*pixels)[at+2]=r; }
-            cut[at/4]=false;
         }
         // [x0,x1) x [y0,y1)
         void Box(int x0, int y0, int x1, int y1, BYTE r, BYTE g, BYTE b)
         { for (int y=y0;y<y1;++y) for (int x=x0;x<x1;++x) Put(x,y,r,g,b); }
-        // The same area in the window's colour (the button face of this fixture).
-        void Face(int x0, int y0, int x1, int y1, bool expectCut)
+        // The same area in the window's colour (the button face of this fixture):
+        // a colour like any other.
+        void Face(int x0, int y0, int x1, int y1) { Box(x0,y0,x1,y1,240,240,240); }
+        // What the checkerboard unit lays under a picture: squares of four pixels.
+        void Board(int x0, int y0, int x1, int y1)
         {
-            Box(x0,y0,x1,y1,240,240,240);
-            for (int y=y0;y<y1;++y) for (int x=x0;x<x1;++x) cut[static_cast<size_t>(y)*width+x]=expectCut;
+            for (int y=y0;y<y1;++y) for (int x=x0;x<x1;++x)
+            { const BYTE level=BYTE((x/4+y/4)%2==0?205:255); Put(x,y,level,level,level); }
         }
         void Canvas(COLORREF colour) { canvas=source.background=colour; }
         void OnWindowColour() { Canvas(RGB(240,240,240)); }
@@ -665,16 +666,14 @@ namespace
         {
             const auto& p=ImageTest::last.pixels;
             CHECK(p.size()==bytes.size() && ImageTest::last.selected!=original);
-            for (size_t i=0;i<cut.size();++i)
+            for (size_t i=0;i<p.size()/4;++i)
             {
                 const BYTE* out=p.data()+i*4; const BYTE* in=bytes.data()+i*4;
-                const bool ok=cut[i] ? !out[0] && !out[1] && !out[2] && !out[3]
-                    : out[0]==in[0] && out[1]==in[1] && out[2]==in[2] && out[3]==255;
-                if (!ok)
+                if (out[0]!=in[0] || out[1]!=in[1] || out[2]!=in[2] || out[3]!=255)
                 {
-                    std::cerr<<"pixel "<<i%width<<","<<i/width<<" expected "<<(cut[i]?"cut":"opaque")
+                    std::cerr<<"pixel "<<i%width<<","<<i/width
                         <<" out="<<int(out[2])<<","<<int(out[1])<<","<<int(out[0])<<","<<int(out[3])<<"\n";
-                    CHECK(ok);
+                    CHECK(false);
                 }
             }
             CHECK(ImageTest::last.entryError==0x29 && GetLastError()==0x51);
@@ -738,15 +737,16 @@ namespace
         return icon;
     }
 
-    void ScrollPicturesAndTheWindowColour()
+    void ScrollPicturesAsTheyAre()
     {
         {
-            // A picture the EXE composed on the colour of its window: the margin
-            // goes, the picture stays whole - a hole of the same colour included.
+            // A picture the EXE composed on the colour of its window. It is shown
+            // whole and opaque: the margin, a hole of the same colour, the soft
+            // corners that are a blend with it. Nothing is cut out of it.
             Scroll f(16,12); f.OnWindowColour();
-            f.Face(0,0,16,12,true); f.Box(3,2,13,10,200,30,30);
-            f.Face(6,4,9,7,false); f.Face(13,5,14,7,true);
-            f.Put(15,0,240,240,241);
+            f.Face(0,0,16,12); f.Box(3,2,13,10,200,30,30);
+            f.Face(6,4,9,7); f.Face(13,5,14,7);
+            f.Put(2,2,230,170,170); f.Put(15,0,240,240,241);
             CHECK(f.BeginPanel()); CHECK(f.exe.refs["StretchBlt"]==1);
             CHECK(f.Copy());
             CHECK(ImageTest::nativeStretches==1 && chainStretches==1 && ImageTest::reads==1);
@@ -755,48 +755,57 @@ namespace
             CHECK(c.sx==2 && c.sy==1 && c.sw==16 && c.sh==12 && c.rop==SRCCOPY);
             f.Drawn();
             const auto* margin=ImageTest::last.pixels.data()+(1u*16+1)*4;
-            CHECK(!margin[0] && !margin[1] && !margin[2] && !margin[3]);
+            CHECK(margin[0]==240 && margin[1]==240 && margin[2]==240 && margin[3]==255);
+            const auto* corner=ImageTest::last.pixels.data();
+            CHECK(corner[0]==240 && corner[1]==240 && corner[2]==240 && corner[3]==255);
             const auto* hole=ImageTest::last.pixels.data()+(5u*16+7)*4;
             CHECK(hole[0]==240 && hole[1]==240 && hole[2]==240 && hole[3]==255);
             f.EndPanel(); CHECK(f.exe.refs["StretchBlt"]==0);
         }
         {
-            // Scale, mirroring and offsets are the caller's; the picture is cut all the same.
-            Scroll f(10,6); f.OnWindowColour(); f.Face(0,0,10,6,true); f.Box(2,1,8,5,10,90,170);
+            // A picture the EXE composed on the checkerboard - the PNG frame of an
+            // icon: both colours of the board and the blends with them stay.
+            Scroll f(24,16); f.OnWindowColour();
+            f.Board(0,0,24,16); f.Box(6,4,18,12,20,90,200);
+            f.Put(5,4,138,173,228); f.Put(18,11,112,147,202);
+            CHECK(f.BeginPanel()); CHECK(f.Copy()); f.Drawn();
+            const auto* dark=ImageTest::last.pixels.data();
+            CHECK(dark[0]==205 && dark[1]==205 && dark[2]==205 && dark[3]==255);
+            const auto* light=ImageTest::last.pixels.data()+4u*4;
+            CHECK(light[0]==255 && light[1]==255 && light[2]==255 && light[3]==255);
+            f.EndPanel();
+        }
+        {
+            // Scale, mirroring and offsets are the caller's.
+            Scroll f(10,6); f.OnWindowColour(); f.Face(0,0,10,6); f.Box(2,1,8,5,10,90,170);
             CHECK(f.BeginPanel());
             CHECK(f.Stretch(nullptr,nullptr,SRCCOPY,-30,24,10,-6));
             const auto& c=ImageTest::last;
             CHECK(c.w==-30 && c.h==24 && c.sw==10 && c.sh==-6 && c.rop==SRCCOPY);
             f.Drawn(); f.EndPanel();
         }
-        // The canvas of the bitmap says what it was composed on. Anything but the
-        // system's face - white where nobody set it - and the picture is whole.
-        struct Case { COLORREF canvas; COLORREF face; COLORREF window; bool expectCut; };
+        // Nothing depends on what the canvas of the bitmap says, nor on the
+        // colours the system has: the picture comes out the same.
+        struct Case { COLORREF canvas; COLORREF face; COLORREF window; };
         for (const Case c : {
-            Case{RGB(255,255,255), RGB(240,240,240), RGB(255,255,255), false},
-            Case{RGB(50,60,70),    RGB(240,240,240), RGB(255,255,255), false},
-            Case{RGB(240,240,240), RGB(212,208,200), RGB(240,240,240), false},
-            Case{0x02f0f0f0u,      RGB(240,240,240), RGB(255,255,255), true},
+            Case{RGB(240,240,240), RGB(240,240,240), RGB(255,255,255)},
+            Case{RGB(255,255,255), RGB(240,240,240), RGB(255,255,255)},
+            Case{RGB(50,60,70),    RGB(240,240,240), RGB(255,255,255)},
+            Case{RGB(240,240,240), RGB(212,208,200), RGB(240,240,240)},
+            Case{0xffffffffu,      RGB(255,255,255), RGB(255,255,255)},
         })
         {
             Scroll f(10,6); f.Canvas(c.canvas);
             PanelTest::faceColor=c.face; PanelTest::windowColor=c.window;
-            f.Face(0,0,10,6,c.expectCut); f.Box(2,1,8,5,10,90,170);
+            f.Face(0,0,10,6); f.Box(2,1,8,5,10,90,170); f.Box(0,5,10,6,255,255,255);
             CHECK(f.BeginPanel()); CHECK(f.Copy()); f.Drawn(); f.EndPanel();
             PanelTest::faceColor=0xf0f0f0; PanelTest::windowColor=0xffffff;
         }
         {
-            // A picture too large to walk keeps its margin, and is opaque all the same.
-            Scroll f(4097,1024); f.OnWindowColour();
-            f.Face(0,0,4097,2,false); f.Box(0,2,4097,1024,10,90,170);
-            CHECK(f.BeginPanel()); CHECK(f.Copy()); f.Drawn(); f.EndPanel();
-        }
-        {
-            // A panel inside a panel keeps the policy it had: the picture as it is,
-            // margin included, whatever its canvas says.
+            // A panel inside a panel: the same picture as it is, any ROP.
             Scroll f(10,6); f.OnWindowColour();
             f.panel.cls=L"TPanel"; PanelTest::parents[&f.panel]=&f.parent;
-            f.Face(0,0,10,6,false); f.Box(2,1,8,5,10,90,170);
+            f.Face(0,0,10,6); f.Box(2,1,8,5,10,90,170);
             CHECK(f.BeginPanel()); CHECK(f.exe.refs["StretchBlt"]==1 && f.exe.refs["DrawIconEx"]==0);
             CHECK(f.Copy()); f.Drawn(); f.EndPanel();
         }
@@ -807,13 +816,13 @@ namespace
         // a picture as it is. Masks and other ROPs are their callers' own.
         for (DWORD rop : {SRCAND,DWORD(0x00e20746),DWORD(0x00660046),DWORD(0x00ee0086)})
         {
-            Scroll f; f.OnWindowColour(); f.Face(0,0,12,8,false);
+            Scroll f; f.OnWindowColour(); f.Face(0,0,12,8);
             CHECK(f.BeginPanel()); CHECK(f.Copy(rop));
             CHECK(ImageTest::reads==0 && ImageTest::last.rop==rop); f.Native(); f.EndPanel();
         }
         for (int which=0;which<14;++which)
         {
-            Scroll f; f.OnWindowColour(); f.Face(0,0,12,8,false); HDC dest=&f.dc; bool begun=true;
+            Scroll f; f.OnWindowColour(); f.Face(0,0,12,8); HDC dest=&f.dc; bool begun=true;
             switch (which)
             {
             case 0:f.panel.cls=L"TScrollBoxEx";begun=false;break;                // not a panel class at all
@@ -843,23 +852,23 @@ namespace
         }
         {
             // The class is compared whole and without case; a tracked memory DC of the window is its surface.
-            Scroll f; f.panel.cls=L"tscrollBOX"; f.OnWindowColour(); f.Face(0,0,12,8,true); f.Put(5,4,1,2,3);
+            Scroll f; f.panel.cls=L"tscrollBOX"; f.OnWindowColour(); f.Face(0,0,12,8); f.Put(5,4,1,2,3);
             CHECK(f.BeginPanel()); CHECK(f.exe.refs["StretchBlt"]==1 && f.exe.refs["DrawIconEx"]==1);
             CHECK(f.Stretch(&f.memory,nullptr,SRCCOPY,12,8,12,8)); f.Drawn(); f.EndPanel();
         }
         for (UINT msg : {WM_ERASEBKGND,WM_PRINTCLIENT})
         {
             // Only its paint: an erase and a print take neither import.
-            Scroll f; f.OnWindowColour(); f.Face(0,0,12,8,false);
+            Scroll f; f.OnWindowColour(); f.Face(0,0,12,8);
             CHECK(f.BeginPanel(msg)); CHECK(f.exe.refs["StretchBlt"]==0 && f.exe.refs["DrawIconEx"]==0);
             CHECK(f.Copy()); CHECK(ImageTest::reads==0); f.Native(); f.EndPanel();
         }
         for (int which=0;which<3;++which)
         {
             // Whatever fails while the copy is made, the caller's bitmap is drawn once
-            // and stays the caller's: nothing of it is cut, though here it is itself a
-            // 32bpp DIB whose fourth byte is 255, margin and all.
-            Scroll f; f.OnWindowColour(); f.Face(0,0,12,8,false);
+            // and stays the caller's, byte for byte - here itself a 32bpp DIB whose
+            // fourth byte is 255.
+            Scroll f; f.OnWindowColour(); f.Face(0,0,12,8);
             for (size_t i=3;i<f.bytes.size();i+=4) f.original->pixels[i]=f.bytes[i]=255;
             CHECK(f.BeginPanel());
             switch (which)
@@ -1239,7 +1248,7 @@ int main(int argc,char** argv)
         else if(name=="panel-isolation")PanelDcIsolationAndClientBuffers();
         else if(name=="panel-leases")PanelLeasesNativeBarriersAndShutdown();
         else if(name=="panel-failures")PanelFailureAndReentry();
-        else if(name=="scroll-pictures")ScrollPicturesAndTheWindowColour();
+        else if(name=="scroll-pictures")ScrollPicturesAsTheyAre();
         else if(name=="scroll-picture-scope")ScrollPictureScopeAndIsolation();
         else if(name=="scroll-icons")ScrollIconsWithTheirTransparency();
         else if(name=="scroll-icon-scope")ScrollIconScopeAndIsolation();

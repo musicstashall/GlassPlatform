@@ -6,20 +6,19 @@
 //
 // While such a paint session is open both gdi32 exports are detoured. A SRCCOPY
 // blit of a bitmap into that window's own DC gets an owned 32bpp copy with
-// A=255: the picture is drawn as it is, its own background included (the black
-// of the placeholders). Only what the EXE composed the picture on is not the
-// picture's: where the bitmap's canvas names the colour of the window, the
-// pixels of that colour that reach the outline are transparent, like the
-// window around them. The caller's blit then runs unchanged with that copy
-// selected. Other ROPs, DCs and callers stay native. Nothing is masked by
-// brightness, no colour is keyed inside the picture, and there is no AlphaBlend.
+// A=255, and the caller's blit then runs unchanged with that copy selected:
+// the picture is drawn as it is, with everything the EXE composed it on - the
+// black of the placeholders, the checkerboard RestoratorCheckerboard lays
+// under a picture that has transparency. Other ROPs, DCs and callers stay
+// native. Nothing is masked by brightness, no colour is keyed or cut out of
+// the picture, and there is no AlphaBlend.
 #include "CorePch.h"
 #include <Hooks/delphi/RestoratorImages.h>
+#include <Hooks/delphi/RestoratorCheckerboard.h>
 #include <Core/Intercept/HookHelper.h>
 #include <Module/ModuleHandler.h>
 #include <Subsystems/PaintDispatcher.h>
 #include <Subsystems/OpaqueBitmapSource.h>
-#include <Subsystems/PictureAlpha.h>
 #include <Subsystems/RootSwcaGradient.h>
 #include <GlassBackdropMark.h>
 #include <DebugLog.h>
@@ -127,32 +126,23 @@ namespace GlassCore::RestoratorImages
             BITMAP info{};
             LPCWSTR reason = extents ? Reject(blit, info) : L"extents";
             BOOL result{}; DWORD error{};
-            size_t edge = 0; // pixels of the window's colour cut around the picture
             if (!reason)
             {
-                // The A=255 copy is drawn as it is: the picture keeps its own
-                // background. What the EXE composed it on is the window's colour,
-                // named by the bitmap's canvas; that much is cut from the outline.
+                // The A=255 copy is drawn as it is: the picture keeps what the
+                // EXE composed it on, and nothing of it is cut out by colour.
                 GlassCore::GdiUtils::OpaqueBitmapSource picture{blit.source};
-                COLORREF key{};
                 if (!picture) reason = L"copy";
-                else
-                {
-                    if (GlassCore::GdiUtils::WindowBackgroundKey(blit.source, key))
-                        edge = GlassCore::GdiUtils::CutSelectedEdgeBackground(blit.source, info, key);
-                    result = native(); error = GetLastError();
-                }
+                else { result = native(); error = GetLastError(); }
             } // The copy is deleted and the caller's bitmap selected again.
             if (reason) { result = native(); error = GetLastError(); }
             if (TakeDiag(1))
                 DebugLog(DBG_NORMAL,
-                    L"[GlassCore][RestoratorImages] image api=%s hwnd=0x%p dc=0x%p dcWnd=0x%p dcType=%lu src=0x%p bpp=%u size=[%ld,%ld] dst=[%d,%d,%d,%d] srcRect=[%d,%d,%d,%d] rop=0x%08X bk=0x%06X opaque=%d edge=%zu reason=%s result=%d",
+                    L"[GlassCore][RestoratorImages] image api=%s hwnd=0x%p dc=0x%p dcWnd=0x%p dcType=%lu src=0x%p bpp=%u size=[%ld,%ld] dst=[%d,%d,%d,%d] srcRect=[%d,%d,%d,%d] rop=0x%08X opaque=%d reason=%s result=%d",
                     blit.api, blit.hwnd, blit.dc, blit.dc ? WindowFromDC(blit.dc) : nullptr,
                     blit.dc ? GetObjectType(blit.dc) : 0ul, blit.source,
                     unsigned(info.bmBitsPixel), info.bmWidth, info.bmHeight,
                     blit.x, blit.y, blit.w, blit.h, blit.sx, blit.sy, blit.sw, blit.sh, blit.rop,
-                    static_cast<unsigned>(GetBkColor(blit.source) & 0xFFFFFFu),
-                    reason ? 0 : 1, edge, reason ? reason : L"none", result);
+                    reason ? 0 : 1, reason ? reason : L"none", result);
             SetLastError(error);
             return result;
         }
@@ -249,9 +239,16 @@ namespace GlassCore::RestoratorImages
             const Host host = HostOf(hwnd);
             if (host == Host::None) return;
             const HMODULE exe = GlassCore::ModuleHandler::g_entryPointModule;
-            const bool eligible = exe && caller == exe && GlassCore::Root::IsFullInjectionMode()
+            // A window of the EXE's own class, on glass - whoever begins its paint.
+            const bool own = exe && GlassCore::Root::IsFullInjectionMode()
                 && GlassShared::GlassIsBackdropAllowedForHwnd(hwnd)
                 && reinterpret_cast<HMODULE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)) == exe;
+            // This EXE shows its pictures itself, on glass: from now on what it
+            // lays under a picture it composes is watched. A populated tree,
+            // which comctl32 paints, says so as well - the picture a viewer
+            // shows next is composed before that viewer paints.
+            if (own) GlassCore::RestoratorCheckerboard::Arm(hwnd);
+            const bool eligible = own && caller == exe;
             // comctl32 draws a populated tree; only the empty one shows a picture.
             const unsigned items = eligible && host == Host::Tree ? static_cast<unsigned>(TreeView_GetCount(hwnd)) : 0;
             // Every BeginPaint of these classes is recorded, leased or not, so that

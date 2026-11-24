@@ -1,8 +1,9 @@
 // Environment doubles for the complete production RestoratorImages translation
 // unit. The strict bitmap/selection doubles of the VCL image suite are reused;
-// this file adds only an export/trampoline model for two gdi32 detours, faults
-// in the prepared copy and captured diagnostics. It is not Windows GDI or DWM,
-// a real PE export, the Detours ABI or instruction patching.
+// this file adds only an export/trampoline model for two gdi32 detours, captured
+// diagnostics and a recorder in place of RestoratorCheckerboard::Arm - that
+// unit has a suite of its own. It is not Windows GDI or DWM, a real PE export,
+// the Detours ABI or instruction patching.
 #pragma once
 #include "vcl_images_test_shim.h"
 
@@ -25,9 +26,11 @@ namespace RestoratorTest
     inline int countQueries = 0;
     inline thread_local ULONGLONG clock = 100;
     inline thread_local std::vector<std::wstring> logFormats, logStrings;
-    inline thread_local std::vector<size_t> logSizes; // every %zu argument, in order
-    inline thread_local int dibQueries = 0;
-    inline int copyFault = 0; // corrupts what the second DIBSECTION query of a blit (the prepared copy) reports
+    inline std::vector<HWND> arms;                     // every RestoratorCheckerboard::Arm call: its viewer
+}
+namespace GlassCore::RestoratorCheckerboard
+{
+    inline void Arm(HWND viewer) noexcept { RestoratorTest::arms.push_back(viewer); }
 }
 
 inline BOOL WINAPI RestoratorTrampolineBitBlt(HDC dc, int x, int y, int w, int h, HDC src, int sx, int sy, DWORD rop)
@@ -47,7 +50,7 @@ inline BOOL WINAPI RestoratorTrampolineStretchBlt(HDC dc, int x, int y, int w, i
 // Calling it again from a detour would re-enter that detour, not bypass it.
 inline BOOL WINAPI RestoratorExportBitBlt(HDC dc, int x, int y, int w, int h, HDC src, int sx, int sy, DWORD rop)
 {
-    ++RestoratorTest::exportCalls; RestoratorTest::dibQueries = 0;
+    ++RestoratorTest::exportCalls;
     if (const auto hook = reinterpret_cast<RestoratorTest::BitFn>(RestoratorTest::bitDetour))
         return hook(dc, x, y, w, h, src, sx, sy, rop);
     return BitBlt(dc, x, y, w, h, src, sx, sy, rop);
@@ -55,7 +58,7 @@ inline BOOL WINAPI RestoratorExportBitBlt(HDC dc, int x, int y, int w, int h, HD
 inline BOOL WINAPI RestoratorExportStretchBlt(HDC dc, int x, int y, int w, int h,
     HDC src, int sx, int sy, int sw, int sh, DWORD rop)
 {
-    ++RestoratorTest::exportCalls; RestoratorTest::dibQueries = 0;
+    ++RestoratorTest::exportCalls;
     if (const auto hook = reinterpret_cast<RestoratorTest::StretchFn>(RestoratorTest::stretchDetour))
         return hook(dc, x, y, w, h, src, sx, sy, sw, sh, rop);
     return StretchBlt(dc, x, y, w, h, src, sx, sy, sw, sh, rop);
@@ -138,30 +141,11 @@ inline FARPROC RestoratorGetProcAddress(HMODULE module, LPCSTR name)
         return RestoratorTest::stretchExport ? reinterpret_cast<FARPROC>(&RestoratorExportStretchBlt) : nullptr;
     return nullptr;
 }
-inline int RestoratorGetObjectW(HGDIOBJ object, int bytes, void* out)
-{
-    const bool copy = bytes == sizeof(DIBSECTION) && ++RestoratorTest::dibQueries == 2;
-    const int result = ImageGetObjectW(object, bytes, out);
-    if (!copy || !RestoratorTest::copyFault) return result;
-    auto& info = static_cast<DIBSECTION*>(out)->dsBm;
-    switch (RestoratorTest::copyFault)
-    {
-    case 1: return 0;
-    case 2: return sizeof(BITMAP);
-    case 3: info.bmBits = nullptr; break;
-    case 4: info.bmBitsPixel = 24; break;
-    case 5: info.bmPlanes = 2; break;
-    case 6: ++info.bmWidth; break;
-    case 7: --info.bmHeight; break;
-    }
-    return result;
-}
 inline ULONGLONG RestoratorTickCount64() { return RestoratorTest::clock; }
 template <typename T> inline void RestoratorCaptureLogString(T value)
 {
     if constexpr (std::is_convertible_v<T, LPCWSTR>)
     { if (value) RestoratorTest::logStrings.emplace_back(value); }
-    else if constexpr (std::is_same_v<T, size_t>) RestoratorTest::logSizes.push_back(value);
 }
 template <typename... Args> inline void RestoratorDebugLog(int, LPCWSTR format, Args... args)
 {
@@ -173,9 +157,5 @@ template <typename... Args> inline void RestoratorDebugLog(int, LPCWSTR format, 
 #define GetModuleHandleW RestoratorGetModuleHandleW
 #undef GetProcAddress
 #define GetProcAddress RestoratorGetProcAddress
-#undef GetObject
-#define GetObject RestoratorGetObjectW
-#undef GetObjectW
-#define GetObjectW RestoratorGetObjectW
 #define GetTickCount64 RestoratorTickCount64
 #define DebugLog RestoratorDebugLog

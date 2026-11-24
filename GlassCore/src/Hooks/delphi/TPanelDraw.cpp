@@ -3,9 +3,9 @@
 // controls' DCs are not recoloured. The root themed-text slot also shares this
 // session/DC gate and the existing transparent compositor. No alpha pattern brushes.
 // What the graphic controls of a TScrollBox draw inside its paint is the EXE's
-// own too: a bitmap copied as it is lands opaque, without the window's colour
-// it was composed on; an icon or a cursor is blended with its transparency;
-// a label is the ANSI text of a panel.
+// own too: a bitmap copied as it is lands opaque, with everything it was
+// composed on; an icon or a cursor is blended with its transparency; a label
+// is the ANSI text of a panel.
 #include "CorePch.h"
 #include <Hooks/delphi/TPanelDraw.h>
 #include <Core/Intercept/HookDispatcher.h>
@@ -387,24 +387,19 @@ namespace GlassCore::DelphiPanel
             g_inHook = true;
             auto leave = wil::scope_exit([]() noexcept { g_inHook = false; });
             BOOL result{}; DWORD error{}; bool prepared{};
-            size_t edge = 0; // пикселей цвета окна, вырезанных вокруг изображения
             {
+                // Копия A=255 рисуется как есть — вместе с тем, на чём приложение
+                // собрало изображение. По цвету из неё ничего не вырезается.
                 GlassCore::GdiUtils::OpaqueBitmapSource image{source};
                 prepared = static_cast<bool>(image);
-                // Изображение TScrollBox приложение собирает на цвете окна: его
-                // называет canvas bitmap. Этот цвет от контура — тот же фон окна.
-                COLORREF key{};
-                if (prepared && host == ImageHost::ScrollBox && GlassCore::GdiUtils::WindowBackgroundKey(source, key))
-                    edge = GlassCore::GdiUtils::CutSelectedEdgeBackground(source, bitmap, key);
                 result = native(); // mask/ROP, масштаб и знаки extents сохраняются
                 error = GetLastError();
             }
             if (TakeDiag(3))
                 DebugLog(DBG_NORMAL,
-                    L"[GlassCore][DelphiPanel] image api=StretchBlt hwnd=0x%p dc=0x%p src=0x%p bpp=%u dst=[%d,%d,%d,%d] srcRect=[%d,%d,%d,%d] rop=0x%08X bk=0x%06X opaqueCopy=%d edge=%zu result=%d",
+                    L"[GlassCore][DelphiPanel] image api=StretchBlt hwnd=0x%p dc=0x%p src=0x%p bpp=%u dst=[%d,%d,%d,%d] srcRect=[%d,%d,%d,%d] rop=0x%08X opaqueCopy=%d result=%d",
                     hwnd, dc, source, unsigned(bitmap.bmBitsPixel),
-                    x, y, w, h, sx, sy, sw, sh, rop, static_cast<unsigned>(GetBkColor(source) & 0xFFFFFFu),
-                    prepared ? 1 : 0, edge, result);
+                    x, y, w, h, sx, sy, sw, sh, rop, prepared ? 1 : 0, result);
             SetLastError(error);
             return result;
         }

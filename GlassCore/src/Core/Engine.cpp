@@ -23,6 +23,7 @@
 #include <Hooks/delphi/TInputIcons.h>
 #include <Hooks/delphi/TPanelDraw.h>
 #include <Hooks/delphi/RestoratorImages.h>
+#include <Hooks/delphi/RestoratorCheckerboard.h>
 #include <Hooks/delphi/THexDumpDraw.h>
 #include <Hooks/delphi/TResVersionEditorDraw.h>
 #include <Hooks/delphi/THintWindowDraw.h>
@@ -174,6 +175,7 @@ namespace GlassCore::Engine
         GlassCore::DelphiToggle::Startup();
         GlassCore::DelphiBackground::Startup();
         GlassCore::DelphiPanel::Startup();
+        GlassCore::RestoratorCheckerboard::Startup();
         GlassCore::RestoratorImages::Startup();
         GlassCore::DelphiHexDump::Startup();
         GlassCore::DelphiResVersionEditor::Startup();
@@ -298,6 +300,7 @@ namespace GlassCore::Engine
         GlassCore::DelphiResVersionEditor::Shutdown();
         GlassCore::DelphiHexDump::Shutdown();
         GlassCore::RestoratorImages::Shutdown();
+        GlassCore::RestoratorCheckerboard::Shutdown();
         GlassCore::DelphiPanel::Shutdown();
         GlassCore::DelphiInputIcons::Shutdown();
         GlassCore::DelphiBackground::Shutdown();
