@@ -52,7 +52,6 @@
 #include "Root/ExplorerRootSubclass.h"
 #include "Root/RootSubclassShared.h"
 #include "Root/DelphiPanelPaint.h"
-#include "Root/DelphiRestoreProbe.h"
 #include "Root/DelphiShowErase.h"
 #include "Root/RootBackdropRefreshThrottle.h"
 #include "Root/TaskbarHost.h"
@@ -1003,14 +1002,6 @@ namespace
         // WM_NCPAINT / WM_ERASEBKGND после показа под всем, что ждёт перерисовки,
         // кладётся прозрачная база. Сообщения идут дальше без изменений.
         WndCompat::DelphiShowErase::OnRootMessage(hWnd, uMsg, lParam);
-
-#if defined(_DEBUG)
-        // Только Debug: что лежит на поверхности VCL-формы под каждым её контролом
-        // сразу после показа/разворачивания, после системного стирания и после
-        // перерисовки. Ничего не рисует; своё сообщение и свой таймер дальше не идут.
-        if (WndCompat::DelphiRestoreProbe::OnRootMessage(hWnd, uMsg, wParam, lParam))
-            return 0;
-#endif
 
         // VCL-панелям нужен исходный Brush.Color: безусловный BLACKNESS в
         // WM_ERASEBKGND ниже уничтожает его до вызова родного VCL-обработчика.

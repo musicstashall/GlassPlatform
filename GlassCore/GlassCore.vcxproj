@@ -182,6 +182,7 @@
     <ClCompile Include="src\Hooks\delphi\RestoratorImages.cpp" />
     <ClCompile Include="src\Hooks\delphi\THexDumpDraw.cpp" />
     <ClCompile Include="src\Hooks\delphi\TResVersionEditorDraw.cpp" />
+    <ClCompile Include="src\Hooks\delphi\THintWindowDraw.cpp" />
     <ClCompile Include="src\Hooks\delphi\TButtonGroupsDraw.cpp" />
     <ClCompile Include="src\Hooks\delphi\BomeMemoDraw.cpp" />
     <ClCompile Include="src\Hooks\delphi\TInputHooks.cpp" />
@@ -274,6 +275,7 @@
     <ClInclude Include="Include\Hooks\delphi\RestoratorImages.h" />
     <ClInclude Include="Include\Hooks\delphi\THexDumpDraw.h" />
     <ClInclude Include="Include\Hooks\delphi\TResVersionEditorDraw.h" />
+    <ClInclude Include="Include\Hooks\delphi\THintWindowDraw.h" />
     <ClInclude Include="Include\Hooks\delphi\TButtonGroupsDraw.h" />
     <ClInclude Include="Include\Hooks\delphi\BomeMemoDraw.h" />
     <ClInclude Include="Include\Hooks\delphi\TInputHooks.h" />

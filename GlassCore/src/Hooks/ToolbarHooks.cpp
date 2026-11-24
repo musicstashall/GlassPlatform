@@ -9,6 +9,8 @@
 //   1bpp-маска ImageList: skip после alpha_direct; orig после blackkey.
 // Exact TToolBar (VCL): также caller EXE; временная opaque-копия источника
 //   и настоящий comctl32!MaskBlt с неизменными маской/ROP. BitBlt — native.
+//   Подписи кнопок при caller EXE рисует тот же comctl32 v6: его DrawThemeText
+//   (и DrawTextExW uxtheme при glow) берутся на время сессии по имени модуля.
 // Фон erase (F4): Root NM_CUSTOMDRAW CDDS_PREERASE → DrawThemeParentBackground.
 // Хуки включаются на callerModule при каждом BeginPaint.
 
@@ -55,6 +57,12 @@ namespace GlassCore::ToolbarControl
         // Снимок только реально полученных refs. Даже если второй comctl32
         // загрузится во время paint, End освободит ровно модули из Begin.
         std::array<HMODULE, 2> iconModules{};
+        // EXE paint-route VCL: BeginPaint вызван кодом EXE (TWinControl.PaintHandler),
+        // а подписи кнопок рисует comctl32 v6. Хуки текста, которые comctl32-маршрут
+        // получает по caller, здесь берутся по имени модуля; снимок — для End.
+        HMODULE textModule{};   // comctl32 v6: DrawThemeText
+        HMODULE glowModule{};   // uxtheme: DrawTextExW (только при glow)
+        unsigned texts{};       // подписей, нарисованных хуком в этой сессии
     };
     thread_local std::vector<PaintSession> g_modStack;
     thread_local bool g_inOpaqueIcon = false;
@@ -357,7 +365,10 @@ namespace GlassCore::ToolbarControl
         const HRESULT hrAlpha = GlassCore::Text::DrawTextWithAlpha(
             hdc, pszText, cchText, &rc, dwTextFlags, result);
         if (!FAILED(hrAlpha))
+        {
+            ++g_modStack.back().texts;
             return S_OK;
+        }
 
         return orig(hTheme, hdc, iPartId, iStateId, pszText, cchText, dwTextFlags, dwTextFlags2, pRect);
     }
@@ -658,6 +669,17 @@ namespace GlassCore::ToolbarControl
                 if (modules[i] && (i == 0 || modules[i] != modules[0])
                     && EnableHooksOnModule(modules[i], OHK_MASKBLT, true))
                     session.iconModules[i] = modules[i];
+            // Подписи. Маршрут с caller comctl32 v6 получает те же хуки ниже, в
+            // EnableToolbarHooksForModule; второй ref на одну сессию не берётся.
+            if (callerMod == GlassCore::ModuleHandler::g_entryPointModule && modules[0]
+                && EnableHooksOnModule(modules[0], OHK_DRAWTHEMETEXT, true))
+            {
+                session.textModule = modules[0];
+                HMODULE const ux = GetModuleHandleW(L"uxtheme.dll");
+                if (ux && GlassCore::Text::IsInkGlowEffectActiveForPaintSession(hWnd)
+                    && EnableHooksOnModule(ux, OHK_DRAWTEXTEX, true))
+                    session.glowModule = ux;
+            }
         }
         // Даже без полученного MaskBlt-ref запись служит native-барьером:
         // process-wide IAT внешней сессии не авторизует этот paint.
@@ -665,9 +687,9 @@ namespace GlassCore::ToolbarControl
         EnableToolbarHooksForModule(hWnd, callerMod, true, session.vclIcons);
 
         DebugLog(DBG_NORMAL,
-            L"[GlassCore][Toolbar] Begin: callerMod=0x%p hWnd=0x%p depth=%zu vclIcons=%d maskModules=[0x%p,0x%p]",
+            L"[GlassCore][Toolbar] Begin: callerMod=0x%p hWnd=0x%p depth=%zu vclIcons=%d maskModules=[0x%p,0x%p] textModule=0x%p",
             callerMod, hWnd, g_modStack.size(), session.vclIcons ? 1 : 0,
-            session.iconModules[0], session.iconModules[1]);
+            session.iconModules[0], session.iconModules[1], session.textModule);
     }
 
     static void OnEndGlobal(HWND hWnd, HMODULE /*callerMod*/)
@@ -676,12 +698,16 @@ namespace GlassCore::ToolbarControl
         const PaintSession session = g_modStack.back();
         g_modStack.pop_back();
         EnableToolbarHooksForModule(hWnd, session.caller, false, session.vclIcons);
+        if (session.glowModule)
+            EnableHooksOnModule(session.glowModule, OHK_DRAWTEXTEX, false);
+        if (session.textModule)
+            EnableHooksOnModule(session.textModule, OHK_DRAWTHEMETEXT, false);
         for (size_t i = session.iconModules.size(); i > 0; --i)
             if (session.iconModules[i-1])
                 EnableHooksOnModule(session.iconModules[i-1], OHK_MASKBLT, false);
         if (g_modStack.empty())
             g_toolbarSuppressMaskBitBlt = false;
-        DebugLog(DBG_NORMAL, L"[GlassCore][Toolbar] End: hWnd=0x%p depth=%zu", hWnd, g_modStack.size());
+        DebugLog(DBG_NORMAL, L"[GlassCore][Toolbar] End: hWnd=0x%p depth=%zu text=%u", hWnd, g_modStack.size(), session.texts);
     }
 
     // =========================================================================

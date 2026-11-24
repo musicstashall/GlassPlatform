@@ -124,6 +124,9 @@
     <ClCompile Include="src\Hooks\delphi\TResVersionEditorDraw.cpp">
       <Filter>src\Hooks\delphi</Filter>
     </ClCompile>
+    <ClCompile Include="src\Hooks\delphi\THintWindowDraw.cpp">
+      <Filter>src\Hooks\delphi</Filter>
+    </ClCompile>
     <ClCompile Include="src\Hooks\delphi\TButtonGroupsDraw.cpp">
       <Filter>src\Hooks\delphi</Filter>
     </ClCompile>
@@ -394,6 +397,9 @@
       <Filter>Include\Hooks\delphi</Filter>
     </ClInclude>
     <ClInclude Include="Include\Hooks\delphi\TResVersionEditorDraw.h">
+      <Filter>Include\Hooks\delphi</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\delphi\THintWindowDraw.h">
       <Filter>Include\Hooks\delphi</Filter>
     </ClInclude>
     <ClInclude Include="Include\Hooks\delphi\TButtonGroupsDraw.h">

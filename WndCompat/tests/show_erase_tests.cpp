@@ -6,11 +6,9 @@
 namespace
 {
     namespace Erase = WndCompat::DelphiShowErase;
-    using SeTest::Log;
 
     void On(HWND w, UINT message, LPARAM lParam = 0) { Erase::OnRootMessage(w, message, lParam); }
     void On(HWND w, UINT message, const WINDOWPOS& pos) { On(w, message, reinterpret_cast<LPARAM>(&pos)); }
-    [[maybe_unused]] long long Number(const void* p) { return static_cast<long long>(reinterpret_cast<std::intptr_t>(p)); }
 
     // A world of its own for every scenario: nothing is armed, nothing is drawn.
     void Reset()
@@ -154,11 +152,7 @@ namespace
         SeTest::surface.clear();
         On(&root, WM_ERASEBKGND); On(&root, WM_NCPAINT);
         CHECK(SeTest::surface.empty() && SeTest::dcsTaken == 1 && SeTest::regionsMade == 3);
-#if defined(_DEBUG)
-        CHECK(SeTest::logs.size() == 1);
-#else
         CHECK(SeTest::logs.empty() && SeTest::pixelReads == 0);
-#endif
 
         // A window without a frame of its own is asked to erase first.
         Reset();
@@ -458,13 +452,11 @@ namespace
         // The fill itself fails: the clip is taken back all the same.
         build(); SeTest::failBlit = true; Show(root);
         CHECK(SeTest::surface.empty() && SeTest::blits == 1 && SeTest::selects == 2 && Released() && !Armed(&root));
-#if defined(_DEBUG)
-        CHECK(SeTest::logs.size() == 1 && SeTest::logs[0].numbers.back() == 0);
-#endif
     }
 
-    // What a Debug build writes, once for a show; a release build writes nothing.
-    void Line()
+    // The unit only clears: whatever it does or declines, no build of it
+    // writes a line or reads the surface.
+    void Quiet()
     {
         Reset();
         TestWindow root, valid, button, away;
@@ -474,55 +466,32 @@ namespace
         Child(away, root, root, RECT{70, 5, 80, 15});       // beside the client: visited, and that is all
         away.thread = 2;
         Pending(button);
-        SeTest::surface[{5, 12}] = 0x00000000;      // one sampled point already holds nothing
-        SeTest::surface[{15, 12}] = 0x01000000;     // ...and one holds nothing a colour is made of
+        const auto quiet = [] { return SeTest::logs.empty() && SeTest::pixelReads == 0; };
+        // Cleared: the form below the valid window, around the button's frame.
         WINDOWPOS pos = kShow; pos.flags |= SWP_FRAMECHANGED;
         On(&root, WM_WINDOWPOSCHANGING, pos);
         SeTest::clock += 7;
         On(&root, WM_NCPAINT);
-        CHECK(Matches(root) && Released());
-#if defined(_DEBUG)
-        CHECK(SeTest::logs.size() == 1);
-        const Log& log = SeTest::logs[0];
-        CHECK(log.format == L"[WndCompat][DelphiShowErase] root=0x%p flags=0x%04X waited=%u windows=%u kept=%u region=%d "
-                            L"box=[%ld,%ld,%ld,%ld] light=%u/%u at=[%ld,%ld]:0x%06X cleared=%d");
-        // Four windows, one of them kept: the valid one - the window of another thread that the form cuts away
-        // is not one that keeps a picture. The region is the form below the valid one, around the button's frame.
-        // The grid over [0,8,60,40] is 5,15,..,55 by 12,20,28,36: of its 24 points one, 45,20, is on the frame
-        // of the button and is not read; two of the others hold no colour, and the first that does is 25,12.
-        CHECK((log.numbers == std::vector<long long>{Number(&root), 0x61, 7, 4, 1, COMPLEXREGION, 0, 8, 60, 40, 21, 23, 25, 12, 0xf0e0d0, 1}));
-        CHECK(log.texts.empty() && SeTest::pixelReads == 23);
-        // Nothing pending yet: a line, and the window stays armed.
+        CHECK(Matches(root) && Released() && SeTest::blits == 1 && quiet());
+        // Nothing pending yet: the window stays armed.
         Reset();
         root.update.clear(); button.update.clear();
         Show(root);
-        CHECK(SeTest::logs.size() == 1 && Armed(&root));
-        CHECK((SeTest::logs[0].numbers == std::vector<long long>{Number(&root), 0x41, 0, 4, 3, NULLREGION, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}));
-        CHECK(SeTest::pixelReads == 0 && SeTest::dcsTaken == 0);
+        CHECK(Armed(&root) && SeTest::dcsTaken == 0 && quiet());
         // The walk failed.
         Reset();
         Pending(root); SeTest::failUpdate = &button;
         Show(root);
-        CHECK(SeTest::logs.size() == 1 && SeTest::logs[0].numbers[5] == ERROR && SeTest::logs[0].numbers.back() == 0);
-        // Why a shown window was passed over: 1 late, 2 mode, 3 no glass, 4 another surface or layout, 5 not VCL.
-        const auto skipped = [&](int reason, unsigned waited) {
-            return SeTest::logs.size() == 1
-                && SeTest::logs[0].format == L"[WndCompat][DelphiShowErase] root=0x%p flags=0x%04X waited=%u skip=%d"
-                && SeTest::logs[0].numbers == std::vector<long long>{Number(&root), 0x41, waited, reason};
-        };
-        Reset(); On(&root, WM_WINDOWPOSCHANGING, kShow); SeTest::clock += 1000; On(&root, WM_NCPAINT); CHECK(skipped(1, 1000));
-        Reset(); SeTest::mode = Shared::InjectionMode::PopupOnly; Show(root); CHECK(skipped(2, 0));
-        Reset(); root.backdrop = false; Show(root); CHECK(skipped(3, 0)); root.backdrop = true;
-        Reset(); root.ex = WS_EX_LAYERED; Show(root); CHECK(skipped(4, 0)); root.ex = 0;
-        Reset(); root.props.clear(); Show(root); CHECK(skipped(5, 0));
-        // The reasons in that order: the first that holds.
-        Reset(); root.backdrop = false; SeTest::mode = Shared::InjectionMode::PopupOnly;
-        On(&root, WM_WINDOWPOSCHANGING, kShow); SeTest::clock += 2000; On(&root, WM_NCPAINT); CHECK(skipped(1, 2000));
-        Reset(); root.backdrop = false; root.ex = WS_EX_LAYOUTRTL; Show(root); CHECK(skipped(3, 0));
-        Reset(); root.backdrop = true; Show(root); CHECK(skipped(4, 0));
-#else
-        CHECK(SeTest::logs.empty() && SeTest::pixelReads == 0);
-#endif
+        CHECK(Untouched() && !Armed(&root) && quiet());
+        // A shown window that is passed over: late, another mode, no glass,
+        // another surface or layout, not VCL.
+        const auto passed = [&] { return Untouched() && !Armed(&root) && SeTest::regionsMade == 0 && quiet(); };
+        Reset(); On(&root, WM_WINDOWPOSCHANGING, kShow); SeTest::clock += 1000; On(&root, WM_NCPAINT); CHECK(passed());
+        Reset(); SeTest::mode = Shared::InjectionMode::PopupOnly; Show(root); CHECK(passed());
+        Reset(); root.backdrop = false; Show(root); CHECK(passed()); root.backdrop = true;
+        Reset(); root.ex = WS_EX_LAYERED; Show(root); CHECK(passed());
+        Reset(); root.ex = WS_EX_LAYOUTRTL; Show(root); CHECK(passed()); root.ex = 0;
+        Reset(); root.props.clear(); Show(root); CHECK(passed());
     }
 
     // Layouts nobody thought of: windows of any place, frame, order and state,
@@ -587,7 +556,7 @@ int main(int argc, char** argv)
         else if (name == "others") Others();
         else if (name == "gates") Gates();
         else if (name == "failures") Failures();
-        else if (name == "line") Line();
+        else if (name == "quiet") Quiet();
         else if (name == "random") Random();
         else throw std::runtime_error("unknown case");
         std::cout << "PASS " << name << '\n';

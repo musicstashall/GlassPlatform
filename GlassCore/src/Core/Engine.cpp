@@ -25,6 +25,7 @@
 #include <Hooks/delphi/RestoratorImages.h>
 #include <Hooks/delphi/THexDumpDraw.h>
 #include <Hooks/delphi/TResVersionEditorDraw.h>
+#include <Hooks/delphi/THintWindowDraw.h>
 #include <Hooks/UpDown.h>
 #include <Hooks/forms/FormsHooks.h>
 #include <Subsystems/CtlColorProbe.h>
@@ -176,6 +177,7 @@ namespace GlassCore::Engine
         GlassCore::RestoratorImages::Startup();
         GlassCore::DelphiHexDump::Startup();
         GlassCore::DelphiResVersionEditor::Startup();
+        GlassCore::DelphiHint::Startup();
         GlassCore::UpDownControl::Startup();
         GlassCore::FormsHooks::Startup();
         GlassCore::Hooks::Immersive::Startup();
@@ -292,6 +294,7 @@ namespace GlassCore::Engine
         GlassCore::StatusBarControl::Shutdown();
         GlassCore::ProgressBarControl::Shutdown();
         GlassCore::DirectUI::Shutdown();
+        GlassCore::DelphiHint::Shutdown();
         GlassCore::DelphiResVersionEditor::Shutdown();
         GlassCore::DelphiHexDump::Shutdown();
         GlassCore::RestoratorImages::Shutdown();

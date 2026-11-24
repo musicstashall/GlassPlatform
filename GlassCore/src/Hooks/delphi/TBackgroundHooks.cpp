@@ -234,41 +234,6 @@ namespace GlassCore::DelphiBackground
             DeleteObject(tint);
             return drawn;
         }
-#if defined(_DEBUG)
-        // A fill of the EXE that reached a VCL window which is not in the table,
-        // outside that window's sessions: what a parent erased into the DC of its
-        // child, or the erase of a class that is not decided here. Reported only:
-        // nothing is drawn and nothing depends on it.
-        void ReportOther(HWND hwnd, HDC dc, const RECT* r, HBRUSH brush) noexcept
-        {
-            WCHAR cls[64]{};
-            if (!hwnd || !GlassCore::Root::IsFullInjectionMode()
-                || GetWindowThreadProcessId(hwnd, nullptr) != GetCurrentThreadId()
-                || !GetClassNameW(hwnd, cls, _countof(cls)) || cls[0] != L'T') return;
-            static thread_local ULONGLONG epoch = 0;
-            static thread_local unsigned budget = 0;
-            const ULONGLONG now = GetTickCount64();
-            if (!epoch || now - epoch >= 1000) { epoch = now; budget = 64; }
-            if (!budget) return;
-            --budget;
-            const RECT rect = r ? *r : RECT{};
-            RECT client{}, clip{};
-            GetClientRect(hwnd, &client);
-            const int clipKind = GetClipBox(dc, &clip);
-            POINT viewport{}, window{};
-            GetViewportOrgEx(dc, &viewport);
-            GetWindowOrgEx(dc, &window);
-            LOGBRUSH lb{};
-            const bool known = GetObjectW(brush, sizeof(lb), &lb) == sizeof(lb);
-            DebugLog(DBG_NORMAL, L"[GlassCore][DelphiBackground] erase-other hwnd=0x%p class=%s kind=%u dc=0x%p rect=[%ld,%ld,%ld,%ld] client=[%ld,%ld] clip=%d[%ld,%ld,%ld,%ld] org=[%ld,%ld,%ld,%ld] style=%d rgb=0x%06X",
-                hwnd, cls, static_cast<unsigned>(GlassShared::GlassGetWindowKind(hwnd)), dc,
-                rect.left, rect.top, rect.right, rect.bottom, client.right, client.bottom,
-                clipKind, clip.left, clip.top, clip.right, clip.bottom,
-                viewport.x, viewport.y, window.x, window.y,
-                known ? static_cast<int>(lb.lbStyle) : -1,
-                known ? static_cast<unsigned>(lb.lbColor & 0xFFFFFFu) : 0u);
-        }
-#endif
 
         // Windows erased the window on its own (see the header). The fill is
         // told apart by what it lacks: no session of this window is open on its
@@ -283,13 +248,7 @@ namespace GlassCore::DelphiBackground
             const HWND hwnd = WindowFromDC(dc);
             for (const Session& s : g_sessions) if (s.hwnd == hwnd) return 0;
             EraseTarget target{};
-            if (!IsEraseTarget(hwnd, target) || GetWindowThreadProcessId(hwnd, nullptr) != GetCurrentThreadId())
-            {
-#if defined(_DEBUG)
-                ReportOther(hwnd, dc, r, brush);
-#endif
-                return 0;
-            }
+            if (!IsEraseTarget(hwnd, target) || GetWindowThreadProcessId(hwnd, nullptr) != GetCurrentThreadId()) return 0;
             // A window DC (frame painting) has the same window behind it, but its
             // clip spans the frame. The DC of an erase never leaves the client.
             RECT clip{};

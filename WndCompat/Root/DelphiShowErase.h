@@ -1,6 +1,5 @@
 #pragma once
 #include <windows.h>
-#include <DebugLog.h>
 #include <GlassBackdropMark.h>
 #include <InjectionMode.h>
 #include <Tracker/WinEventHandler.h>
@@ -31,7 +30,6 @@ namespace WndCompat::DelphiShowErase
     {
         HWND root{};
         ULONGLONG armedAt{};
-        UINT flags{};               // of the WM_WINDOWPOSCHANGING that armed it
     };
     inline thread_local State t_state;
 
@@ -117,7 +115,7 @@ namespace WndCompat::DelphiShowErase
     }
 
     // False: nothing in the window is waiting for a paint yet.
-    [[nodiscard]] inline bool Clear(HWND root, [[maybe_unused]] const State& armed, [[maybe_unused]] ULONGLONG waited) noexcept
+    [[nodiscard]] inline bool Clear(HWND root) noexcept
     {
         RECT client{};
         if (!GetClientRect(root, &client) || IsRectEmpty(&client)) return true;
@@ -128,47 +126,20 @@ namespace WndCompat::DelphiShowErase
         Visit(walk, root, client, 0);
         RECT box{};
         const int kind = walk.failed ? ERROR : GetRgnBox(walk.rgn.total, &box);
-        [[maybe_unused]] BOOL cleared = FALSE;
-        [[maybe_unused]] unsigned light = 0, sampled = 0;
-        [[maybe_unused]] POINT lightAt{};
-        [[maybe_unused]] COLORREF lightColor = 0;
         if (kind > NULLREGION)
         {
             // A DC of the window itself that its children do not clip: they
             // draw into its surface.
             if (const HDC dc = GetDCEx(root, nullptr, DCX_CACHE))
             {
-#if defined(_DEBUG)
-                // What the surface held where it is about to be cleared.
-                for (int row = 0; row < 4; ++row)
-                {
-                    for (int column = 0; column < 6; ++column)
-                    {
-                        const POINT at{ box.left + (box.right - box.left) * (2 * column + 1) / 12,
-                            box.top + (box.bottom - box.top) * (2 * row + 1) / 8 };
-                        if (!PtInRegion(walk.rgn.total, at.x, at.y)) continue;
-                        const COLORREF color = GetPixel(dc, at.x, at.y);
-                        ++sampled;
-                        if (color == CLR_INVALID || !(color & 0xFFFFFFu)) continue;
-                        if (!light++) { lightAt = at; lightColor = color; }
-                    }
-                }
-#endif
                 if (SelectClipRgn(dc, walk.rgn.total) != ERROR)
                 {
-                    cleared = PatBlt(dc, box.left, box.top, box.right - box.left, box.bottom - box.top, BLACKNESS);
+                    PatBlt(dc, box.left, box.top, box.right - box.left, box.bottom - box.top, BLACKNESS);
                     SelectClipRgn(dc, nullptr);
                 }
                 ReleaseDC(root, dc);
             }
         }
-#if defined(_DEBUG)
-        DebugLog(DBG_NORMAL,
-            L"[WndCompat][DelphiShowErase] root=0x%p flags=0x%04X waited=%u windows=%u kept=%u region=%d box=[%ld,%ld,%ld,%ld] light=%u/%u at=[%ld,%ld]:0x%06X cleared=%d",
-            root, static_cast<unsigned>(armed.flags), static_cast<unsigned>(waited), walk.windows, walk.kept, kind,
-            box.left, box.top, box.right, box.bottom, light, sampled, lightAt.x, lightAt.y,
-            static_cast<unsigned>(lightColor & 0xFFFFFFu), cleared ? 1 : 0);
-#endif
         return kind != NULLREGION;
     }
 
@@ -186,33 +157,26 @@ namespace WndCompat::DelphiShowErase
                 || GetAncestor(hwnd, GA_ROOT) != hwnd) return;
             state.root = hwnd;
             state.armedAt = GetTickCount64();
-            state.flags = pos->flags;
             return;
         }
         case WM_NCPAINT:
         case WM_ERASEBKGND:
         {
             if (state.root != hwnd || !IsWindowVisible(hwnd) || IsIconic(hwnd)) return;
-            const ULONGLONG waited = GetTickCount64() - state.armedAt;
-            // 0: go on. Otherwise why not: too late to be the paint of that
-            // show, no glass here, a surface or a layout of another kind, not VCL.
-            const int skip = waited >= kArmedMs ? 1
-                : WndCompat::WinEventHook_GetMode() != Shared::InjectionMode::Full ? 2
-                : !GlassShared::GlassIsBackdropAllowedForHwnd(hwnd) ? 3
-                : (GetWindowLongW(hwnd, GWL_EXSTYLE) & (WS_EX_LAYERED | WS_EX_LAYOUTRTL)) ? 4
-                : !IsVclWindow(hwnd) ? 5 : 0;
-            if (skip)
+            // Too late to be the paint of that show, no glass here, a surface
+            // or a layout of another kind, not VCL: the window is passed over.
+            if (GetTickCount64() - state.armedAt >= kArmedMs
+                || WndCompat::WinEventHook_GetMode() != Shared::InjectionMode::Full
+                || !GlassShared::GlassIsBackdropAllowedForHwnd(hwnd)
+                || (GetWindowLongW(hwnd, GWL_EXSTYLE) & (WS_EX_LAYERED | WS_EX_LAYOUTRTL))
+                || !IsVclWindow(hwnd))
             {
-#if defined(_DEBUG)
-                DebugLog(DBG_NORMAL, L"[WndCompat][DelphiShowErase] root=0x%p flags=0x%04X waited=%u skip=%d",
-                    hwnd, static_cast<unsigned>(state.flags), static_cast<unsigned>(waited), skip);
-#endif
                 state = State{};
                 return;
             }
             // Once. A frame painted before anything was invalidated is not the
             // paint of that show: the window stays armed for it.
-            if (Clear(hwnd, state, waited)) state = State{};
+            if (Clear(hwnd)) state = State{};
             return;
         }
         case WM_NCDESTROY:

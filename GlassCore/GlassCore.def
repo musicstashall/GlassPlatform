@@ -13,6 +13,8 @@ EXPORTS
     GlassCore_EndDelphiListBoxProbe
     GlassCore_BeginDelphiPanelPaint
     GlassCore_EndDelphiPanelPaint
+    GlassCore_BeginDelphiHintPaint
+    GlassCore_EndDelphiHintPaint
     GlassCore_BeginExplorerShellChromeRestore
     GlassCore_ClearThemePaintPreview
     GlassCore_FinalizeRootActivationVisualUpdate

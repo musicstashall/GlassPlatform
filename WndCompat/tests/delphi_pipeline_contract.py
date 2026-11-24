@@ -3357,7 +3357,7 @@ class DelphiPipelineContract(unittest.TestCase):
         gates = ('if (GetObjectType(dc) != OBJ_DC) return 0;',
                  'const HWND hwnd = WindowFromDC(dc);',
                  'for (const Session& s : g_sessions) if (s.hwnd == hwnd) return 0;',
-                 'if (!IsEraseTarget(hwnd, target) || GetWindowThreadProcessId(hwnd, nullptr) != GetCurrentThreadId())',
+                 'if (!IsEraseTarget(hwnd, target) || GetWindowThreadProcessId(hwnd, nullptr) != GetCurrentThreadId()) return 0;',
                  'const int clipKind = GetClipBox(dc, &clip);',
                  'const bool whole = IsFullClient(hwnd, dc, r) && clipKind > NULLREGION',
                  '&& clip.left >= r->left && clip.top >= r->top && clip.right <= r->right && clip.bottom <= r->bottom;',
@@ -3381,11 +3381,11 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertIn('L"[GlassCore][DelphiBackground] erase-outside hwnd=0x%p class=%s dc=0x%p rect=[%ld,%ld,%ld,%ld] '
                       'client=[%ld,%ld] clip=%d[%ld,%ld,%ld,%ld] whole=%d style=%d rgb=0x%06X cleared=%d"', outside)
         self.assertIn('budget = 32', outside)
-        # Two Debug blocks: the report about a window that is not in the table, and this line.
-        self.assertEqual(outside.count('#if defined(_DEBUG)'), 2)
-        self.assertEqual(outside.count('#endif'), 2)
-        debug = outside.rsplit('#if defined(_DEBUG)', 1)[1].split('#endif', 1)[0]
-        self.assertLess(outside.index('cleared = Tint(dc, r, brush);'), outside.rindex('#if defined(_DEBUG)'))
+        # One Debug block, this line. A fill that reached a window which is not in the table is not reported.
+        self.assertEqual(outside.count('#if defined(_DEBUG)'), 1)
+        self.assertEqual(outside.count('#endif'), 1)
+        debug = outside.split('#if defined(_DEBUG)', 1)[1].split('#endif', 1)[0]
+        self.assertLess(outside.index('cleared = Tint(dc, r, brush);'), outside.index('#if defined(_DEBUG)'))
         # Nothing the release build decides on is computed there, and nothing is drawn or returned.
         for forbidden in ('PatBlt', 'return', 'whole =', 'cleared =', 'SetLastError', 'Tint('):
             self.assertNotIn(forbidden, debug)
@@ -3510,10 +3510,11 @@ class DelphiPipelineContract(unittest.TestCase):
         self.assertEqual(sorted({name for name in re.findall(r'\{L"(\w+)", GlassControlKind::\w+, (?:true|false)\}', test)
                                  if name != 'tedit'}), sorted(name for name, _, _ in rows))
 
-    def test_vcl_erase_keeps_a_memo_colour_as_the_tint_of_its_paint_and_reports_other_fills(self):
+    def test_vcl_erase_keeps_a_memo_colour_as_the_tint_of_its_paint_and_leaves_other_windows_alone(self):
         code = read('GlassCore/src/Hooks/delphi/TBackgroundHooks.cpp')
         self.assertIn('#include <WinApiUtils.h>', code)
-        tint = code.split('int Tint(HDC dc, const RECT* r, HBRUSH brush) noexcept', 1)[1].split('#if defined(_DEBUG)', 1)[0]
+        tint = code.split('int Tint(HDC dc, const RECT* r, HBRUSH brush) noexcept', 1)[1].split(
+            '        // Windows erased the window on its own (see the header).', 1)[0]
         # A solid brush only; the brush for the tint first, so that a failure leaves nothing drawn; the base,
         # then the colour; the brush does not outlive the call.
         order = ('if (!brush || GetObjectW(brush, sizeof(lb), &lb) != sizeof(lb) || lb.lbStyle != BS_SOLID) return 0;',
@@ -3566,27 +3567,12 @@ class DelphiPipelineContract(unittest.TestCase):
                        'Kind::Button', 'Kind::StatusBar', 'Kind::TrackBar'):
             self.assertNotIn(absent, code)
 
-        # The report about a fill that reached another VCL window: Debug only, and only a line.
-        self.assertEqual(code.count('ReportOther('), 2)
-        head, report = code.split('        void ReportOther(HWND hwnd, HDC dc, const RECT* r, HBRUSH brush) noexcept', 1)
-        self.assertNotIn('#endif', head.rsplit('#if defined(_DEBUG)', 1)[1])
-        report = report.split('#endif', 1)[0]
-        order = ('if (!hwnd || !GlassCore::Root::IsFullInjectionMode()',
-                 '|| GetWindowThreadProcessId(hwnd, nullptr) != GetCurrentThreadId()',
-                 "|| !GetClassNameW(hwnd, cls, _countof(cls)) || cls[0] != L'T') return;",
-                 'if (!epoch || now - epoch >= 1000) { epoch = now; budget = 64; }',
-                 'if (!budget) return;',
-                 'GetViewportOrgEx(dc, &viewport);',
-                 'GetWindowOrgEx(dc, &window);',
-                 'DebugLog(DBG_NORMAL, L"[GlassCore][DelphiBackground] erase-other hwnd=0x%p class=%s kind=%u dc=0x%p '
-                 'rect=[%ld,%ld,%ld,%ld] client=[%ld,%ld] clip=%d[%ld,%ld,%ld,%ld] org=[%ld,%ld,%ld,%ld] style=%d rgb=0x%06X",')
-        positions = [report.index(marker) for marker in order]
-        self.assertEqual(positions, sorted(positions))
-        for forbidden in ('PatBlt', 'FillRect(', 'orig(', 'Tint(', 'SendMessage', 'g_sessions', 'SetLastError', 'return 0',
-                          'return 1', 'return true', 'IsEraseTarget', 'Acquire'):
-            self.assertNotIn(forbidden, report)
-        self.assertIn('            {\n#if defined(_DEBUG)\n                ReportOther(hwnd, dc, r, brush);\n#endif\n                return 0;\n            }\n',
-                      outside)
+        # A fill that reached a VCL window which is not in the table stays the application's: nothing is
+        # drawn for it, nothing is written about it, and the window is not asked for its class.
+        for absent in ('ReportOther', 'erase-other', "cls[0] != L'T'"):
+            self.assertNotIn(absent, code)
+        self.assertEqual(outside.count('GetClassNameW('), 0)
+        self.assertEqual(code.count('GetClassNameW('), 3)
 
         # The suite: the shim's brush for a tint remembers its colour and alpha and has to be deleted; the two
         # new cases run in both configurations.
@@ -3597,124 +3583,17 @@ class DelphiPipelineContract(unittest.TestCase):
                        'return BgTest::failDirectFill ? 0 : 1;'):
             self.assertIn(marker, shim)
         test = read('WndCompat/tests/vcl_background_rendering_tests.cpp')
-        for case in ('own-colour', 'other-diagnostics'):
+        for case in ('own-colour', 'other-windows'):
             self.assertEqual(test.count('name == "%s"' % case), 1)
+        others = test.split('    void OtherWindows()\n', 1)[1].split('int main(int argc, char** argv)', 1)[0]
+        self.assertIn('CHECK(BgTest::logs.empty() && BgTest::classLookups == 0);', others)
+        self.assertNotIn('erase-other', test)
         self.assertIn('assert(BgTest::tints.empty() && BgTest::tintsMade == BgTest::tintsDeleted);', test)
         self.assertIn("'WinApiUtils.h'", read('WndCompat/tests/vcl_background_rendering_test.py'))
 
-    def test_restore_probe_is_debug_only_reads_the_surface_and_draws_nothing(self):
-        probe = read('WndCompat/Root/DelphiRestoreProbe.h')
-        self.assertEqual(probe.count('#if defined(_DEBUG)'), 1)
-        self.assertEqual(probe.count('#else'), 1)
-        body, release = probe.split('#if defined(_DEBUG)', 1)[1].split('#else', 1)
-        # A release build has the one function, and it does nothing.
-        self.assertEqual(release.strip(),
-                         '[[nodiscard]] inline bool OnRootMessage(HWND, UINT, WPARAM, LPARAM) noexcept { return false; }\n'
-                         '#endif\n}')
-        # It reads and writes lines. It draws nothing, sends nothing to a window, invalidates nothing, hooks
-        # nothing, and its DC is the top-level window's own without child clipping.
-        for forbidden in ('PatBlt', 'FillRect', 'BitBlt', 'SetPixel', 'SendMessage', 'InvalidateRect', 'RedrawWindow',
-                          'UpdateWindow', 'ValidateRect', 'BeginPaint', 'SetWindowsHookEx', 'SetWindowSubclass', 'ShowWindow',
-                          'SetWindowPos', 'GetWindowDC', 'DCX_CLIPCHILDREN', 'DCX_PARENTCLIP', 'DCX_USESTYLE', 'DefSubclassProc',
-                          'GetProcAddress', 'TRUE);'):
-            self.assertNotIn(forbidden, probe)
-        report = body.split('inline void Report(HWND root, const wchar_t* name)', 1)[1].split(
-            '[[nodiscard]] inline bool OnRootMessage(', 1)[0]
-        order = ('const HDC dc = GetDCEx(root, nullptr, DCX_CACHE);',
-                 'if (!dc) return;',
-                 'EnumChildWindows(root, ReportChild, reinterpret_cast<LPARAM>(&moment));',
-                 'ReleaseDC(root, dc);')
-        positions = [report.index(marker) for marker in order]
-        self.assertEqual(positions, sorted(positions))
-        child = body.split('inline BOOL CALLBACK ReportChild(HWND child, LPARAM lParam)', 1)[1].split(
-            'inline void Report(HWND root, const wchar_t* name)', 1)[0]
-        for marker in ('if (!IsWindowVisible(child)) return TRUE;',
-                       'MapWindowPoints(HWND_DESKTOP, moment->root, reinterpret_cast<POINT*>(&rc), 2);',
-                       'if (rc.right <= rc.left || rc.bottom <= rc.top) return TRUE;',
-                       'const COLORREF centre = GetPixel(moment->dc, (rc.left + rc.right) / 2, y);',
-                       'const COLORREF quarter = GetPixel(moment->dc, rc.left + width / 4, y);',
-                       'const COLORREF corner = GetPixel(moment->dc, rc.left + (width > 8 ? 4 : width / 2),\n'
-                       '            rc.top + (height > 8 ? 4 : height / 2));',
-                       'const BOOL pending = GetUpdateRect(child, &update, FALSE);',
-                       'L"[WndCompat][DelphiRestore] %s hwnd=0x%p class=%s parent=0x%p pclass=%s kind=%u style=0x%08X '
-                       'rect=[%ld,%ld,%ld,%ld] px=0x%08X/0x%08X/0x%08X pending=%d",'):
-            self.assertIn(marker, child)
-        self.assertEqual(child.count('GetPixel('), 3)
-        # The header names what it uses: it does not lean on the precompiled header of the unit.
-        self.assertTrue(probe.startswith('#pragma once\n#include <windows.h>\n#include <DebugLog.h>\n'
-                                         '#include <GlassControlKind.h>\n'))
-        self.assertIn('L"[WndCompat][DelphiRestore] %s root=0x%p class=%s visible=%d iconic=%d foreground=%d",', report)
-        # Three moments: armed when a VCL top-level window is being shown or leaves the taskbar; the first on
-        # its frame or erase, the second through the queue, the third on a timer. Only the last two messages
-        # are the probe's own.
-        handler = body.split('[[nodiscard]] inline bool OnRootMessage(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)', 1)[1]
-        order = ('case WM_WINDOWPOSCHANGING:',
-                 'if (!pos || (!(pos->flags & SWP_SHOWWINDOW) && !IsIconic(hwnd))) return false;',
-                 'if (GetAncestor(hwnd, GA_ROOT) != hwnd) return false;',
-                 "|| cls[0] != L'T') return false;",
-                 'if (state.startedAt && GetTickCount64() - state.startedAt < kQuietMs) return false;',
-                 'case WM_NCPAINT:',
-                 'case WM_ERASEBKGND:',
-                 'if (state.stage != Stage::Armed || state.root != hwnd || !IsWindowVisible(hwnd) || IsIconic(hwnd))',
-                 'Report(hwnd, L"shown");',
-                 'if (!PostMessageW(hwnd, WM_NULL, kPostedWParam, kPostedLParam)) state.stage = Stage::Idle;',
-                 'case WM_NULL:',
-                 'Report(hwnd, L"erased");',
-                 'if (!SetTimer(hwnd, kTimerId, kPaintedAfterMs, nullptr)) state.stage = Stage::Idle;',
-                 'case WM_TIMER:',
-                 'KillTimer(hwnd, kTimerId);',
-                 'Report(hwnd, L"painted");',
-                 'case WM_NCDESTROY:')
-        positions = [handler.index(marker) for marker in order]
-        self.assertEqual(positions, sorted(positions))
-        self.assertEqual(handler.count('return true;'), 2)
-        self.assertEqual(body.count('Report(hwnd, L"'), 3)
-        self.assertIn('inline constexpr unsigned kLinesPerMoment = 200;', body)
-        self.assertIn('inline constexpr ULONGLONG kQuietMs = 3000;', body)
-
-        # One call, in Debug only, on the Full-mode path after the shutdown gate and before any handler of
-        # the root: the messages it watches are passed on unchanged.
-        root = read('WndCompat/Root/RootSubclass.cpp')
-        self.assertEqual(root.count('#include "Root/DelphiRestoreProbe.h"'), 1)
-        self.assertEqual(root.count('DelphiRestoreProbe::'), 1)
-        self.assertIn('#if defined(_DEBUG)\n'
-                      '        // Только Debug: что лежит на поверхности VCL-формы под каждым её контролом\n'
-                      '        // сразу после показа/разворачивания, после системного стирания и после\n'
-                      '        // перерисовки. Ничего не рисует; своё сообщение и свой таймер дальше не идут.\n'
-                      '        if (WndCompat::DelphiRestoreProbe::OnRootMessage(hWnd, uMsg, wParam, lParam))\n'
-                      '            return 0;\n'
-                      '#endif\n', root)
-        shared = root.split('LRESULT CALLBACK RootSubclassProcShared(', 1)[1]
-        self.assertLess(shared.index('if (WndCompat::IsShuttingDown())'), shared.index('DelphiRestoreProbe::OnRootMessage('))
-        self.assertLess(shared.index('DelphiRestoreProbe::OnRootMessage('), shared.index('WndCompat::TryHandleDelphiPanelPaint('))
-        for project in ('WndCompat/WndCompat.vcxproj', 'WndCompat/WndCompat.vcxproj.filters'):
-            text = read(project)
-            self.assertEqual(text.count(r'Root\DelphiRestoreProbe.h'), 1)
-            ET.fromstring(text.encode('utf-8'))
-
-        # The suite compiles the header itself in both configurations.
-        test = read('WndCompat/tests/restore_probe_tests.cpp')
-        self.assertTrue(test.startswith('#include "restore_probe_test_shim.h"\n#include "../Root/DelphiRestoreProbe.h"\n\n'
-                                        '#define CHECK(expr)'))
-        self.assertEqual(test.count('#include "'), 2)
-        shim = read('WndCompat/tests/restore_probe_test_shim.h')
-        self.assertEqual(shim.count('#include "'), 0)
-        for marker in ('if (dc->flags != DCX_CACHE || !PrbTest::surface) return CLR_INVALID;',
-                       'if (erase) ++PrbTest::updateErases;',
-                       'assert(!proc);'):
-            self.assertIn(marker, shim)
-        runner = read('WndCompat/tests/restore_probe_test.py')
-        for marker in ("'Release'", "'Debug'", "'-D_DEBUG'", "'-Werror'", "'-std=c++20'"):
-            self.assertIn(marker, runner)
-        for forbidden in ('read_text', 'source.split(', 'code.split(', '-Wno-error'):
-            self.assertNotIn(forbidden, runner)
-        cases = sorted(set(re.findall(r'name == "([a-z-]+)"', test)))
-        self.assertEqual(cases, ['absent', 'children', 'gates', 'limits', 'restore', 'sequence'])
-        self.assertEqual(cases, sorted(re.findall(r"self\.run_case\('([a-z-]+)'\)", runner)))
-
     def test_shown_vcl_window_is_cleared_once_where_its_controls_wait_for_a_paint(self):
         unit = read('WndCompat/Root/DelphiShowErase.h')
-        self.assertTrue(unit.startswith('#pragma once\n#include <windows.h>\n#include <DebugLog.h>\n#include <GlassBackdropMark.h>\n'
+        self.assertTrue(unit.startswith('#pragma once\n#include <windows.h>\n#include <GlassBackdropMark.h>\n'
                                         '#include <InjectionMode.h>\n#include <Tracker/WinEventHandler.h>\n\n'))
         # It lays the transparent base and does nothing else to a window: no message, no invalidation, no
         # validation, no hook, no subclass. One fill, through one DC of the top-level window itself that its
@@ -3727,8 +3606,8 @@ class DelphiPipelineContract(unittest.TestCase):
             self.assertNotIn(forbidden, unit)
         self.assertEqual(unit.count('PatBlt('), 1)
         self.assertEqual(unit.count('GetDCEx('), 1)
-        clear = unit.split('[[nodiscard]] inline bool Clear(HWND root, [[maybe_unused]] const State& armed, '
-                           '[[maybe_unused]] ULONGLONG waited) noexcept', 1)[1].split('    // Watches the messages', 1)[0]
+        clear = unit.split('[[nodiscard]] inline bool Clear(HWND root) noexcept', 1)[1].split(
+            '    // Watches the messages', 1)[0]
         order = ('if (!GetClientRect(root, &client) || IsRectEmpty(&client)) return true;',
                  'if (!walk.rgn.Valid()) return true;',
                  'Visit(walk, root, client, 0);',
@@ -3736,7 +3615,7 @@ class DelphiPipelineContract(unittest.TestCase):
                  'if (kind > NULLREGION)',
                  'if (const HDC dc = GetDCEx(root, nullptr, DCX_CACHE))',
                  'if (SelectClipRgn(dc, walk.rgn.total) != ERROR)',
-                 'cleared = PatBlt(dc, box.left, box.top, box.right - box.left, box.bottom - box.top, BLACKNESS);',
+                 'PatBlt(dc, box.left, box.top, box.right - box.left, box.bottom - box.top, BLACKNESS);',
                  'SelectClipRgn(dc, nullptr);',
                  'ReleaseDC(root, dc);',
                  'return kind != NULLREGION;')
@@ -3792,12 +3671,12 @@ class DelphiPipelineContract(unittest.TestCase):
                  'case WM_NCPAINT:',
                  'case WM_ERASEBKGND:',
                  'if (state.root != hwnd || !IsWindowVisible(hwnd) || IsIconic(hwnd)) return;',
-                 'const int skip = waited >= kArmedMs ? 1',
-                 ': WndCompat::WinEventHook_GetMode() != Shared::InjectionMode::Full ? 2',
-                 ': !GlassShared::GlassIsBackdropAllowedForHwnd(hwnd) ? 3',
-                 ': (GetWindowLongW(hwnd, GWL_EXSTYLE) & (WS_EX_LAYERED | WS_EX_LAYOUTRTL)) ? 4',
-                 ': !IsVclWindow(hwnd) ? 5 : 0;',
-                 'if (Clear(hwnd, state, waited)) state = State{};',
+                 'if (GetTickCount64() - state.armedAt >= kArmedMs',
+                 '|| WndCompat::WinEventHook_GetMode() != Shared::InjectionMode::Full',
+                 '|| !GlassShared::GlassIsBackdropAllowedForHwnd(hwnd)',
+                 '|| (GetWindowLongW(hwnd, GWL_EXSTYLE) & (WS_EX_LAYERED | WS_EX_LAYOUTRTL))',
+                 '|| !IsVclWindow(hwnd))',
+                 'if (Clear(hwnd)) state = State{};',
                  'case WM_NCDESTROY:',
                  'if (state.root == hwnd) state = State{};')
         positions = [handler.index(marker) for marker in order]
@@ -3810,30 +3689,30 @@ class DelphiPipelineContract(unittest.TestCase):
                        'return GetPropW(hwnd, name) != nullptr;'):
             self.assertIn(marker, vcl)
 
-        # A release build neither reads the surface nor writes a line.
-        self.assertEqual(unit.count('#if defined(_DEBUG)'), 3)
-        self.assertEqual(unit.count('#endif'), 3)
-        outside = re.sub(r'#if defined\(_DEBUG\).*?#endif', '', unit, flags=re.S)
-        for debug_only in ('DebugLog(', 'GetPixel(', 'PtInRegion('):
-            self.assertIn(debug_only, unit)
-            self.assertNotIn(debug_only, outside)
-        self.assertEqual(unit.count('DebugLog('), 2)
+        # No build of it reads the surface or writes a line, and it has no Debug-only part.
+        for absent in ('_DEBUG', 'DebugLog', 'GetPixel', 'PtInRegion', 'maybe_unused', 'flags{}', 'waited', 'skip'):
+            self.assertNotIn(absent, unit)
 
-        # One call on the Full-mode path of the root subclass, after the shutdown gate, before the Debug
-        # probe (which then reads what was cleared) and before any handler of the root.
+        # One call on the Full-mode path of the root subclass, after the shutdown gate and before any
+        # handler of the root. The probe that read the surface around it is gone with its files.
         root = read('WndCompat/Root/RootSubclass.cpp')
         self.assertEqual(root.count('#include "Root/DelphiShowErase.h"'), 1)
         self.assertEqual(root.count('DelphiShowErase::'), 1)
-        self.assertIn('        WndCompat::DelphiShowErase::OnRootMessage(hWnd, uMsg, lParam);\n\n#if defined(_DEBUG)\n', root)
+        self.assertIn('        WndCompat::DelphiShowErase::OnRootMessage(hWnd, uMsg, lParam);\n\n'
+                      '        // VCL-панелям нужен исходный Brush.Color', root)
         shared = root.split('LRESULT CALLBACK RootSubclassProcShared(', 1)[1]
         positions = [shared.index(marker) for marker in (
-            'if (WndCompat::IsShuttingDown())', 'DelphiShowErase::OnRootMessage(', 'DelphiRestoreProbe::OnRootMessage(',
-            'WndCompat::TryHandleDelphiPanelPaint(')]
+            'if (WndCompat::IsShuttingDown())', 'DelphiShowErase::OnRootMessage(', 'WndCompat::TryHandleDelphiPanelPaint(')]
         self.assertEqual(positions, sorted(positions))
+        self.assertNotIn('DelphiRestoreProbe', root)
         for project in ('WndCompat/WndCompat.vcxproj', 'WndCompat/WndCompat.vcxproj.filters'):
             text = read(project)
             self.assertEqual(text.count(r'Root\DelphiShowErase.h'), 1)
+            self.assertNotIn('DelphiRestoreProbe', text)
             ET.fromstring(text.encode('utf-8'))
+        for gone in ('WndCompat/Root/DelphiRestoreProbe.h', 'WndCompat/tests/restore_probe_test.py',
+                     'WndCompat/tests/restore_probe_tests.cpp', 'WndCompat/tests/restore_probe_test_shim.h'):
+            self.assertFalse((ROOT / gone).exists(), gone)
 
         # The suite compiles the header itself in both configurations, without the type-based assumptions
         # MSVC does not make, and compares generated layouts with a description of its own.
@@ -3858,7 +3737,404 @@ class DelphiPipelineContract(unittest.TestCase):
         for forbidden in ('read_text', 'source.split(', 'code.split(', '-Wno-error'):
             self.assertNotIn(forbidden, runner)
         cases = sorted(set(re.findall(r'name == "([a-z-]+)"', test)))
-        self.assertEqual(cases, ['failures', 'gates', 'kept', 'line', 'others', 'random', 'restored'])
+        self.assertEqual(cases, ['failures', 'gates', 'kept', 'others', 'quiet', 'random', 'restored'])
+        quiet = test.split('    void Quiet()\n', 1)[1].split('    // Layouts nobody thought of', 1)[0]
+        self.assertIn('const auto quiet = [] { return SeTest::logs.empty() && SeTest::pixelReads == 0; };', quiet)
+        self.assertEqual(test.count('#if defined(_DEBUG)'), 0)
+        self.assertEqual(cases, sorted(re.findall(r"self\.run_case\('([a-z-]+)'\)", runner)))
+
+    def test_ttoolbar_captions_on_the_exe_route_take_the_comctl_text_hook_by_name(self):
+        code = read('GlassCore/src/Hooks/ToolbarHooks.cpp')
+        session = code.split('    struct PaintSession\n', 1)[1].split('    thread_local std::vector<PaintSession> g_modStack;', 1)[0]
+        for marker in ('std::array<HMODULE, 2> iconModules{};', 'HMODULE textModule{};', 'HMODULE glowModule{};',
+                       'unsigned texts{};'):
+            self.assertIn(marker, session)
+        # Inside the block of a VCL toolbar the session serves, after the icons and before the session is
+        # recorded: only when the EXE began the paint, only comctl32 v6, the glow only together with the text.
+        begin = code.split('static void OnBeginGlobal(', 1)[1].split('static void OnEndGlobal(', 1)[0]
+        vcl = begin.split('if (session.vclIcons && IsVclToolbarIconSession(hWnd, callerMod))', 1)[1].split(
+            'g_modStack.push_back(session);', 1)[0]
+        order = ('EnableHooksOnModule(modules[i], OHK_MASKBLT, true))',
+                 'if (callerMod == GlassCore::ModuleHandler::g_entryPointModule && modules[0]',
+                 '&& EnableHooksOnModule(modules[0], OHK_DRAWTHEMETEXT, true))',
+                 'session.textModule = modules[0];',
+                 'HMODULE const ux = GetModuleHandleW(L"uxtheme.dll");',
+                 'if (ux && GlassCore::Text::IsInkGlowEffectActiveForPaintSession(hWnd)',
+                 '&& EnableHooksOnModule(ux, OHK_DRAWTEXTEX, true))',
+                 'session.glowModule = ux;')
+        positions = [vcl.index(marker) for marker in order]
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(begin.count('OHK_DRAWTHEMETEXT, true)'), 1)
+        self.assertEqual(begin.count('OHK_DRAWTEXTEX, true)'), 1)
+        self.assertEqual(begin.count('session.textModule ='), 1)
+        self.assertEqual(begin.count('session.glowModule ='), 1)
+        # The other text slot of this file stays as it was: taken by nobody.
+        self.assertEqual(code.count('OHK_DRAWTHEMETEXTEX'), 3)
+        self.assertNotIn('OHK_DRAWTHEMETEXTEX, ', code.split('//  EnableToolbarHooksForModule', 1)[1])
+        # The comctl32 route is what it was: by its caller, and it knows nothing of the EXE.
+        enable = code.split('static void EnableToolbarHooksForModule(', 1)[1].split(
+            '//  PaintDispatcher provider callbacks', 1)[0]
+        for marker in ('if (callerMod == g_new)', 'EnableHooksOnModule(callerMod, OHK_DRAWTHEMETEXT, enable);',
+                       'EnableHooksOnModule(hUx, OHK_DRAWTEXTEX, enable);'):
+            self.assertIn(marker, enable)
+        self.assertNotIn('g_entryPointModule', enable)
+        # The end gives back the snapshot, in the reverse order, and asks the process nothing again.
+        end = code.split('static void OnEndGlobal(', 1)[1].split('//  Lifecycle', 1)[0]
+        order = ('EnableToolbarHooksForModule(hWnd, session.caller, false, session.vclIcons);',
+                 'if (session.glowModule)',
+                 'EnableHooksOnModule(session.glowModule, OHK_DRAWTEXTEX, false);',
+                 'if (session.textModule)',
+                 'EnableHooksOnModule(session.textModule, OHK_DRAWTHEMETEXT, false);',
+                 'EnableHooksOnModule(session.iconModules[i-1], OHK_MASKBLT, false);')
+        positions = [end.index(marker) for marker in order]
+        self.assertEqual(positions, sorted(positions))
+        for forbidden in ('GetModuleHandleW', 'IsInkGlow', 'g_comctl32', 'g_entryPointModule'):
+            self.assertNotIn(forbidden, end)
+        # The caption is drawn by the body the comctl32 route always had; it only counts what it drew.
+        text = code.split('HRESULT WINAPI Overall_MyDrawThemeText(\n', 1)[1].split('// ── DrawTextExW', 1)[0]
+        order = ('if (!orig)', 'if (g_modStack.empty())', 'if (!IsToolbarGlassSessionAllowedForHdc(hdc))', 'if (!pRect)',
+                 'if (dwTextFlags & DT_CALCRECT)', 'EnsureToolbarTextColorOnDc(hdc);',
+                 'const HRESULT hrAlpha = GlassCore::Text::DrawTextWithAlpha(',
+                 'if (!FAILED(hrAlpha))', '++g_modStack.back().texts;', 'return S_OK;',
+                 'return orig(hTheme, hdc, iPartId, iStateId, pszText, cchText, dwTextFlags, dwTextFlags2, pRect);')
+        positions = [text.rindex(marker) if marker.startswith('return orig(') else text.index(marker) for marker in order]
+        self.assertEqual(positions, sorted(positions))
+        self.assertNotIn('vclIcons', text)
+        self.assertEqual(code.count('.texts'), 2)
+        # The two lines the session always wrote say what was taken and how many captions were drawn.
+        self.assertIn('L"[GlassCore][Toolbar] Begin: callerMod=0x%p hWnd=0x%p depth=%zu vclIcons=%d '
+                      'maskModules=[0x%p,0x%p] textModule=0x%p",', code)
+        self.assertIn('L"[GlassCore][Toolbar] End: hWnd=0x%p depth=%zu text=%u", hWnd, g_modStack.size(), session.texts);', code)
+        self.assertEqual(code.count('DebugLog('), 4)
+
+        test = read('WndCompat/tests/vcl_images_rendering_tests.cpp')
+        runner = read('WndCompat/tests/vcl_images_rendering_test.py')
+        cases = re.findall(r'name=="([a-z-]+)"', test)
+        self.assertEqual(len(cases), 15)
+        self.assertEqual(sorted(cases), sorted(re.findall(r"self\.run_case\('([a-z-]+)'\)", runner)))
+        self.assertIn('toolbar-captions', cases)
+        captions = test.split('    void ToolbarCaptionsOnTheExeRoute()\n', 1)[1].split('    void PanelNativeImageAndMirroring()\n', 1)[0]
+        for marker in ('Overall_MyDrawThemeText(nullptr,&f.dc,1,1,L"Open",4,flags,0,where?where:&rect);',
+                       'f.BeginToolbar(&f.exe);', 'f.BeginToolbar(&f.modern);', 'f.BeginToolbar(&f.legacy);',
+                       'g_modStack.back().textModule==&f.modern', 'g_modStack.back().glowModule==&ux',
+                       'ImageTest::registrationFailures[&f.modern].insert("DrawThemeText");',
+                       'std::thread otherThread('):
+            self.assertIn(marker, captions)
+        self.assertIn('ImageTest::textDc = dc; ImageTest::textString.assign(text, n > 0 ? n : 0);',
+                      read('WndCompat/tests/vcl_images_test_shim.h'))
+
+    def test_vcl_hint_window_is_erased_framed_and_captioned_through_the_exe_imports(self):
+        code = read('GlassCore/src/Hooks/delphi/THintWindowDraw.cpp')
+        header = read('GlassCore/Include/Hooks/delphi/THintWindowDraw.h')
+        bare = re.sub(r'//[^\n]*', '', code)
+        for declaration in ('void Startup() noexcept;', 'void Shutdown() noexcept;', 'void OnAttached(HWND hwnd) noexcept;',
+                            '[[nodiscard]] bool BeginPaint(HWND hwnd, UINT message, HDC dc) noexcept;',
+                            'void EndPaint() noexcept;'):
+            self.assertEqual(header.count(declaration), 1)
+        self.assertIn('namespace GlassCore::DelphiHint\n', header)
+        # Four imports of the EXE, wide and ANSI: the caption and the answer about the animation.
+        self.assertIn('enum : size_t { TextW, TextA, ParamW, ParamA, Count };', code)
+        table = code.split('const HookDispatcherDependency<Count, 3> g_dep{{', 1)[1].split('        }};', 1)[0]
+        self.assertEqual(re.findall(r'"(\w+)", reinterpret_cast<void\*>\((\w+)\)', table),
+                         [('DrawTextW', 'HintDrawTextW'), ('DrawTextA', 'HintDrawTextA'),
+                          ('SystemParametersInfoW', 'HintParametersW'), ('SystemParametersInfoA', 'HintParametersA')])
+        self.assertIn('HookDispatcher<Count, 3> g_dispatcher{g_dep, nullptr};', code)
+        # It hooks nothing else and is nobody's provider: no subclass, no detour, no dispatcher session, no
+        # window is shown, invalidated or sent a message, and no fill of the application is touched.
+        for forbidden in ('SetWindowSubclass', 'Detours::', 'PaintDispatcher', 'RegisterPaintProvider', 'InvalidateRect',
+                          'RedrawWindow', 'SendMessage', 'PostMessage', 'ShowWindow', 'AnimateWindow', 'SetWindowPos',
+                          'FillRect', 'GetDC(', 'GetDCEx', 'DrawThemeBackground', 'GetSysColor', 'SetSysColors',
+                          'GlassGetWindowKind', 'IsFullInjectionMode', 'wcsstr', 'wcsncmp', '_wcsnicmp'):
+            self.assertNotIn(forbidden, bare)
+        self.assertEqual(bare.count('L"T'), 1)
+
+        hint = code.split('bool IsHint(HWND hwnd) noexcept', 1)[1].split('bool Arm() noexcept', 1)[0]
+        order = ('const HMODULE exe = GlassCore::ModuleHandler::g_entryPointModule;',
+                 'return exe && hwnd && GetWindowThreadProcessId(hwnd, nullptr) == GetCurrentThreadId()',
+                 '&& GetClassNameW(hwnd, name, static_cast<int>(_countof(name)))',
+                 '&& _wcsicmp(name, L"THintWindow") == 0',
+                 '&& reinterpret_cast<HMODULE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)) == exe',
+                 '&& !(GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_LAYOUTRTL);')
+        positions = [hint.index(marker) for marker in order]
+        self.assertEqual(positions, sorted(positions))
+
+        # Once, under the lock; a reference counts only when the dispatcher took it; the answer about the
+        # animation is taken only together with a DrawText.
+        arm = code.split('bool Arm() noexcept', 1)[1].split('bool Served(HWND hwnd) noexcept', 1)[0]
+        order = ('if (g_armed.load(std::memory_order_acquire)) return g_text.load(std::memory_order_acquire);',
+                 'auto lock = g_lock.lock_exclusive();',
+                 'if (g_shutdown.load(std::memory_order_acquire) || !exe) return false;',
+                 'if (!g_armed.load(std::memory_order_acquire))',
+                 'g_dispatcher.moduleAddress = exe;',
+                 'const int before = g_dispatcher.GetRef(slot);',
+                 'g_dispatcher.EnableHook(slot, true);',
+                 'return g_dispatcher.GetRef(slot) > before;',
+                 'const bool wide = take(TextW), ansi = take(TextA);',
+                 'const bool text = wide || ansi;',
+                 'if (text)',
+                 'const bool wideParameters = take(ParamW), ansiParameters = take(ParamA);',
+                 'g_text.store(text, std::memory_order_release);',
+                 'g_armed.store(true, std::memory_order_release);',
+                 'return g_text.load(std::memory_order_acquire);')
+        positions = [arm.index(marker) if marker != order[-1] else arm.rindex(marker) for marker in order]
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(code.count('EnableHook('), 1)
+        served = code.split('bool Served(HWND hwnd) noexcept', 1)[1].split('bool DeviceUnits(HDC dc) noexcept', 1)[0]
+        self.assertIn('return !g_shutdown.load(std::memory_order_acquire) && IsHint(hwnd)\n'
+                      '                && !GlassCore::Settings::IsTooltipCustomizationDisabled() && Arm();', served)
+
+        # The erase: only a DC of this window, in device units, the whole client, one fill.
+        erase = code.split('bool ClearClient(HWND hwnd, HDC dc) noexcept', 1)[1].split('bool ClearFrame(HWND hwnd) noexcept', 1)[0]
+        self.assertIn('return OwnDc(hwnd, dc) && DeviceUnits(dc) && GetClientRect(hwnd, &client) && !IsRectEmpty(&client)\n'
+                      '                && PatBlt(dc, client.left, client.top, client.right - client.left, '
+                      'client.bottom - client.top, BLACKNESS);', erase)
+        self.assertIn('return dc && GetObjectType(dc) == OBJ_DC && WindowFromDC(dc) == hwnd;', code)
+        self.assertIn('return GetMapMode(dc) == MM_TEXT && GetViewportOrgEx(dc, &viewport) && GetWindowOrgEx(dc, &window)\n'
+                      '                && !viewport.x && !viewport.y && !window.x && !window.y;', code)
+        # The frame: a window DC taken and given back as it was, the client excluded, one fill.
+        frame = code.split('bool ClearFrame(HWND hwnd) noexcept', 1)[1].split('int Target(HDC dc) noexcept', 1)[0]
+        order = ('if (!GetWindowRect(hwnd, &window) || !GetClientRect(hwnd, &client) || !ClientToScreen(hwnd, &origin))',
+                 'const int width = window.right - window.left, height = window.bottom - window.top;',
+                 'const int left = origin.x - window.left, top = origin.y - window.top;',
+                 'if (width <= 0 || height <= 0) return false;',
+                 'const HDC dc = GetWindowDC(hwnd);',
+                 'if (!dc) return false;',
+                 'if (const int saved = SaveDC(dc))',
+                 'cleared = ExcludeClipRect(dc, left, top, left + client.right, top + client.bottom) != ERROR',
+                 '&& PatBlt(dc, 0, 0, width, height, BLACKNESS);',
+                 'RestoreDC(dc, saved);',
+                 'ReleaseDC(hwnd, dc);',
+                 'return cleared;')
+        positions = [frame.index(marker) for marker in order]
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(bare.count('GetWindowDC('), 1)
+        self.assertEqual(bare.count('ReleaseDC('), 1)
+        self.assertEqual(bare.count('PatBlt('), 3)
+
+        # The caption: the paint session on top, the window's own DC; whatever is not a caption is one native
+        # call with the caller's arguments; the client is cleared once per paint, under the caption; the DC,
+        # the caller's rectangle and its last error are as they were.
+        target = code.split('int Target(HDC dc) noexcept', 1)[1].split('bool Decode(', 1)[0]
+        for marker in ('if (g_inside || g_sessions.empty() || g_shutdown.load(std::memory_order_acquire)) return -1;',
+                       'if (top.message != WM_PAINT || !OwnDc(top.hwnd, dc)) return -1;',
+                       'return static_cast<int>(g_sessions.size() - 1);'):
+            self.assertIn(marker, target)
+        caption = code.split('int DrawCaption(size_t slot, HDC dc, LPCWSTR text, int count, const RECT* rect, UINT flags,', 1)[1].split(
+            'int WINAPI HintDrawTextW(HDC dc, LPCWSTR text, int count, LPRECT rect, UINT flags)\n        {', 1)[0]
+        order = ('if (!text || !rect || count == 0 || count < -1 || (flags & (DT_CALCRECT | DT_MODIFYSTRING))',
+                 '|| rect->right <= rect->left || rect->bottom <= rect->top || !DeviceUnits(dc)',
+                 '|| !GetClientRect(hwnd, &client) || IsRectEmpty(&client))',
+                 'const int saved = SaveDC(dc);',
+                 'if (!saved) return native();',
+                 'g_inside = true;',
+                 'auto leave = wil::scope_exit([]() noexcept { g_inside = false; });',
+                 'auto restore = wil::scope_exit([&]() noexcept { RestoreDC(dc, saved); });',
+                 'if (!g_sessions[slot].cleared)',
+                 'g_sessions[slot].cleared = PatBlt(dc, client.left, client.top,',
+                 'SetBkMode(dc, TRANSPARENT);',
+                 'SetTextColor(dc, GlassCore::Tooltip::Detail::Context().rendering.color);',
+                 'RECT where = *rect;',
+                 'drawn = SUCCEEDED(GlassCore::Text::DrawTextWithAlpha(dc, text, count, &where,',
+                 'flags & ~static_cast<UINT>(DT_NOCLIP), result));',
+                 'catch (...) { drawn = false; }',
+                 'if (!drawn) return native();',
+                 'if (slot < g_sessions.size()) ++g_sessions[slot].texts;',
+                 'SetLastError(entryError);',
+                 'return result;')
+        positions = [caption.index(marker) for marker in order]
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(bare.count('DrawTextWithAlpha('), 1)
+        for hook, api in (('HintDrawTextW', 'DrawTextW'), ('HintDrawTextA', 'DrawTextA')):
+            body = code.split('int WINAPI %s(HDC dc, ' % hook, 1)[1].split('        }\n', 1)[0]
+            for marker in ('const DWORD entryError = GetLastError();',
+                           'SetLastError(entryError);',
+                           'return original ? original(dc, text, count, rect, flags) : ::%s(dc, text, count, rect, flags);' % api,
+                           'const int slot = Target(dc);'):
+                self.assertIn(marker, body)
+        ansi = code.split('int WINAPI HintDrawTextA(HDC dc, ', 1)[1].split('        // The answer about the animation', 1)[0]
+        order = ('if (slot < 0 || !text || count == 0 || count < -1) return native();',
+                 'try { decoded = Decode(dc, text, count, wide); }',
+                 'catch (...) { decoded = false; }',
+                 'if (!decoded) return native();',
+                 'return DrawCaption(static_cast<size_t>(slot), dc, wide.c_str(), static_cast<int>(wide.size()),')
+        positions = [ansi.index(marker) for marker in order]
+        self.assertEqual(positions, sorted(positions))
+        decode = code.split('bool Decode(HDC dc, LPCSTR text, int count, std::wstring& wide)', 1)[1].split('// `native` restores', 1)[0]
+        for marker in ('if (charset < 0 || charset == SYMBOL_CHARSET) return false;', 'UINT codepage = CP_ACP;',
+                       'if (charset != DEFAULT_CHARSET)', 'codepage = info.ciACP;',
+                       'if (count == -1) wide.pop_back();', 'return !wide.empty();'):
+            self.assertIn(marker, decode)
+
+        # The answer about the animation: that question only, a call that succeeded, a thread with such a hint.
+        parameters = code.split('BOOL Parameters(UINT action, UINT param, PVOID data, UINT flags)', 1)[1].split(
+            'BOOL WINAPI HintParametersW(UINT action, UINT param, PVOID data, UINT flags)\n', 1)[0]
+        order = ('const BOOL result = original ? original(action, param, data, flags)',
+                 ': slot == ParamW ? ::SystemParametersInfoW(action, param, data, flags)',
+                 ': ::SystemParametersInfoA(action, param, data, flags);',
+                 'if (!result || action != SPI_GETTOOLTIPANIMATION || !data) return result;',
+                 'const DWORD error = GetLastError();',
+                 'if (Served(g_hint)) *static_cast<BOOL*>(data) = FALSE;',
+                 'SetLastError(error);',
+                 'return result;')
+        positions = [parameters.index(marker) if marker != 'return result;' else parameters.rindex(marker) for marker in order]
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(bare.count('SPI_'), 1)
+        self.assertEqual(bare.count('(data) = '), 1)
+
+        # The three messages, and what each needs before a session is recorded.
+        begin = code.split('    bool BeginPaint(HWND hwnd, UINT message, HDC dc) noexcept', 1)[1].split('    void EndPaint() noexcept', 1)[0]
+        order = ('if (message != WM_PAINT && message != WM_ERASEBKGND && message != WM_NCPAINT) return false;',
+                 'if ((message == WM_PAINT && dc) || !Served(hwnd)) return false;',
+                 'if (message == WM_ERASEBKGND && !ClearClient(hwnd, dc)) return false;',
+                 'if (message == WM_NCPAINT && !ClearFrame(hwnd)) return false;',
+                 'try { g_sessions.push_back(Session{hwnd, message}); }',
+                 'catch (...) { return false; }',
+                 'return true;')
+        positions = [begin.index(marker) for marker in order]
+        self.assertEqual(positions, sorted(positions))
+        end = code.split('    void EndPaint() noexcept', 1)[1]
+        for marker in ('if (g_sessions.empty()) return;', 'const Session session = g_sessions.back();', 'g_sessions.pop_back();'):
+            self.assertIn(marker, end)
+        attached = code.split('    void OnAttached(HWND hwnd) noexcept', 1)[1].split('    bool BeginPaint(', 1)[0]
+        for marker in ('if (g_shutdown.load(std::memory_order_acquire) || !IsHint(hwnd)) return;', 'g_hint = hwnd;', 'Arm();'):
+            self.assertIn(marker, attached)
+        shutdown = code.split('    void Shutdown() noexcept', 1)[1].split('    void OnAttached(HWND hwnd) noexcept', 1)[0]
+        order = ('g_shutdown.store(true, std::memory_order_release);', 'auto lock = g_lock.lock_exclusive();',
+                 'g_dispatcher.DisableAllHooks();', 'g_text.store(false, std::memory_order_release);',
+                 'g_armed.store(false, std::memory_order_release);', 'g_sessions.clear();', 'g_hint = nullptr;')
+        positions = [shutdown.index(marker) for marker in order]
+        self.assertEqual(positions, sorted(positions))
+        # Two Debug lines, and only in a Debug build.
+        self.assertEqual(code.count('#if defined(_DEBUG)'), 2)
+        self.assertEqual(code.count('DebugLog('), 2)
+        release = re.sub(r'#if defined\(_DEBUG\).*?#e(?:lse|ndif)', '', code, flags=re.S)
+        self.assertNotIn('DebugLog(', release)
+        self.assertIn('L"[GlassCore][DelphiHint] armed exe=0x%p textW=%d textA=%d parameters=%d"', code)
+        self.assertIn('L"[GlassCore][DelphiHint] paint hwnd=0x%p cleared=%d texts=%u"', code)
+
+        # Registered, exported under undecorated names, started after the tooltip subsystem it serves.
+        for project in ('GlassCore/GlassCore.vcxproj', 'GlassCore/GlassCore.vcxproj.filters'):
+            text = read(project)
+            self.assertEqual(text.count(r'src\Hooks\delphi\THintWindowDraw.cpp'), 1)
+            self.assertEqual(text.count(r'Include\Hooks\delphi\THintWindowDraw.h'), 1)
+            ET.fromstring(text.encode('utf-8'))
+        exports = read('GlassCore/src/Core/Exports.cpp')
+        prefix = r'extern\s+"C"\s+__declspec\(dllexport\)\s+'
+        self.assertRegex(exports, prefix + r'BOOL\s+WINAPI\s+GlassCore_BeginDelphiHintPaint\s*\(\s*HWND\s+hwnd\s*,\s*UINT\s+message\s*,'
+                         r'\s*HDC\s+suppliedDc\s*\)\s*noexcept\s*\{\s*return GlassCore::DelphiHint::BeginPaint\(hwnd, message, suppliedDc\) \? TRUE : FALSE;')
+        self.assertRegex(exports, prefix + r'void\s+WINAPI\s+GlassCore_EndDelphiHintPaint\s*\(\s*\)\s*noexcept\s*\{\s*GlassCore::DelphiHint::EndPaint\(\);')
+        definition = read('GlassCore/GlassCore.def')
+        for export in ('GlassCore_BeginDelphiHintPaint', 'GlassCore_EndDelphiHintPaint'):
+            self.assertEqual(len(re.findall(r'(?m)^    %s$' % export, definition)), 1)
+        engine = read('GlassCore/src/Core/Engine.cpp')
+        self.assertEqual(engine.count('GlassCore::DelphiHint::Startup();'), 1)
+        self.assertEqual(engine.count('GlassCore::DelphiHint::Shutdown();'), 1)
+        self.assertLess(engine.index('GlassCore::Tooltip::Startup();'), engine.index('GlassCore::DelphiHint::Startup();'))
+        tooltip = read('GlassCore/src/Subsystems/Tooltip.cpp')
+        self.assertEqual(tooltip.count('DelphiHint::'), 1)
+        attach = tooltip.split('    void OnTooltipSubclassAttached(HWND hWnd)', 1)[1].split('    void OnTooltipSubclassDetached(', 1)[0]
+        order = ('if (g_tooltipSubsystemShutdown.load(std::memory_order_acquire))',
+                 'if (GlassCore::Settings::IsTooltipCustomizationDisabled())',
+                 'UpdateContext(hWnd, std::nullopt);',
+                 'GlassCore::DelphiHint::OnAttached(hWnd);')
+        positions = [attach.index(marker) for marker in order]
+        self.assertEqual(positions, sorted(positions))
+
+    def test_tooltip_subclass_asks_glasscore_before_vcl_paints_its_hint_window(self):
+        bridge = read('WndCompat/Popup/Tooltip/DelphiHintPaint.h')
+        self.assertTrue(bridge.startswith('#pragma once\n#include <windows.h>\n#include <WndCompat.h>\n#include <wil.h>\n\n'))
+        order = ('if ((message != WM_PAINT && message != WM_ERASEBKGND && message != WM_NCPAINT) || IsShuttingDown())',
+                 'using BeginFn = BOOL(WINAPI*)(HWND, UINT, HDC) noexcept;',
+                 'using EndFn = void(WINAPI*)() noexcept;',
+                 'const HMODULE core = GetModuleHandleW(L"GlassCore.dll");',
+                 'GetProcAddress(core, "GlassCore_BeginDelphiHintPaint")',
+                 'GetProcAddress(core, "GlassCore_EndDelphiHintPaint")',
+                 'const HDC dc = message == WM_NCPAINT ? nullptr : reinterpret_cast<HDC>(wParam);',
+                 'if (!begin || !end || !begin(hwnd, message, dc))',
+                 'auto finish = wil::scope_exit([end]() noexcept { end(); });',
+                 'result = message == WM_PAINT ? DefSubclassProc(hwnd, message, wParam, lParam)',
+                 ': message == WM_ERASEBKGND ? 1 : 0;',
+                 'return true;')
+        positions = [bridge.index(marker) for marker in order]
+        self.assertEqual(positions, sorted(positions))
+        # The bridge draws nothing and knows no class: both are GlassCore's.
+        bare = re.sub(r'//[^\n]*', '', bridge)
+        for forbidden in ('PatBlt', 'FillRect', 'GetDC', 'GetWindowDC', 'GetClassName', 'THintWindow', 'GlassCoreProviders',
+                          'TooltipEventProvider', 'SetWindowSubclass', 'InvalidateRect'):
+            self.assertNotIn(forbidden, bare)
+        self.assertEqual(bridge.count('DefSubclassProc('), 1)
+
+        code = read('WndCompat/Popup/Tooltip/TooltipSubclass.cpp')
+        self.assertEqual(code.count('#include "DelphiHintPaint.h"'), 1)
+        self.assertIn('    constexpr DWORD_PTR kVclHintWindow = 1;\n', code)
+        # Only the attach of a VCL hint window marks the subclass; a tooltip of common controls has none.
+        native = code.split('    void Tooltip_AttachIfNeeded(HWND hWnd)', 1)[1].split('    void Tooltip_AttachHintWindow(HWND hWnd)', 1)[0]
+        vcl = code.split('    void Tooltip_AttachHintWindow(HWND hWnd)', 1)[1].split('    void Tooltip_Detach(HWND hWnd)', 1)[0]
+        self.assertIn('if (!SetWindowSubclass(hWnd, TooltipSubclassProc, kTooltipSubclassId, 0))', native)
+        self.assertIn('if (!SetWindowSubclass(hWnd, TooltipSubclassProc, kTooltipSubclassId, kVclHintWindow))', vcl)
+        self.assertEqual(code.count('SetWindowSubclass('), 2)
+        proc = code.split('    LRESULT CALLBACK TooltipSubclassProc(', 1)[1].split('namespace WndCompat\n', 1)[0]
+        # After the detach message, the shutdown gate and the destruction; the erase and the frame are asked
+        # first, and the paint goes through the same bridge inside the tooltip's paint session.
+        order = ('if (uMsg == WndCompat::WM_GLASS_DETACH_TOOLTIP)',
+                 'if (WndCompat::IsShuttingDown())',
+                 'if (uMsg == WM_NCDESTROY)',
+                 'if (uMsg == WM_WINDOWPOSCHANGED)',
+                 'const bool vclHint = dwRefData == kVclHintWindow;',
+                 'if (vclHint && (uMsg == WM_ERASEBKGND || uMsg == WM_NCPAINT))',
+                 'if (WndCompat::TryHandleDelphiHintPaint(hWnd, uMsg, wParam, lParam, answered))',
+                 'return answered;',
+                 'if (uMsg == WM_PAINT || uMsg == WM_PRINTCLIENT)',
+                 'const auto paint = [&]() -> LRESULT',
+                 'if (vclHint && WndCompat::TryHandleDelphiHintPaint(hWnd, uMsg, wParam, lParam, painted))',
+                 'return DefSubclassProc(hWnd, uMsg, wParam, lParam);',
+                 'broadcast = p->OnTooltipPaintSessionBegin(hWnd);',
+                 'LRESULT const r = paint();',
+                 'p->OnTooltipPaintSessionEnd(hWnd);',
+                 'return paint();')
+        positions = []
+        cursor = 0
+        for marker in order:
+            cursor = proc.index(marker, cursor)
+            positions.append(cursor)
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(proc.count('TryHandleDelphiHintPaint('), 2)
+        self.assertEqual(proc.count('vclHint'), 3)
+        self.assertEqual(proc.count('paint()'), 2)
+        for project in ('WndCompat/WndCompat.vcxproj', 'WndCompat/WndCompat.vcxproj.filters'):
+            text = read(project)
+            self.assertEqual(text.count(r'Popup\Tooltip\DelphiHintPaint.h'), 1)
+            ET.fromstring(text.encode('utf-8'))
+        # The window is still attached where it always was, by its exact class.
+        events = read('WndCompat/Tracker/WinEventHandler.cpp')
+        self.assertEqual(events.count('WndCompat::Tooltip_AttachHintWindow(hWnd);'), 2)
+        self.assertEqual(events.count('WndCompat::IsWindowClass(hWnd, L"THintWindow")'), 3)
+
+        # The suite compiles the unit and the bridge themselves, in both configurations, over doubles of its own.
+        test = read('WndCompat/tests/hint_window_tests.cpp')
+        self.assertTrue(test.startswith('#include "hint_window_test_shim.h"\n'
+                                        '#include "../../GlassCore/src/Hooks/delphi/THintWindowDraw.cpp"\n'
+                                        '#include "../Popup/Tooltip/DelphiHintPaint.h"\n\n#define CHECK(expr)'))
+        self.assertEqual(test.count('#include "'), 3)
+        shim = read('WndCompat/tests/hint_window_test_shim.h')
+        self.assertEqual(shim.count('#include "'), 0)
+        for marker in ('assert(!HintTest::exclusive && !HintTest::shared);     // not recursive',
+                       'assert(dc->saved.empty() && dc->excluded.empty());     // given back as it was taken',
+                       'if (!refs[i] && HintTest::registrationFailures[mod].count(name)) return false;',
+                       'if (HintTest::alphaMovesRect) *rect = RECT{-1, -2, -3, -4};'):
+            self.assertIn(marker, shim)
+        # What the test calls the subclass does what the production one does with these messages.
+        self.assertIn('            if ((message == WM_ERASEBKGND || message == WM_NCPAINT || message == WM_PAINT)\n'
+                      '                && WndCompat::TryHandleDelphiHintPaint(w, message, wParam, lParam, result))\n'
+                      '                return result;\n'
+                      '            return DefSubclassProc(w, message, wParam, lParam);', test)
+        runner = read('WndCompat/tests/hint_window_test.py')
+        for marker in ("'Release'", "'Debug'", "'-D_DEBUG'", "'-Werror'", "'-std=c++20'"):
+            self.assertIn(marker, runner)
+        for forbidden in ('read_text', 'source.split(', 'code.split(', '-Wno-error', "'Hooks/delphi/THintWindowDraw.h'"):
+            self.assertNotIn(forbidden, runner)
+        cases = sorted(set(re.findall(r'name == "([a-z-]+)"', test)))
+        self.assertEqual(cases, ['animation', 'ansi', 'bridge', 'diagnostics', 'failures', 'frame', 'gates', 'lifecycle', 'shown'])
         self.assertEqual(cases, sorted(re.findall(r"self\.run_case\('([a-z-]+)'\)", runner)))
 
 if __name__ == "__main__":

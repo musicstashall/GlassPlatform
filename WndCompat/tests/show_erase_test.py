@@ -6,9 +6,9 @@ when it is shown again: on its first frame or erase after the show it lays the
 transparent base under every point whose owner - the topmost visible window
 there - is about to repaint it, and nowhere else. The scenarios cover the form
 of LogViewer-25, windows that keep their picture, windows that are left alone,
-the gates, every refusal of the system, the Debug line, and four hundred
-generated layouts compared point by point with an independent description of
-who owns a point.
+the gates, every refusal of the system, the absence of any output, and four
+hundred generated layouts compared point by point with an independent
+description of who owns a point.
 This is NOT Windows: no window procedure runs, nothing is composed, a region
 is a set of points, the moment Windows sends WM_NCPAINT and WM_ERASEBKGND is
 the test's own, and it is not an MSVC build acceptance.
@@ -34,7 +34,7 @@ class ShowEraseTest(unittest.TestCase):
         cls.addClassCleanup(cls.tmp.cleanup)
         tmp = Path(cls.tmp.name)
         stubs = tmp / 'include'
-        for header in ('windows.h', 'DebugLog.h', 'GlassBackdropMark.h', 'InjectionMode.h', 'Tracker/WinEventHandler.h'):
+        for header in ('windows.h', 'GlassBackdropMark.h', 'InjectionMode.h', 'Tracker/WinEventHandler.h'):
             path = stubs / header
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text('#pragma once\n', encoding='utf-8')
@@ -77,8 +77,8 @@ class ShowEraseTest(unittest.TestCase):
     def test_whatever_refuses_nothing_is_cleared_and_nothing_is_left_behind(self):
         self.run_case('failures')
 
-    def test_debug_build_writes_one_line_and_a_release_build_none(self):
-        self.run_case('line')
+    def test_no_build_writes_a_line_or_reads_the_surface(self):
+        self.run_case('quiet')
 
     def test_generated_layouts_match_the_owner_of_every_point(self):
         self.run_case('random')

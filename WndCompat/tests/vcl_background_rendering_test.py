@@ -104,8 +104,8 @@ class VclBackgroundRenderingTest(unittest.TestCase):
     def test_debug_line_reports_each_fill_that_reached_a_control_outside_its_sessions(self):
         self.run_case('outside-diagnostics')
 
-    def test_debug_line_reports_each_fill_that_reached_another_vcl_window_outside_its_sessions(self):
-        self.run_case('other-diagnostics')
+    def test_fill_that_reached_another_vcl_window_stays_native_and_unreported(self):
+        self.run_case('other-windows')
 
 
 if __name__ == '__main__':

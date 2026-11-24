@@ -88,6 +88,9 @@ class VclImagesRenderingTest(unittest.TestCase):
     def test_toolbar_native_false_last_error_cleanup_and_reentry(self):
         self.run_case('toolbar-failures')
 
+    def test_ttoolbar_captions_on_the_exe_route_take_and_return_the_comctl_text_hook(self):
+        self.run_case('toolbar-captions')
+
     def test_panel_image_uses_actual_exe_stretch_with_scaled_and_mirrored_extents(self):
         self.run_case('panel-images')
 

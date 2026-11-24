@@ -349,6 +349,174 @@ namespace
         CHECK(f.Mask()); CHECK(ImageTest::reads==1 && ImageTest::nativeMasks==2);
         f.Prepared(); f.EndToolbar();
     }
+    // The captions of a VCL toolbar are drawn by comctl32 v6, whoever began the
+    // paint. On the EXE route (TWinControl.PaintHandler) the session takes the
+    // text hook of that module by name - the one the comctl32 route takes by
+    // its caller - and gives back exactly what it took.
+    constexpr UINT kFlags=0x24;                              // DT_SINGLELINE | DT_VCENTER
+    void ToolbarCaptionsOnTheExeRoute()
+    {
+        using namespace GlassCore::ToolbarControl;
+        const auto reset=[] {
+            Test::alphaText=Test::nativeTheme=0; Test::alphaResult=S_OK; ImageTest::glow=false;
+            ImageTest::textDc=nullptr; ImageTest::textString.clear(); ImageTest::textFlags=0; ImageTest::textRect={};
+        };
+        const auto caption=[&](Fixture& f, HMODULE from, UINT flags=kFlags, const RECT* where=nullptr) {
+            static const RECT rect{21,3,90,25};
+            ImageTest::caller=from;
+            return Overall_MyDrawThemeText(nullptr,&f.dc,1,1,L"Open",4,flags,0,where?where:&rect);
+        };
+        // The EXE began the paint: one reference on comctl32 v6, none on the legacy module or the EXE.
+        {
+            reset(); Fixture f; f.BeginToolbar(&f.exe);
+            CHECK(f.modern.refs["DrawThemeText"]==1 && f.legacy.refs["DrawThemeText"]==0);
+            CHECK(!f.exe.hooks.count("DrawThemeText") && g_modStack.back().textModule==&f.modern);
+            CHECK(!g_modStack.back().glowModule && g_modStack.back().texts==0);
+            CHECK(caption(f,&f.modern)==S_OK);
+            CHECK(Test::alphaText==1 && Test::nativeTheme==0 && ImageTest::textDc==&f.dc);
+            CHECK(ImageTest::textString==L"Open" && ImageTest::textFlags==kFlags);
+            CHECK(ImageTest::textRect.left==21 && ImageTest::textRect.top==3 && ImageTest::textRect.right==90
+                && ImageTest::textRect.bottom==25);
+            CHECK(caption(f,&f.modern)==S_OK); CHECK(g_modStack.back().texts==2);
+            // A measurement and a call without a rectangle are comctl32's own.
+            CHECK(caption(f,&f.modern,kFlags|DT_CALCRECT)==S_FALSE); CHECK(Test::nativeTheme==1 && Test::alphaText==2);
+            ImageTest::caller=&f.modern;
+            CHECK(Overall_MyDrawThemeText(nullptr,&f.dc,1,1,L"Open",4,kFlags,0,nullptr)==S_FALSE);
+            CHECK(Test::nativeTheme==2 && g_modStack.back().texts==2);
+            // The legacy module was not asked for anything: its call is not ours.
+            CHECK(caption(f,&f.legacy)==S_FALSE); CHECK(Test::nativeTheme==3 && Test::alphaText==2);
+            // The compositor refused: the caption is drawn as comctl32 would draw it, and is not counted.
+            Test::alphaResult=E_FAIL; CHECK(caption(f,&f.modern)==S_FALSE);
+            CHECK(Test::alphaText==3 && Test::nativeTheme==4 && g_modStack.back().texts==2);
+            f.EndToolbar();
+            CHECK(f.modern.refs["DrawThemeText"]==0 && g_modStack.empty());
+            // Outside a session the import is not hooked at all.
+            Test::alphaResult=S_OK; CHECK(caption(f,&f.modern)==S_FALSE); CHECK(Test::alphaText==3);
+        }
+        // comctl32 v6 began the paint: its own route takes the reference, and only one is taken.
+        {
+            reset(); Fixture f; f.BeginToolbar(&f.modern);
+            CHECK(f.modern.refs["DrawThemeText"]==1 && !g_modStack.back().textModule);
+            CHECK(caption(f,&f.modern)==S_OK); CHECK(Test::alphaText==1 && g_modStack.back().texts==1);
+            f.EndToolbar(); CHECK(f.modern.refs["DrawThemeText"]==0);
+        }
+        // The legacy module began it: it draws without a theme, and nothing is taken.
+        {
+            reset(); Fixture f; f.BeginToolbar(&f.legacy);
+            CHECK(f.modern.refs["DrawThemeText"]==0 && f.legacy.refs["DrawThemeText"]==0 && !g_modStack.back().textModule);
+            CHECK(caption(f,&f.modern)==S_FALSE); CHECK(Test::alphaText==0 && Test::nativeTheme==1);
+            f.EndToolbar();
+        }
+        // A toolbar of common controls is not this route.
+        {
+            reset(); Fixture f; f.toolbar.cls=L"ToolbarWindow32"; f.BeginToolbar(&f.exe);
+            CHECK(f.modern.refs["DrawThemeText"]==0 && !g_modStack.back().textModule && !g_modStack.back().vclIcons);
+            f.EndToolbar();
+        }
+        // A VCL toolbar the session does not serve takes nothing: another mode, no glass, another module's
+        // window class, a caller that is neither the EXE nor comctl32, no comctl32 v6 in the process.
+        for (int which=0;which<5;++which)
+        {
+            reset(); Fixture f; HMODULE from=&f.exe;
+            switch (which)
+            {
+            case 0:Test::full=false;break;
+            case 1:f.toolbar.backdrop=false;break;
+            case 2:PanelTest::instances[&f.toolbar]=&f.otherModule;break;
+            case 3:from=&f.otherModule;break;
+            case 4:GlassCore::ModuleHandler::g_comctl32New=nullptr;break;
+            }
+            f.BeginToolbar(from);
+            CHECK(f.modern.refs["DrawThemeText"]==0 && !g_modStack.back().textModule && !g_modStack.back().glowModule);
+            f.EndToolbar(); Test::full=true;
+        }
+        // The import is missing, or its slot cannot be taken: no reference, and none is given back.
+        for (bool conflict : {false,true})
+        {
+            reset(); Fixture f; TestModule ux; ux.originals={{"DrawTextExW",reinterpret_cast<void*>(DrawTextExW)}};
+            Test::ux=&ux; ImageTest::glow=true;
+            if (conflict)
+            {
+                f.modern.hooks["DrawThemeText"]=reinterpret_cast<void*>(std::uintptr_t(17));
+                ImageTest::registrationFailures[&f.modern].insert("DrawThemeText");
+            }
+            else f.modern.originals.erase("DrawThemeText");
+            f.BeginToolbar(&f.exe);
+            // Without the text the glow has nothing to follow.
+            CHECK(!g_modStack.back().textModule && !g_modStack.back().glowModule && ux.refs["DrawTextExW"]==0);
+            CHECK(f.modern.refs["MaskBlt"]==1);
+            f.EndToolbar(); CHECK(f.modern.refs["DrawThemeText"]==0 && ux.refs["DrawTextExW"]==0);
+            if (conflict)
+            { CHECK(f.modern.hooks.at("DrawThemeText")==reinterpret_cast<void*>(std::uintptr_t(17))); f.modern.hooks.clear(); }
+            Test::ux=nullptr;
+        }
+        // Glow: the text of uxtheme is taken with it, and given back even though the setting changed meanwhile.
+        for (bool changes : {false,true})
+        {
+            reset(); Fixture f; TestModule ux; ux.originals={{"DrawTextExW",reinterpret_cast<void*>(DrawTextExW)}};
+            Test::ux=&ux; ImageTest::glow=true;
+            f.BeginToolbar(&f.exe);
+            CHECK(f.modern.refs["DrawThemeText"]==1 && ux.refs["DrawTextExW"]==1);
+            CHECK(g_modStack.back().textModule==&f.modern && g_modStack.back().glowModule==&ux);
+            if (changes) { ImageTest::glow=false; Test::ux=nullptr; }
+            f.EndToolbar();
+            CHECK(f.modern.refs["DrawThemeText"]==0 && ux.refs["DrawTextExW"]==0);
+            Test::ux=nullptr;
+        }
+        // No uxtheme to hook: the caption alone.
+        {
+            reset(); Fixture f; ImageTest::glow=true; f.BeginToolbar(&f.exe);
+            CHECK(g_modStack.back().textModule==&f.modern && !g_modStack.back().glowModule);
+            f.EndToolbar();
+        }
+        // uxtheme is there, the glow is off: the caption alone.
+        {
+            reset(); Fixture f; TestModule ux; ux.originals={{"DrawTextExW",reinterpret_cast<void*>(DrawTextExW)}};
+            Test::ux=&ux; f.BeginToolbar(&f.exe);
+            CHECK(g_modStack.back().textModule==&f.modern && !g_modStack.back().glowModule && ux.refs["DrawTextExW"]==0);
+            f.EndToolbar(); CHECK(f.modern.refs["DrawThemeText"]==0 && ux.refs["DrawTextExW"]==0);
+            Test::ux=nullptr;
+        }
+        // The glow text of uxtheme cannot be taken - no such import, or its slot is someone else's:
+        // the caption alone, and nothing of uxtheme is given back.
+        for (bool conflict : {false,true})
+        {
+            reset(); Fixture f; TestModule ux; Test::ux=&ux; ImageTest::glow=true;
+            if (conflict)
+            {
+                ux.originals={{"DrawTextExW",reinterpret_cast<void*>(DrawTextExW)}};
+                ux.hooks["DrawTextExW"]=reinterpret_cast<void*>(std::uintptr_t(19));
+                ImageTest::registrationFailures[&ux].insert("DrawTextExW");
+            }
+            f.BeginToolbar(&f.exe);
+            CHECK(g_modStack.back().textModule==&f.modern && !g_modStack.back().glowModule && ux.refs["DrawTextExW"]==0);
+            f.EndToolbar(); CHECK(f.modern.refs["DrawThemeText"]==0 && ux.refs["DrawTextExW"]==0);
+            if (conflict)
+            { CHECK(ux.hooks.at("DrawTextExW")==reinterpret_cast<void*>(std::uintptr_t(19))); ux.hooks.clear(); }
+            Test::ux=nullptr;
+        }
+        // Nested paints count their references; the end gives back what its own begin took, whatever
+        // the process says about its modules by then.
+        {
+            reset(); Fixture f; f.BeginToolbar(&f.exe); f.BeginToolbar(&f.exe);
+            CHECK(f.modern.refs["DrawThemeText"]==2 && g_modStack.back().textModule==&f.modern);
+            CHECK(caption(f,&f.modern)==S_OK); CHECK(g_modStack.back().texts==1 && g_modStack.front().texts==0);
+            f.EndToolbar(); CHECK(f.modern.refs["DrawThemeText"]==1);
+            CHECK(caption(f,&f.modern)==S_OK); CHECK(g_modStack.back().texts==1);
+            GlassCore::ModuleHandler::g_comctl32New=&f.otherModule;
+            GlassCore::ModuleHandler::g_entryPointModule=&f.otherModule;
+            f.toolbar.kind=GlassShared::GlassControlKind::None;
+            f.EndToolbar(); CHECK(f.modern.refs["DrawThemeText"]==0 && f.otherModule.refs["DrawThemeText"]==0);
+        }
+        // Another thread has no session of its own: its caption is comctl32's.
+        {
+            reset(); Fixture f; f.BeginToolbar(&f.exe);
+            std::thread otherThread([&] { CHECK(caption(f,&f.modern)==S_FALSE); }); otherThread.join();
+            CHECK(Test::alphaText==0 && Test::nativeTheme==1 && g_modStack.back().texts==0);
+            f.EndToolbar();
+        }
+        reset();
+    }
     void PanelNativeImageAndMirroring()
     {
         for (DWORD rop : {SRCCOPY,SRCAND,DWORD(0x00e20746)}) for (bool mirror : {false,true})
@@ -483,6 +651,7 @@ int main(int argc,char** argv)
         else if(name=="toolbar-leases")ToolbarLeasesAndMissingImports();
         else if(name=="toolbar-barriers")ToolbarUnreadyNativeBarriers();
         else if(name=="toolbar-failures")ToolbarNativeFailureAndReentry();
+        else if(name=="toolbar-captions")ToolbarCaptionsOnTheExeRoute();
         else if(name=="panel-images")PanelNativeImageAndMirroring();
         else if(name=="panel-scope")PanelExactClassAndMessageScope();
         else if(name=="panel-isolation")PanelDcIsolationAndClientBuffers();

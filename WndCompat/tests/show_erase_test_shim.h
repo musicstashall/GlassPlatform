@@ -312,6 +312,8 @@ inline BOOL PatBlt(HDC dc, int x, int y, int width, int height, DWORD rop)
     }
     return TRUE;
 }
+// The unit neither reads the surface nor writes a line: the two doubles below
+// are there to count it if it ever does.
 inline COLORREF GetPixel(HDC dc, int x, int y)
 {
     assert(dc && !dc->owner->parent && !dc->clipped);

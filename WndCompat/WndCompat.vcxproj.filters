@@ -307,6 +307,9 @@
     <ClInclude Include="Popup\Tooltip\TooltipSubclass.h">
       <Filter>Popup\Tooltip</Filter>
     </ClInclude>
+    <ClInclude Include="Popup\Tooltip\DelphiHintPaint.h">
+      <Filter>Popup\Tooltip</Filter>
+    </ClInclude>
     <ClInclude Include="Root\ExplorerRootSubclass.h">
       <Filter>Root</Filter>
     </ClInclude>
@@ -323,9 +326,6 @@
       <Filter>Root</Filter>
     </ClInclude>
     <ClInclude Include="Root\DelphiPanelPaint.h">
-      <Filter>Root</Filter>
-    </ClInclude>
-    <ClInclude Include="Root\DelphiRestoreProbe.h">
       <Filter>Root</Filter>
     </ClInclude>
     <ClInclude Include="Root\DelphiShowErase.h">

@@ -47,6 +47,11 @@ namespace ImageTest
     };
     inline BltCall last;
     inline std::vector<BltCall> calls;
+    // What the toolbar gave the text compositor last.
+    inline HDC textDc{};
+    inline std::wstring textString;
+    inline UINT textFlags{};
+    inline RECT textRect{};
 
     inline HBITMAP MakeBitmap(int width, int height, int bpp = 32, bool dib = true)
     {
@@ -237,7 +242,11 @@ namespace GlassCore::Text
 {
     inline bool IsInkGlowEffectActiveForPaintSession(HWND) { return ImageTest::glow; }
     inline HRESULT DrawTextWithAlpha(HDC dc, LPCWSTR text, int n, LPRECT r, UINT f, int& result)
-    { return DrawTextWithAlpha(dc, text, n, r, f, result, true); }
+    {
+        ImageTest::textDc = dc; ImageTest::textString.assign(text, n > 0 ? n : 0);
+        ImageTest::textFlags = f; ImageTest::textRect = *r;
+        return DrawTextWithAlpha(dc, text, n, r, f, result, true);
+    }
     inline HRESULT DrawThemeContent(HDC dc, const RECT& r, const RECT* clip, const RECT* exclude, DWORD flags,
         const std::function<void(HDC,HPAINTBUFFER,RGBQUAD*,int)>& draw)
     { return DrawThemeContent(dc, r, clip, exclude, flags, draw, 255, false, true, false); }

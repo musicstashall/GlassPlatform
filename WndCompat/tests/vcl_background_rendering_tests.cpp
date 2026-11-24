@@ -941,17 +941,12 @@ namespace
         f.list.cls = L"TListBox"; f.list.kind = GlassControlKind::ListBox;
         f.list.valid = false; native(&f.eraseDc, f.client, &f.window); f.list.valid = true;
         // Most windows are of another kind, and every fill of the EXE comes
-        // through here: such a window is not asked for its class. (A Debug build
-        // asks once, for the line it writes about the fill.)
+        // through here: such a window is not asked for its class.
         for (const GlassControlKind kind : {GlassControlKind::None, GlassControlKind::Toolbar})
         {
             f.list.kind = kind; BgTest::classLookups = 0;
             native(&f.eraseDc, f.client, &f.window);
-#if defined(_DEBUG)
-            CHECK(BgTest::classLookups == 1);
-#else
             CHECK(BgTest::classLookups == 0);
-#endif
         }
         f.list.kind = GlassControlKind::ListBox; BgTest::classLookups = 0;
         black(&f.eraseDc);
@@ -1227,14 +1222,14 @@ namespace
 
     // A fill of the EXE that reached a VCL window which is not in the table,
     // outside the sessions of that window: what a parent erased into the DC of
-    // its child, or the erase of a class that is not decided here. One Debug
-    // line each, 64 a second, with the origins of the DC. Nothing is drawn for
-    // it: the fill stays the application's.
-    void OtherDiagnostics()
+    // its child, or the erase of a class that is not decided here. It stays the
+    // application's, and no build writes a line about it or asks the window
+    // for its class.
+    void OtherWindows()
     {
         Fixture f;
         CHECK(f.Begin(f.list, f.paintDc, true)); f.End(f.list, f.paintDc); Take();
-        BgTest::clock += 1000; BgTest::logs.clear();
+        BgTest::clock += 1000; BgTest::logs.clear(); BgTest::classLookups = 0;
         BgTest::nativeFillResult = 7;
         const auto native = [&](HDC dc, const RECT& rect, HBRUSH brush) {
             CHECK(f.Fill(dc, rect, brush) == 7);
@@ -1253,72 +1248,20 @@ namespace
         // The erase of a class which is not in the table, marked or not.
         TestWindow bar; bar.cls = L"TToolBar"; bar.kind = GlassControlKind::Toolbar; bar.client = RECT{0, 0, 298, 30};
         TestDC barDc; barDc.owner = &bar; barDc.clipKind = 3;
-        native(&barDc, bar.client, &f.window);
-        native(&barDc, bar.client, &f.hatch);
-        BgTest::failObject = true; native(&barDc, bar.client, &f.window); BgTest::failObject = false;
-        CHECK(ExeFillRect(f.exe, &barDc, nullptr, &f.window) == 7); Take();
-        [[maybe_unused]] auto lines = Logs(L"] erase-other ");
-#if defined(_DEBUG)
-        // hwnd, kind, dc, the rectangle, the client's size, the clip, the origins, the brush
-        const auto line = [](HWND w, int kind, HDC dc, const RECT& rect, int clipKind, POINT viewport, POINT window,
-                             int style, long long rgb) {
-            return std::vector<long long>{Number(w), kind, Number(dc), rect.left, rect.top, rect.right, rect.bottom,
-                w->client.right, w->client.bottom, clipKind, w->client.left, w->client.top, w->client.right, w->client.bottom,
-                viewport.x, viewport.y, window.x, window.y, style, rgb};
-        };
-        CHECK(lines.size() == 6 && BgTest::logs.size() == 6);
-        CHECK(lines[0].format == L"[GlassCore][DelphiBackground] erase-other hwnd=0x%p class=%s kind=%u dc=0x%p rect=[%ld,%ld,%ld,%ld] "
-                                 L"client=[%ld,%ld] clip=%d[%ld,%ld,%ld,%ld] org=[%ld,%ld,%ld,%ld] style=%d rgb=0x%06X");
-        CHECK(lines[0].texts == std::vector<std::wstring>{L"TPanel"});
-        CHECK(lines[0].numbers == line(&f.other, 0, &f.foreignDc, parent, SIMPLEREGION, POINT{-20, -30}, POINT{}, 0, 0xf0f0f0));
-        CHECK(lines[1].numbers == line(&f.other, 0, &f.foreignDc, parent, SIMPLEREGION, POINT{}, POINT{20, 30}, 0, 0x00c0ff));
-        CHECK(lines[2].texts == std::vector<std::wstring>{L"TToolBar"});
-        const int barKind = static_cast<int>(GlassControlKind::Toolbar);
-        CHECK(lines[2].numbers == line(&bar, barKind, &barDc, bar.client, 3, POINT{}, POINT{}, 0, 0xffffff));
-        CHECK(lines[3].numbers == line(&bar, barKind, &barDc, bar.client, 3, POINT{}, POINT{}, 2, 0xffffff));
-        CHECK(lines[4].numbers == line(&bar, barKind, &barDc, bar.client, 3, POINT{}, POINT{}, -1, 0));
-        CHECK(lines[5].numbers == line(&bar, barKind, &barDc, RECT{}, 3, POINT{}, POINT{}, 0, 0xffffff));
-        // Not reported: a window which is not VCL's, one that cannot tell its
-        // class, another thread, another mode, a buffer, the screen, a session of
-        // the window - and a control of the table, which has a line of its own.
-        BgTest::clock += 1000; BgTest::logs.clear();
-        for (LPCWSTR cls : {L"Edit", L"ComboBox", L"SysTabControl32", L"tPanel", L""})
+        for (HBRUSH brush : {&f.window, &f.face, &f.custom, &f.hatch}) native(&barDc, bar.client, brush);
+        bar.kind = GlassControlKind::None;
+        for (LPCWSTR cls : {L"THintWindow", L"TPanel", L"TButton", L"Edit"})
         { bar.cls = cls; native(&barDc, bar.client, &f.window); }
-        bar.cls = L"TToolBar";
-        bar.valid = false; native(&barDc, bar.client, &f.window); bar.valid = true;
-        BgTest::thread = 2; native(&barDc, bar.client, &f.window); BgTest::thread = 1;
-        bar.thread = 2; native(&barDc, bar.client, &f.window); bar.thread = 1;
-        BgTest::full = false; native(&barDc, bar.client, &f.window); BgTest::full = true;
-        native(&f.memoryDc, bar.client, &f.window);
-        TestDC screen; screen.screen = true;
-        native(&screen, bar.client, &f.window);
-        f.BeginDc(bar); native(&barDc, bar.client, &f.window); f.EndDc(bar);
-        CHECK(!f.Begin(bar, barDc, false)); native(&barDc, bar.client, &f.window); f.End(bar, barDc);
-        CHECK(BgTest::logs.empty());
-        CHECK(f.Fill(&f.eraseDc, f.client, &f.window) == 1); Take();
-        CHECK(Logs(L"] erase-other ").empty() && Logs(L"] erase-outside ").size() == 1);
-        // A window without glass on its root is reported: the line is about the
-        // fill, not about what the platform would do with it.
-        BgTest::clock += 1000; BgTest::logs.clear();
-        bar.backdrop = false; native(&barDc, bar.client, &f.window); bar.backdrop = true;
-        CHECK(Logs(L"] erase-other ").size() == 1);
-        // 64 a second, apart from the budget of the other line.
-        BgTest::clock += 1000; BgTest::logs.clear();
-        for (int i = 0; i < 80; ++i) native(&barDc, bar.client, &f.window);
-        CHECK(Logs(L"] erase-other ").size() == 64);
-        for (int i = 0; i < 40; ++i) { CHECK(f.Fill(&f.eraseDc, f.client, &f.window) == 1); Take(); }
-        CHECK(Logs(L"] erase-outside ").size() == 32 && Logs(L"] erase-other ").size() == 64);
-        BgTest::clock += 999;
-        native(&barDc, bar.client, &f.window);
-        CHECK(Logs(L"] erase-other ").size() == 64);
-        BgTest::clock += 1;
-        native(&barDc, bar.client, &f.window);
-        CHECK(Logs(L"] erase-other ").size() == 65);
-#else
-        CHECK(lines.empty() && BgTest::logs.empty());
-#endif
+        CHECK(ExeFillRect(f.exe, &barDc, nullptr, &f.window) == 7); Take();
+        CHECK(BgTest::logs.empty() && BgTest::classLookups == 0);
         CHECK(BgTest::Count(Kind::Black) == 0 && BgTest::tintsMade == 0);
-        Take();
+        // A control of the table has the line of its own, as before.
+        CHECK(f.Fill(&f.eraseDc, f.client, &f.window) == 1); Take();
+#if defined(_DEBUG)
+        CHECK(BgTest::logs.size() == 1 && Logs(L"] erase-outside ").size() == 1);
+#else
+        CHECK(BgTest::logs.empty());
+#endif
         CHECK(f.Idle() && f.Kept());
     }
 }
@@ -1343,7 +1286,7 @@ int main(int argc, char** argv)
         else if (name == "outside-gates") OutsideGates();
         else if (name == "kept-import") KeptImport();
         else if (name == "outside-diagnostics") OutsideDiagnostics();
-        else if (name == "other-diagnostics") OtherDiagnostics();
+        else if (name == "other-windows") OtherWindows();
         else throw std::runtime_error("unknown case");
         std::cout << "PASS " << name << '\n';
     }
