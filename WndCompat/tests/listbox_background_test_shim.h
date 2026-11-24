@@ -15,7 +15,6 @@ inline constexpr UINT BS_NULL = 1, BS_PATTERN = 3, OBJ_PEN = 1, PS_SOLID = 0;
 inline constexpr int BLACK_PEN = 7, BP_CHECKBOX = 3, BPBF_TOPDOWNDIB = 2, COLOR_HIGHLIGHT = 13;
 inline constexpr int ERROR = 0, NULLREGION = 1, SIMPLEREGION = 2;
 inline constexpr DWORD SRCINVERT = 0x00660046;
-inline constexpr COLORREF CLR_INVALID = 0xffffffffu;
 struct DRAWITEMSTRUCT
 {
     UINT CtlType{}, CtlID{}, itemID{}, itemAction{}, itemState{};

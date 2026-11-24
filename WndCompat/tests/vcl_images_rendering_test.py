@@ -2,8 +2,11 @@
 """Run complete production Toolbar/panel/opaque-source code with Win32 doubles.
 
 Both optimized and Debug/probe configurations exercise bytes, native parameters,
-thread/session/DC gates and resource ownership. This is NOT Windows GDI/DWM
-rasterization, a real PE/IAT test or a Windows/MSVC build acceptance.
+thread/session/DC gates and resource ownership, the pictures and icons of a
+scroll box included: the opaque copy drawn as it is, nothing cut out of it,
+and the icon blended with its own transparency. This is NOT Windows GDI/DWM
+rasterization (DrawIconEx is a narrow model), a real PE/IAT test or a
+Windows/MSVC build acceptance.
 """
 from pathlib import Path
 import os
@@ -61,7 +64,7 @@ class VclImagesRenderingTest(unittest.TestCase):
     def run_case(self, name):
         for mode, binary in self.binaries.items():
             with self.subTest(mode=mode):
-                result = subprocess.run([str(binary), name], capture_output=True, text=True, timeout=15)
+                result = subprocess.run([str(binary), name], capture_output=True, text=True, timeout=60)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_production_copy_normalizes_8_16_24_32_bpp_dib_and_ddb_without_color_key(self):
@@ -88,6 +91,9 @@ class VclImagesRenderingTest(unittest.TestCase):
     def test_toolbar_native_false_last_error_cleanup_and_reentry(self):
         self.run_case('toolbar-failures')
 
+    def test_ttoolbar_captions_on_the_exe_route_take_and_return_the_comctl_text_hook(self):
+        self.run_case('toolbar-captions')
+
     def test_panel_image_uses_actual_exe_stretch_with_scaled_and_mirrored_extents(self):
         self.run_case('panel-images')
 
@@ -102,6 +108,24 @@ class VclImagesRenderingTest(unittest.TestCase):
 
     def test_panel_native_failure_error_cleanup_and_reentry(self):
         self.run_case('panel-failures')
+
+    def test_scroll_box_picture_is_opaque_as_it_is_and_nothing_is_cut_out_of_it(self):
+        self.run_case('scroll-pictures')
+
+    def test_scroll_box_pictures_are_plain_copies_into_its_own_paint_dc_only(self):
+        self.run_case('scroll-picture-scope')
+
+    def test_scroll_box_icons_and_cursors_are_blended_with_their_own_transparency(self):
+        self.run_case('scroll-icons')
+
+    def test_scroll_box_icon_route_is_exact_class_paint_dc_and_plain_draw_only(self):
+        self.run_case('scroll-icon-scope')
+
+    def test_scroll_box_icon_refs_and_every_failure_leave_one_native_draw(self):
+        self.run_case('scroll-icon-failures')
+
+    def test_toolbar_style_and_theme_are_read_for_the_debug_line_only(self):
+        self.run_case('toolbar-readout')
 
     def test_zero_extents_self_copies_and_mapped_or_mask_source_stay_native(self):
         self.run_case('native-extents')

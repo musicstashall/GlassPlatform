@@ -36,7 +36,10 @@ Menu-ключи на эти поверхности **не** влияют (см. 
 | TreeView (MaskBlt non-alpha) | `TreeViewHooks.cpp` | black-key | `SpriteEffect` |
 | ToolbarWindow32 (MaskBlt/BitBlt non-alpha) | `ToolbarHooks.cpp` | black-key | `SpriteEffect` |
 | TToolBar (VCL native MaskBlt) | `ToolbarHooks.cpp` + `OpaqueBitmapSource` | opaque 32bpp copy, настоящая маска/ROP | тот же native mask-путь, не chroma |
-| Restorator: TResTreeView / TImgViewBox (EXE SRCCOPY BitBlt/StretchBlt) | `delphi/RestoratorImages.cpp` + `OpaqueBitmapSource` | локальная альфа-маска по яркости для картинки на чёрном | тот же путь, настройка не применяется |
+| Restorator: TResTreeView / TImgViewBox (EXE SRCCOPY BitBlt/StretchBlt) | `delphi/RestoratorImages.cpp` + `OpaqueBitmapSource` | opaque 32bpp copy как есть; по цвету ничего не вырезается | тот же путь, настройка не применяется |
+| Restorator: подложка картинки с прозрачностью (EXE FillRect в memory-DC) | `delphi/RestoratorCheckerboard.cpp` | заливка цветом окна по всей последней DIB-секции заменяется шахматной (205 / белый, клетка 4 px) до того, как EXE нарисует картинку | настройка не применяется |
+| TScrollBox: изображения графических контролов (EXE SRCCOPY StretchBlt) | `delphi/TPanelDraw.cpp` + `OpaqueBitmapSource` | та же opaque-копия как есть; источник размером с клиент — native | тот же путь, настройка не применяется |
+| TScrollBox: значки и курсоры (EXE DrawIconEx) | `delphi/TPanelDraw.cpp` + `PictureAlpha.h` | значок рисуется оригиналом на чёрном и на белом и смешивается с собственной прозрачностью | тот же путь, настройка не применяется |
 | Button (comctl32 BitBlt non-alpha) | `ButtonHooks.cpp` | black-key | `SpriteEffect` |
 | MFC Afx toolbar (16×16) | `RootGdiHooks.cpp` | black-key (без настройки/UI) | — |
 | Static с изображением | `WndCompat/Controls/StaticSubclass.cpp` | только `Promise32BPP` (alpha=255, цвет не удаляется) | `SpriteEffect` |
@@ -63,13 +66,29 @@ caller текущего BeginPaint** (new либо legacy) и доказанны
 DoubleBuffered; см. [Delphi-VCL, тест 101](Delphi-VCL.md#тест-101-непрозрачность-изображений-ttoolbar-и-вложенного-tpanel--native-bwm-пути)
 и [тест 102](Delphi-VCL.md#тест-102-tlistview--native-maskblt-паритет-restorator).
 
-Стартовые картинки Restorator (`RestoratorImages`) — тоже отдельный путь: альфа
-копии — попиксельная маска по яркости (A = max канала, RGB без изменений),
-построенная в самом модуле; порогов для содержимого и областей нет,
-`ApplyBlackKeyAlpha` и chroma-настройка не используются. Маршрут — в
+Картинки Restorator (`RestoratorImages`: стартовые подсказки и графические
+ресурсы в `TResTreeView` / `TImgViewBox`) — тоже отдельный путь: копия с A=255
+рисуется как есть, вместе со всем, на чём EXE собрал картинку (чёрный фон у
+подсказок). Из готовой картинки фон не убирается ничем: маска по яркости
+(тест 120) и вырез цвета окна от контура (тест 131) отменены — картинка уже
+сведена, её сглаженный край смешан с фоном, и ключ по цвету его не повторяет.
+`ApplyBlackKeyAlpha` и chroma-настройка не используются. Так же выводятся
+изображения графических контролов в `TScrollBox` (`TPanelDraw.cpp`); значки и
+курсоры в нём (`DrawIconEx` из EXE) смешиваются с собственной прозрачностью
+(`Subsystems/PictureAlpha.h`).
+
+Прозрачность картинки показывает шахматная подложка, как у донора
+(`RestoratorCheckerboard`): там, где EXE собирает картинку, его заливка цветом
+окна по всей последней DIB-секции в memory-DC заменяется узором
+RGB(205,205,205) / белый с клеткой 4 пикселя, и декодер EXE сам смешивает
+картинку с ним. Импорты EXE `FillRect` и `CreateDIBSection` берутся при первой
+перерисовке `TResTreeView` / `TImgViewBox` на стекле и держатся до выгрузки.
+Маршрут — в
 [Delphi-VCL, тест 119](Delphi-VCL.md#тест-119-restorator--стартовые-картинки-trestreeview-и-timgviewbox-без-чёрной-подложки),
-маска — в
-[тесте 120](Delphi-VCL.md#тест-120-restorator--альфа-маска-по-яркости-вместо-блочной-политики).
+значки и подписи `TScrollBox` — в
+[тесте 131](Delphi-VCL.md#тест-131-стили-ttoolbar-restorator--картинки-значки-и-подписи-tscrollbox),
+политика картинок и подложка — в
+[тесте 132](Delphi-VCL.md#тест-132-restorator--шахматная-подложка-вместо-выреза-цвета-окна).
 
 ### Static (`STM_SETIMAGE`)
 

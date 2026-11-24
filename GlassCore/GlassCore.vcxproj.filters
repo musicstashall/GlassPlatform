@@ -118,10 +118,16 @@
     <ClCompile Include="src\Hooks\delphi\RestoratorImages.cpp">
       <Filter>src\Hooks\delphi</Filter>
     </ClCompile>
+    <ClCompile Include="src\Hooks\delphi\RestoratorCheckerboard.cpp">
+      <Filter>src\Hooks\delphi</Filter>
+    </ClCompile>
     <ClCompile Include="src\Hooks\delphi\THexDumpDraw.cpp">
       <Filter>src\Hooks\delphi</Filter>
     </ClCompile>
     <ClCompile Include="src\Hooks\delphi\TResVersionEditorDraw.cpp">
+      <Filter>src\Hooks\delphi</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Hooks\delphi\THintWindowDraw.cpp">
       <Filter>src\Hooks\delphi</Filter>
     </ClCompile>
     <ClCompile Include="src\Hooks\delphi\TButtonGroupsDraw.cpp">
@@ -390,10 +396,16 @@
     <ClInclude Include="Include\Hooks\delphi\RestoratorImages.h">
       <Filter>Include\Hooks\delphi</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Hooks\delphi\RestoratorCheckerboard.h">
+      <Filter>Include\Hooks\delphi</Filter>
+    </ClInclude>
     <ClInclude Include="Include\Hooks\delphi\THexDumpDraw.h">
       <Filter>Include\Hooks\delphi</Filter>
     </ClInclude>
     <ClInclude Include="Include\Hooks\delphi\TResVersionEditorDraw.h">
+      <Filter>Include\Hooks\delphi</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Hooks\delphi\THintWindowDraw.h">
       <Filter>Include\Hooks\delphi</Filter>
     </ClInclude>
     <ClInclude Include="Include\Hooks\delphi\TButtonGroupsDraw.h">
@@ -538,6 +550,9 @@
       <Filter>Include\Subsystems</Filter>
     </ClInclude>
     <ClInclude Include="Include\Subsystems\OpaqueBitmapSource.h">
+      <Filter>Include\Subsystems</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Subsystems\PictureAlpha.h">
       <Filter>Include\Subsystems</Filter>
     </ClInclude>
     <ClInclude Include="Include\Subsystems\Menu.h">

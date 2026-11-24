@@ -2,6 +2,7 @@
 #include "WndCompat.h"
 
 #include "TooltipSubclass.h"
+#include "DelphiHintPaint.h"
 #include <GlassMessages.h>
 #include <TooltipEventProvider.h>
 #include <RegHelper.h>
@@ -16,6 +17,10 @@ namespace
 {
     std::mutex g_tooltipMutex;
     std::vector<HWND> g_tooltipWindows;
+
+    // dwRefData сабкласса: окно подсказки VCL (THintWindow). Его рисует код EXE,
+    // а не comctl32: стирание, рамку и WM_PAINT сначала получает GlassCore.
+    constexpr DWORD_PTR kVclHintWindow = 1;
 
     [[nodiscard]] bool Tooltip_IsStandardAttachable(HWND hWnd) noexcept
     {
@@ -106,20 +111,41 @@ namespace
             }
         }
 
+        const bool vclHint = dwRefData == kVclHintWindow;
+
+        // Стирание и рамку окна подсказки VCL рисует GlassCore (прозрачная база):
+        // родные обработчики VCL залили бы клиент цветом подсказки и обвели окно.
+        if (vclHint && (uMsg == WM_ERASEBKGND || uMsg == WM_NCPAINT))
+        {
+            LRESULT answered{};
+            if (WndCompat::TryHandleDelphiHintPaint(hWnd, uMsg, wParam, lParam, answered))
+                return answered;
+        }
+
         if (uMsg == WM_PAINT || uMsg == WM_PRINTCLIENT)
         {
+            // WM_PAINT окна подсказки VCL идёт внутри сессии GlassCore; иначе и для
+            // прочих тултипов — родной обработчик.
+            const auto paint = [&]() -> LRESULT
+            {
+                LRESULT painted{};
+                if (vclHint && WndCompat::TryHandleDelphiHintPaint(hWnd, uMsg, wParam, lParam, painted))
+                    return painted;
+                return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+            };
+
             bool broadcast = false;
             if (p && p->OnTooltipPaintSessionBegin && p->OnTooltipPaintSessionEnd)
             {
                 broadcast = p->OnTooltipPaintSessionBegin(hWnd);
-                LRESULT const r = DefSubclassProc(hWnd, uMsg, wParam, lParam);
+                LRESULT const r = paint();
                 p->OnTooltipPaintSessionEnd(hWnd);
                 if (broadcast)
                     WndCompat::Tooltip_BroadcastThemeChanged(hWnd);
                 return r;
             }
 
-            return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+            return paint();
         }
 
         return DefSubclassProc(hWnd, uMsg, wParam, lParam);
@@ -195,7 +221,7 @@ namespace WndCompat
                 return;
         }
 
-        if (!SetWindowSubclass(hWnd, TooltipSubclassProc, kTooltipSubclassId, 0))
+        if (!SetWindowSubclass(hWnd, TooltipSubclassProc, kTooltipSubclassId, kVclHintWindow))
             return;
 
         {

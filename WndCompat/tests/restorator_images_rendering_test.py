@@ -2,9 +2,11 @@
 """Run the complete production RestoratorImages unit with Win32 doubles.
 
 Optimized and Debug/probe configurations exercise the pixel policy byte by
-byte, the class/session/caller/DC gates, the two-function Detours lease and
-resource ownership. This is NOT Windows GDI/DWM rasterization, real export
-patching, the Detours ABI or a Windows/MSVC build acceptance.
+byte - the picture drawn as it is, opaque, with everything it was composed on:
+nothing is masked or cut out of it - the class/session/caller/DC gates, the
+two-function Detours lease, the arming of the checkerboard unit and resource
+ownership. This is NOT Windows GDI/DWM rasterization, real export patching,
+the Detours ABI or a Windows/MSVC build acceptance.
 """
 from pathlib import Path
 import os
@@ -61,17 +63,11 @@ class RestoratorImagesRenderingTest(unittest.TestCase):
                 result = subprocess.run([str(binary), name], capture_output=True, text=True, timeout=120)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_placeholder_alpha_is_the_brightness_of_every_pixel_and_nothing_dark_stays_opaque(self):
-        self.run_case('policy-placeholder')
+    def test_a_picture_is_drawn_as_it_is_opaque_with_its_own_black_background(self):
+        self.run_case('policy-opaque')
 
-    def test_every_level_and_channel_maps_to_its_own_alpha_whatever_the_neighbours(self):
-        self.run_case('policy-levels')
-
-    def test_thick_dark_blocks_and_enclosed_black_are_masked_like_any_other_pixel(self):
-        self.run_case('policy-mask')
-
-    def test_pictures_without_a_three_quarter_black_outline_are_not_touched(self):
-        self.run_case('policy-outline')
+    def test_the_colour_the_exe_composed_a_picture_on_is_never_cut_out_of_it(self):
+        self.run_case('policy-background')
 
     def test_tree_and_viewer_copy_and_stretch_keep_the_callers_geometry(self):
         self.run_case('routes')
@@ -96,6 +92,9 @@ class RestoratorImagesRenderingTest(unittest.TestCase):
 
     def test_client_buffer_and_already_prepared_alpha(self):
         self.run_case('buffered')
+
+    def test_every_paint_of_the_exes_tree_or_viewer_on_glass_arms_the_checkerboard_unit(self):
+        self.run_case('arming')
 
 
 if __name__ == '__main__':

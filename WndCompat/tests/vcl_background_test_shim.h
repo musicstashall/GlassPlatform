@@ -2,8 +2,10 @@
 // unit. They model what the module can observe: the EXE's FillRect import, the
 // order in which PaintDispatcher calls its providers around BeginPaint, a VCL
 // window that erases itself when it receives WM_ERASEBKGND, and what a DC tells
-// about itself (its kind, its window, its clip). There are no threads: a test
-// says which one is calling and what another one did before a lock was taken.
+// about itself (its kind, its window, its clip, its origins). There are no
+// threads: a test says which one is calling and what another one did before a
+// lock was taken. A brush made for a tint is a brush of the shim: it remembers
+// its colour and alpha, and whether it was deleted.
 // This is not Windows GDI, DWM, the update region, the real PE import table or
 // the VCL.
 #pragma once
@@ -32,6 +34,7 @@ using BOOL = int;
 using UINT = unsigned int;
 using LONG = std::int32_t;
 using DWORD = std::uint32_t;
+using UCHAR = unsigned char;
 using COLORREF = DWORD;
 using ULONGLONG = std::uint64_t;
 using WCHAR = wchar_t;
@@ -57,9 +60,9 @@ struct PAINTSTRUCT { HDC hdc{}; BOOL fErase{}; RECT rcPaint{}; };
 using LPPAINTSTRUCT = PAINTSTRUCT*;
 struct DRAWITEMSTRUCT { UINT CtlType{}, CtlID{}, itemID{}, itemAction{}, itemState{}; HWND hwndItem{}; HDC hDC{}; RECT rcItem{}; };
 inline constexpr BOOL TRUE = 1, FALSE = 0;
-inline constexpr UINT BS_SOLID = 0, BS_HATCHED = 2, OBJ_BITMAP = 7;
+inline constexpr UINT BS_SOLID = 0, BS_HATCHED = 2, BS_PATTERN = 3, OBJ_BITMAP = 7;
 inline constexpr DWORD OBJ_DC = 3, OBJ_MEMDC = 10;
-inline constexpr int COLOR_WINDOW = 5, COLOR_BTNFACE = 15;
+inline constexpr int COLOR_WINDOW = 5, COLOR_HIGHLIGHT = 13, COLOR_BTNFACE = 15;
 inline constexpr int MM_TEXT = 1, MM_ANISOTROPIC = 8;
 inline constexpr int NULLREGION = 1, SIMPLEREGION = 2;
 inline constexpr DWORD BLACKNESS = 0x42;
@@ -68,7 +71,7 @@ inline constexpr UINT LB_GETTOPINDEX = 0x18e, LB_GETCOUNT = 0x18b, LB_GETITEMREC
 inline constexpr LRESULT LB_ERR = -1;
 inline constexpr int DBG_NORMAL = 1;
 
-namespace GlassShared { enum class GlassControlKind { None, ListBox, Edit, ComboBox, RichEdit50W, ListView, TreeView }; }
+namespace GlassShared { enum class GlassControlKind { None, ListBox, Edit, ComboBox, RichEdit50W, ListView, TreeView, TabControl, Header, Toolbar }; }
 struct TestWindow
 {
     std::wstring cls = L"TListBox";
@@ -109,8 +112,14 @@ namespace BgTest
     inline std::unordered_map<HDC, HWND> paintDcs;      // paint DCs the dispatcher has recorded
     inline thread_local DWORD error{};
     inline ULONGLONG clock = 100;
-    inline COLORREF windowColor = 0xffffff, faceColor = 0xf0f0f0;
+    inline COLORREF windowColor = 0xffffff, faceColor = 0xf0f0f0, highlightColor = 0xd77800;
     inline bool failBlack = false, failObject = false;
+    inline bool failTint = false, failDirectFill = false;
+    // The brushes made for a tint: colour and alpha of the live ones, and how
+    // many were made and deleted.
+    struct TintBrush { COLORREF color{}; int alpha{}; };
+    inline std::unordered_map<HBRUSH, TintBrush> tints;
+    inline int tintsMade = 0, tintsDeleted = 0;
     inline int nativeFillResult = 1;
     inline DWORD thread = 1;                            // the calling thread
     inline int windowLookups = 0;                       // WindowFromDC calls
@@ -130,6 +139,8 @@ namespace BgTest
         HWND hwnd{};
         WPARAM wParam{};
         LPARAM lParam{};
+        int tintAlpha = -1;             // a fill through a brush made for a tint: its alpha...
+        COLORREF tintColor{};           // ...and its colour
     };
     inline std::vector<Event> events;
     inline std::function<void(HWND, HDC)> duringErase;   // runs inside the window's erase handler, before its fill
@@ -167,11 +178,36 @@ inline HGDIOBJ GetCurrentObject(HDC dc, UINT type) { assert(type == OBJ_BITMAP);
 inline int GetClipBox(HDC dc, RECT* out)
 { *out = dc->frame ? dc->frameClip : dc->owner ? dc->owner->client : RECT{}; return dc->clipKind; }
 inline COLORREF GetSysColor(int index)
-{ assert(index == COLOR_WINDOW || index == COLOR_BTNFACE); return index == COLOR_WINDOW ? BgTest::windowColor : BgTest::faceColor; }
+{
+    assert(index == COLOR_WINDOW || index == COLOR_BTNFACE || index == COLOR_HIGHLIGHT);
+    return index == COLOR_WINDOW ? BgTest::windowColor : index == COLOR_BTNFACE ? BgTest::faceColor : BgTest::highlightColor;
+}
 inline int GetObjectW(HBRUSH brush, int bytes, void* out)
 {
     if (BgTest::failObject || !brush || bytes != static_cast<int>(sizeof(LOGBRUSH))) return 0;
     std::memcpy(out, brush, sizeof(LOGBRUSH)); return bytes;
+}
+// GlassShared's helper: a pattern brush of one premultiplied pixel.
+namespace Shared::WinApiUtils
+{
+    inline HBRUSH CreateSolidColorBrushWithAlpha(COLORREF color, UCHAR alpha)
+    {
+        SetLastError(0xb104);
+        if (BgTest::failTint) return nullptr;
+        const HBRUSH brush = new LOGBRUSH{BS_PATTERN, color, 0};
+        BgTest::tints[brush] = {color, alpha};
+        ++BgTest::tintsMade;
+        return brush;
+    }
+}
+inline BOOL DeleteObject(HGDIOBJ object)
+{
+    const auto it = BgTest::tints.find(static_cast<HBRUSH>(object));
+    assert(it != BgTest::tints.end());      // the unit deletes only what it made
+    BgTest::tints.erase(it);
+    ++BgTest::tintsDeleted;
+    delete static_cast<HBRUSH>(object);
+    return TRUE;
 }
 inline ULONGLONG GetTickCount64() { return BgTest::clock; }
 inline BOOL PatBlt(HDC dc, int x, int y, int w, int h, DWORD rop)
@@ -191,11 +227,16 @@ inline int NativeFillRect(HDC dc, const RECT* rect, HBRUSH brush)
     SetLastError(0xb102);
     return BgTest::nativeFillResult;
 }
-// What the production unit calls by name when it has no original to forward to.
+// What the production unit calls by name: when it has no original to forward
+// to, and when it lays a tint itself.
 inline int FillRect(HDC dc, const RECT* rect, HBRUSH brush)
 {
-    BgTest::events.push_back({BgTest::Kind::DirectFill, dc, rect ? *rect : RECT{}, brush});
-    return 1;
+    BgTest::Event e{BgTest::Kind::DirectFill, dc, rect ? *rect : RECT{}, brush};
+    if (const auto it = BgTest::tints.find(brush); it != BgTest::tints.end())
+    { e.tintAlpha = it->second.alpha; e.tintColor = it->second.color; }
+    BgTest::events.push_back(e);
+    SetLastError(0xb105);
+    return BgTest::failDirectFill ? 0 : 1;
 }
 // A call the EXE makes through its import table.
 inline int ExeFillRect(TestModule& exe, HDC dc, const RECT* rect, HBRUSH brush)
