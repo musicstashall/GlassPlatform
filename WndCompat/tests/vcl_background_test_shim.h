@@ -71,7 +71,7 @@ inline constexpr UINT LB_GETTOPINDEX = 0x18e, LB_GETCOUNT = 0x18b, LB_GETITEMREC
 inline constexpr LRESULT LB_ERR = -1;
 inline constexpr int DBG_NORMAL = 1;
 
-namespace GlassShared { enum class GlassControlKind { None, ListBox, Edit, ComboBox, RichEdit50W, ListView, TreeView, TabControl }; }
+namespace GlassShared { enum class GlassControlKind { None, ListBox, Edit, ComboBox, RichEdit50W, ListView, TreeView, TabControl, Header, Toolbar }; }
 struct TestWindow
 {
     std::wstring cls = L"TListBox";

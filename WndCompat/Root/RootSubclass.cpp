@@ -53,6 +53,7 @@
 #include "Root/RootSubclassShared.h"
 #include "Root/DelphiPanelPaint.h"
 #include "Root/DelphiRestoreProbe.h"
+#include "Root/DelphiShowErase.h"
 #include "Root/RootBackdropRefreshThrottle.h"
 #include "Root/TaskbarHost.h"
 #include <string>
@@ -995,6 +996,13 @@ namespace
 
         if (WndCompat::IsShuttingDown())
             return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+
+        // VCL-форма, показанная заново, начинает с поверхности, которую Windows не
+        // очистила. Контрол, который на стирание ничего не рисует (кнопка, флажок,
+        // прозрачный TToolBar, TTrackBar), показывает её до своего WM_PAINT. На первом
+        // WM_NCPAINT / WM_ERASEBKGND после показа под всем, что ждёт перерисовки,
+        // кладётся прозрачная база. Сообщения идут дальше без изменений.
+        WndCompat::DelphiShowErase::OnRootMessage(hWnd, uMsg, lParam);
 
 #if defined(_DEBUG)
         // Только Debug: что лежит на поверхности VCL-формы под каждым её контролом

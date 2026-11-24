@@ -578,6 +578,7 @@ namespace
         {L"TListView", GlassControlKind::ListView, true}, {L"TSystemListView", GlassControlKind::ListView, true},
         {L"TTreeView", GlassControlKind::TreeView, true}, {L"TResTreeView", GlassControlKind::TreeView, true},
         {L"TTabControl", GlassControlKind::TabControl, true}, {L"TPageControl", GlassControlKind::TabControl, true},
+        {L"TComboBox", GlassControlKind::ComboBox, true}, {L"THeaderControl", GlassControlKind::Header, true},
     };
     // A tint: the transparent base, then the colour through a brush made for
     // it, which is gone afterwards. Nothing else is drawn.
@@ -924,7 +925,12 @@ namespace
                               Pair{L"RICHEDIT50W", GlassControlKind::RichEdit50W},
                               Pair{L"TEdit2", GlassControlKind::Edit}, Pair{L"MyTEdit", GlassControlKind::Edit},
                               Pair{L"TEdi", GlassControlKind::Edit}, Pair{L"", GlassControlKind::Edit},
-                              Pair{L"TComboBox", GlassControlKind::ComboBox}, Pair{L"TPanel", GlassControlKind::None},
+                              Pair{L"TComboBox", GlassControlKind::Edit}, Pair{L"TComboBox", GlassControlKind::None},
+                              Pair{L"ComboBox", GlassControlKind::ComboBox}, Pair{L"TColorBox", GlassControlKind::ComboBox},
+                              Pair{L"TDriveComboBox", GlassControlKind::ComboBox}, Pair{L"TFilterComboBox", GlassControlKind::ComboBox},
+                              Pair{L"THeaderControl", GlassControlKind::None}, Pair{L"THeaderControl", GlassControlKind::ComboBox},
+                              Pair{L"SysHeader32", GlassControlKind::Header}, Pair{L"TListBox", GlassControlKind::Header},
+                              Pair{L"TToolBar", GlassControlKind::Toolbar}, Pair{L"TPanel", GlassControlKind::None},
                               Pair{L"TTabControl", GlassControlKind::ListBox}, Pair{L"TPageControl", GlassControlKind::None},
                               Pair{L"SysTabControl32", GlassControlKind::TabControl}, Pair{L"TToolBar", GlassControlKind::TabControl},
                               Pair{L"TListBox", GlassControlKind::TabControl}, Pair{L"TTabSheet", GlassControlKind::TabControl}})
@@ -937,7 +943,7 @@ namespace
         // Most windows are of another kind, and every fill of the EXE comes
         // through here: such a window is not asked for its class. (A Debug build
         // asks once, for the line it writes about the fill.)
-        for (const GlassControlKind kind : {GlassControlKind::None, GlassControlKind::ComboBox})
+        for (const GlassControlKind kind : {GlassControlKind::None, GlassControlKind::Toolbar})
         {
             f.list.kind = kind; BgTest::classLookups = 0;
             native(&f.eraseDc, f.client, &f.window);
@@ -1245,12 +1251,12 @@ namespace
         native(&f.foreignDc, parent, &f.custom);
         f.foreignDc.window = POINT{};
         // The erase of a class which is not in the table, marked or not.
-        TestWindow combo; combo.cls = L"TComboBox"; combo.kind = GlassControlKind::ComboBox; combo.client = RECT{0, 0, 145, 21};
-        TestDC comboDc; comboDc.owner = &combo; comboDc.clipKind = 3;
-        native(&comboDc, combo.client, &f.window);
-        native(&comboDc, combo.client, &f.hatch);
-        BgTest::failObject = true; native(&comboDc, combo.client, &f.window); BgTest::failObject = false;
-        CHECK(ExeFillRect(f.exe, &comboDc, nullptr, &f.window) == 7); Take();
+        TestWindow bar; bar.cls = L"TToolBar"; bar.kind = GlassControlKind::Toolbar; bar.client = RECT{0, 0, 298, 30};
+        TestDC barDc; barDc.owner = &bar; barDc.clipKind = 3;
+        native(&barDc, bar.client, &f.window);
+        native(&barDc, bar.client, &f.hatch);
+        BgTest::failObject = true; native(&barDc, bar.client, &f.window); BgTest::failObject = false;
+        CHECK(ExeFillRect(f.exe, &barDc, nullptr, &f.window) == 7); Take();
         [[maybe_unused]] auto lines = Logs(L"] erase-other ");
 #if defined(_DEBUG)
         // hwnd, kind, dc, the rectangle, the client's size, the clip, the origins, the brush
@@ -1266,47 +1272,47 @@ namespace
         CHECK(lines[0].texts == std::vector<std::wstring>{L"TPanel"});
         CHECK(lines[0].numbers == line(&f.other, 0, &f.foreignDc, parent, SIMPLEREGION, POINT{-20, -30}, POINT{}, 0, 0xf0f0f0));
         CHECK(lines[1].numbers == line(&f.other, 0, &f.foreignDc, parent, SIMPLEREGION, POINT{}, POINT{20, 30}, 0, 0x00c0ff));
-        CHECK(lines[2].texts == std::vector<std::wstring>{L"TComboBox"});
-        const int comboKind = static_cast<int>(GlassControlKind::ComboBox);
-        CHECK(lines[2].numbers == line(&combo, comboKind, &comboDc, combo.client, 3, POINT{}, POINT{}, 0, 0xffffff));
-        CHECK(lines[3].numbers == line(&combo, comboKind, &comboDc, combo.client, 3, POINT{}, POINT{}, 2, 0xffffff));
-        CHECK(lines[4].numbers == line(&combo, comboKind, &comboDc, combo.client, 3, POINT{}, POINT{}, -1, 0));
-        CHECK(lines[5].numbers == line(&combo, comboKind, &comboDc, RECT{}, 3, POINT{}, POINT{}, 0, 0xffffff));
+        CHECK(lines[2].texts == std::vector<std::wstring>{L"TToolBar"});
+        const int barKind = static_cast<int>(GlassControlKind::Toolbar);
+        CHECK(lines[2].numbers == line(&bar, barKind, &barDc, bar.client, 3, POINT{}, POINT{}, 0, 0xffffff));
+        CHECK(lines[3].numbers == line(&bar, barKind, &barDc, bar.client, 3, POINT{}, POINT{}, 2, 0xffffff));
+        CHECK(lines[4].numbers == line(&bar, barKind, &barDc, bar.client, 3, POINT{}, POINT{}, -1, 0));
+        CHECK(lines[5].numbers == line(&bar, barKind, &barDc, RECT{}, 3, POINT{}, POINT{}, 0, 0xffffff));
         // Not reported: a window which is not VCL's, one that cannot tell its
         // class, another thread, another mode, a buffer, the screen, a session of
         // the window - and a control of the table, which has a line of its own.
         BgTest::clock += 1000; BgTest::logs.clear();
         for (LPCWSTR cls : {L"Edit", L"ComboBox", L"SysTabControl32", L"tPanel", L""})
-        { combo.cls = cls; native(&comboDc, combo.client, &f.window); }
-        combo.cls = L"TComboBox";
-        combo.valid = false; native(&comboDc, combo.client, &f.window); combo.valid = true;
-        BgTest::thread = 2; native(&comboDc, combo.client, &f.window); BgTest::thread = 1;
-        combo.thread = 2; native(&comboDc, combo.client, &f.window); combo.thread = 1;
-        BgTest::full = false; native(&comboDc, combo.client, &f.window); BgTest::full = true;
-        native(&f.memoryDc, combo.client, &f.window);
+        { bar.cls = cls; native(&barDc, bar.client, &f.window); }
+        bar.cls = L"TToolBar";
+        bar.valid = false; native(&barDc, bar.client, &f.window); bar.valid = true;
+        BgTest::thread = 2; native(&barDc, bar.client, &f.window); BgTest::thread = 1;
+        bar.thread = 2; native(&barDc, bar.client, &f.window); bar.thread = 1;
+        BgTest::full = false; native(&barDc, bar.client, &f.window); BgTest::full = true;
+        native(&f.memoryDc, bar.client, &f.window);
         TestDC screen; screen.screen = true;
-        native(&screen, combo.client, &f.window);
-        f.BeginDc(combo); native(&comboDc, combo.client, &f.window); f.EndDc(combo);
-        CHECK(!f.Begin(combo, comboDc, false)); native(&comboDc, combo.client, &f.window); f.End(combo, comboDc);
+        native(&screen, bar.client, &f.window);
+        f.BeginDc(bar); native(&barDc, bar.client, &f.window); f.EndDc(bar);
+        CHECK(!f.Begin(bar, barDc, false)); native(&barDc, bar.client, &f.window); f.End(bar, barDc);
         CHECK(BgTest::logs.empty());
         CHECK(f.Fill(&f.eraseDc, f.client, &f.window) == 1); Take();
         CHECK(Logs(L"] erase-other ").empty() && Logs(L"] erase-outside ").size() == 1);
         // A window without glass on its root is reported: the line is about the
         // fill, not about what the platform would do with it.
         BgTest::clock += 1000; BgTest::logs.clear();
-        combo.backdrop = false; native(&comboDc, combo.client, &f.window); combo.backdrop = true;
+        bar.backdrop = false; native(&barDc, bar.client, &f.window); bar.backdrop = true;
         CHECK(Logs(L"] erase-other ").size() == 1);
         // 64 a second, apart from the budget of the other line.
         BgTest::clock += 1000; BgTest::logs.clear();
-        for (int i = 0; i < 80; ++i) native(&comboDc, combo.client, &f.window);
+        for (int i = 0; i < 80; ++i) native(&barDc, bar.client, &f.window);
         CHECK(Logs(L"] erase-other ").size() == 64);
         for (int i = 0; i < 40; ++i) { CHECK(f.Fill(&f.eraseDc, f.client, &f.window) == 1); Take(); }
         CHECK(Logs(L"] erase-outside ").size() == 32 && Logs(L"] erase-other ").size() == 64);
         BgTest::clock += 999;
-        native(&comboDc, combo.client, &f.window);
+        native(&barDc, bar.client, &f.window);
         CHECK(Logs(L"] erase-other ").size() == 64);
         BgTest::clock += 1;
-        native(&comboDc, combo.client, &f.window);
+        native(&barDc, bar.client, &f.window);
         CHECK(Logs(L"] erase-other ").size() == 65);
 #else
         CHECK(lines.empty() && BgTest::logs.empty());

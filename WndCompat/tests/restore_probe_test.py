@@ -44,7 +44,9 @@ class RestoreProbeTest(unittest.TestCase):
             binary = tmp / f'restore-probe-{mode}'
             result = subprocess.run(compiler + [
                 '-std=c++20', '-Wall', '-Wextra', '-Werror', '-Wno-sign-compare',
-                '-Wno-unknown-pragmas', *flags, '-I', str(stubs),
+                # MapWindowPoints takes a RECT as two POINTs, as its documentation shows;
+                # MSVC does not optimise on the types of the two, and neither may this build.
+                '-Wno-unknown-pragmas', '-fno-strict-aliasing', *flags, '-I', str(stubs),
                 str(ROOT / 'WndCompat/tests/restore_probe_tests.cpp'),
                 '-o', str(binary),
             ], capture_output=True, text=True, timeout=180)

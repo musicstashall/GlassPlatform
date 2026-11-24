@@ -87,7 +87,10 @@ namespace GlassCore::DelphiBackground
         // background is transparent, whatever VCL erased. The names and kinds are
         // the classifier's. `windowOnly`: for this class COLOR_BTNFACE is a colour
         // of its own, which the edit hooks keep - like any other colour of such a
-        // control, as a tint. A tab control is repainted whole by its WM_PAINT.
+        // control, as a tint. A tab control and a header are repainted whole by
+        // their WM_PAINT. A combo box is erased by VCL only in its simple style,
+        // with the brush of its parent (TCustomComboBox.WMEraseBkgnd); the other
+        // combo classes of the classifier cannot have that style.
         struct EraseClass { const wchar_t* name; GlassShared::GlassControlKind kind; bool windowOnly; };
         constexpr EraseClass kEraseClasses[] = {
             { L"TListBox", GlassShared::GlassControlKind::ListBox, false },
@@ -113,6 +116,8 @@ namespace GlassCore::DelphiBackground
             { L"TResTreeView", GlassShared::GlassControlKind::TreeView, false },
             { L"TTabControl", GlassShared::GlassControlKind::TabControl, false },
             { L"TPageControl", GlassShared::GlassControlKind::TabControl, false },
+            { L"TComboBox", GlassShared::GlassControlKind::ComboBox, false },
+            { L"THeaderControl", GlassShared::GlassControlKind::Header, false },
         };
         struct EraseTarget { WCHAR cls[64]{}; bool windowOnly{}; bool number{}; };
         bool IsEraseTarget(HWND hwnd, EraseTarget& target) noexcept
@@ -121,7 +126,8 @@ namespace GlassCore::DelphiBackground
             if (!hwnd || !GlassCore::Root::IsFullInjectionMode()) return false;
             const Kind kind = GlassShared::GlassGetWindowKind(hwnd);
             if ((kind != Kind::ListBox && kind != Kind::Edit && kind != Kind::RichEdit50W
-                    && kind != Kind::ListView && kind != Kind::TreeView && kind != Kind::TabControl)
+                    && kind != Kind::ListView && kind != Kind::TreeView && kind != Kind::TabControl
+                    && kind != Kind::ComboBox && kind != Kind::Header)
                 || !GetClassNameW(hwnd, target.cls, _countof(target.cls))) return false;
             for (const EraseClass& c : kEraseClasses)
             {

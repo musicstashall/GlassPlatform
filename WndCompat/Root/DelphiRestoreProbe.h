@@ -7,7 +7,8 @@
 // each of its child controls lies, at three moments after the window was shown
 // or restored:
 //   shown   - on the first WM_NCPAINT / WM_ERASEBKGND of the window: before
-//             Windows has erased anything in it;
+//             Windows has erased anything in it, and after DelphiShowErase
+//             cleared what is waiting for a paint;
 //   erased  - on a message posted from there: after the erase passes Windows
 //             runs on its own, before the first WM_PAINT (a posted message is
 //             taken before WM_PAINT);

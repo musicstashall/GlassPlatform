@@ -328,6 +328,9 @@
     <ClInclude Include="Root\DelphiRestoreProbe.h">
       <Filter>Root</Filter>
     </ClInclude>
+    <ClInclude Include="Root\DelphiShowErase.h">
+      <Filter>Root</Filter>
+    </ClInclude>
     <ClInclude Include="Root\TaskbarHost.h">
       <Filter>Root</Filter>
     </ClInclude>
