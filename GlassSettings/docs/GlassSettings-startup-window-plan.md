@@ -286,3 +286,55 @@ App.OnLaunched
    ShellExt (WM_APP, elevated GS), `Closing → Capture → Dispose RegWatch`, cold start x86 без AV.
 7. Placement: окно с «заэкранным» RECT в реестре открывается по центру primary; перетаскивание на
    отключённый монитор не «запечатывает» координаты (см. `WindowPlacementStore.Save`).
+
+---
+
+## 13. Э7 — первый кадр и индикатор по факту прогонов (2026-11-25, после Э1–Э4)
+
+Прогон на Windows (x64 Debug) показал: трюков с окном больше нет (`cloaked=0` и `switchers=True` на всех
+метках, `visible=False → True` ровно один раз на `activate:end`), но старт выглядит так:
+«пустое окно без материала» → «материал + контент» → «иконка и бублик поверх уже загруженного контента».
+
+### Замеры пользователя (трасса `StartupPhaseTrace`)
+
+```
++245ms chrome+backdrop        +411ms activate:end   (visible=True, cloaked=0, backdrop=GlassWindowBackdrop)
++260ms placement 1444x848     +467ms titlebar-chrome
++262ms ctor:exit              +469ms cold-start-core
++380ms shell-ready            +1499ms first-present  ← +1030 мс от activate:end
+                              +3357ms indicator-dismiss ← +1858 мс от первого кадра
+```
+
+### Причины (все — гонка UI-потока, а не DWM/WinUI)
+
+| # | Причина | Доказательство |
+|---|---------|----------------|
+| П1 | `Activated += OnFirstActivated` (страховка, оставленная с Э2) зовёт `TryCompleteColdStartBootstrap()` **сразу на активации** → весь cold start (preloads обоев/миниатюр, `AppWindow.TitleBar.*`) ложится между `ShowWindow` и первой композицией | `titlebar-chrome`/`cold-start-core` (+467/+469) идут **раньше** `first-present` (+1499) |
+| П2 | PostNav-цепочка (`PlatformPresenceService.Attach`, watchers, `EnsureGlassRuntime`, `PublishColdStartIdleSnapshot`) стартует из `HomePage.OnLoaded` на следующем pump — тоже до первого кадра. `CompositionTarget.Rendering` поднимается на UI-потоке, поэтому любой блок потока сдвигает сам кадр:material и индикатор уезжают вместе с ним | разрыв +469 → +1499; рядом `[ReflectionConfigure] shared wallpaper decode: SetSourceAsync begin/complete` |
+| П3 | `ApplyAppBranding()` переприсваивал `LoadingIcon.Source` (файловый `BitmapImage`) поверх XAML-ного `ms-appx:///Assets/app.ico` → второй decode, и иконка прилетает на кадр позже остального контента | «значок появляется поверх загруженного контента» |
+| П4 | Снятие индикатора привязано к данным (`maxPreviewWaitMs=800`, `_shellInteractiveReady`-поллинг, `LoadingMinimumMs`), а не к кадру → бублик живёт ~1.9 с уже над готовым контентом | +1499 → +3357 |
+
+### Что сделано (Э7.1 — ортогонально дизайну индикатора)
+
+1. `OnFirstActivated` удалён вместе с подпиской: `RunColdStartBootstrapCore` запускается **только** из
+   очереди первого кадра. Страховка «кадр так и не наступил» — `FirstPresentFallbackAsync` (1500 мс).
+2. Новая инфраструктура `RunAfterFirstPresent(Action)` + `CompleteFirstPresent(...)` (очередь, дренируется
+   ровно один раз на первом `Rendering` или на fallback-таймере; зарегистрированные после — выполняются сразу).
+3. PostNav/Ensure/`MarkShellInteractiveReady` из `ScheduleColdStartPostNavAfterHomeLoaded` тоже идут через
+   `RunAfterFirstPresent` → порядок PreNav → Navigate → PostNav (контракт x86) сохранён, сменился только
+   момент: после первого кадра, на том же Normal-pump.
+4. `ApplyAppBranding` больше не перезапускает decode: если XAML-источник на месте — он и используется,
+   файловый источник подключается только как восстановление после `ImageFailed` (`ApplyLoadingIconFallbackSource`).
+
+Ожидаемо после Э7.1: `activate-in → first-present` укладывается в ~≤100 мс (x64), материал, shell, иконка и
+бублик — в одном первом кадре; остаётся вопрос П4 (сколько индикатор живёт после кадра) — он закрыт выбором
+варианта ниже.
+
+### Э7.2 — открытое решение: форма индикатора (А / Б)
+
+| Вариант | Как выглядит | Плюсы | Минусы |
+|---|---|---|---|
+| **А — заставка-панель** | `LoadingOverlay` = панель in-app acrylic (`AcrylicInAppFillColorDefaultBrush`) поверх области контента (`Grid.Row=1`; pane и caption — живые сразу), в центре иконка, под ней бублик; при готовности — fade-out, под ним уже собранный контент | Иконка «на заставке», как просил пользователь; данные (`DesktopWallpaperImageCache`, превью, composition blur) успевают прогреться под veil — пустых слотов не видно; material окна живой с 1-го кадра, окном по-прежнему не управляем | На ~0.3–0.8 с область контента закрыта veil (это и есть заставка) |
+| **Б — только бублик** | Как сейчас: прозрачный overlay, иконка + `ProgressRing`; жёсткий потолок жизни `LoadingMaximumMs` ≈ 600–900 мс от `Activate()`, `maxPreviewWaitMs` 800 → ~250 | Максимально «честно»: контент виден с первого кадра, ничего не перекрывается | Видно, как догружаются превью/notice-слоты (ради этого когда-то и вводились ожидания) |
+
+Оба варианта не возвращают cloak/park/solid-подложку окна и не трогают `SystemBackdrop` после `Activate()`.

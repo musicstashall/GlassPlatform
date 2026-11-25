@@ -96,6 +96,9 @@ public sealed partial class MainWindow : Window
     private bool _deferredStartupTasksDone;
     private bool _startupActivated;
     private bool _firstPresentSeen;
+    private bool _firstPresentWatchArmed;
+    private readonly System.Collections.Generic.List<Action> _afterFirstPresent = new();
+    private bool _loadingIconFallbackApplied;
     /// <summary>Fade-out прозрачного индикатора при снятии: анимация контента, окна не касается.</summary>
     private const int LoadingIndicatorFadeOutMs = 220;
 
@@ -110,27 +113,41 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Тяжёлая часть старта — строго после первого present окна. Кадр к этому моменту уже
-    /// настоящий (shell + живой backdrop), поэтому UI-поток можно занимать без «серых» кадров.
+    /// Отложить работу до первого present окна. Кадр к этому моменту уже настоящий
+    /// (shell + живой backdrop), поэтому UI-поток можно занимать без «серых» кадров.
+    ///
+    /// Критично: CompositionTarget.Rendering поднимается на UI-потоке, поэтому ЛЮБАЯ тяжёлая
+    /// работа до первого кадра сдвигает и сам кадр, и material, и индикатор — всё разом
+    /// (в замерах 2026-11-25 один лишь PostNav+EnsureGlassRuntime дал +1030 мс к first-present).
+    /// Работа, зарегистрированная после первого present, выполняется сразу.
     /// </summary>
-    private void ScheduleAfterFirstPresent(Action work)
+    internal void RunAfterFirstPresent(Action work)
     {
-        void OnRendering(object? sender, object e)
-        {
-            Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnRendering;
-            if (_firstPresentSeen)
-                return;
+        if (work is null)
+            return;
 
-            _firstPresentSeen = true;
-            StartupPhaseTrace.MarkWindow("first-present", this);
+        if (_firstPresentSeen)
+        {
             work();
+            return;
         }
 
-        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += OnRendering;
-        _ = FirstPresentFallbackAsync(work);
+        _afterFirstPresent.Add(work);
+        if (_firstPresentWatchArmed)
+            return;
+
+        _firstPresentWatchArmed = true;
+        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += OnFirstPresentRendering;
+        _ = FirstPresentFallbackAsync();
     }
 
-    private async Task FirstPresentFallbackAsync(Action work)
+    private void OnFirstPresentRendering(object? sender, object e)
+    {
+        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnFirstPresentRendering;
+        CompleteFirstPresent("first-present");
+    }
+
+    private async Task FirstPresentFallbackAsync()
     {
         try
         {
@@ -141,12 +158,31 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        CompleteFirstPresent("first-present:fallback-1500ms");
+    }
+
+    private void CompleteFirstPresent(string phase)
+    {
         if (_firstPresentSeen)
             return;
 
         _firstPresentSeen = true;
-        StartupPhaseTrace.Mark("first-present:fallback-1500ms");
-        work();
+        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnFirstPresentRendering;
+        StartupPhaseTrace.MarkWindow(phase, this);
+
+        var pending = _afterFirstPresent.ToArray();
+        _afterFirstPresent.Clear();
+        foreach (var work in pending)
+        {
+            try
+            {
+                work();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"GlassSettings after-first-present: {ex}");
+            }
+        }
     }
 
     private void RunColdStartBootstrapCore()
@@ -169,7 +205,6 @@ public sealed partial class MainWindow : Window
         ApplyDeferredWindowChrome();
 
         StartupPhaseTrace.MarkWindow("cold-start-core", this);
-        Activated -= OnFirstActivated;
     }
 
     /// <summary>
@@ -222,8 +257,9 @@ public sealed partial class MainWindow : Window
     /// </summary>
     internal void ScheduleColdStartPostNavAfterHomeLoaded(HomePage home)
     {
-
-        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Normal, () =>
+        // Первый кадр важнее данных: Presence/watchers/EnsureGlassRuntime — после first present,
+        // иначе native init встаёт между ShowWindow и композицией и «серый» кадр длится секунду.
+        RunAfterFirstPresent(() => DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Normal, () =>
         {
             // После первого снятия индикатора: новая HomePage иначе остаётся без InjectRuntimeMonitor
             // (OnNavigatedTo при !_built пропускает StartRuntimeMonitor; cold-idle затирает Latest).
@@ -239,7 +275,7 @@ public sealed partial class MainWindow : Window
             InjectRuntimeMonitor.Instance.PublishColdStartIdleSnapshot();
             CompleteColdStartEnsure();
             MarkShellInteractiveReady();
-        });
+        }));
     }
 
     private void CompleteColdStartEnsure()
@@ -345,7 +381,7 @@ public sealed partial class MainWindow : Window
         StartupPhaseTrace.MarkWindow("activate:end", this);
 
         // Тяжёлый cold start — после первого present (кадр уже живой).
-        ScheduleAfterFirstPresent(TryCompleteColdStartBootstrap);
+        RunAfterFirstPresent(TryCompleteColdStartBootstrap);
     }
 
     /// <summary>XamlRoot окна — для ContentDialog и полноэкранной шторы.</summary>
@@ -367,7 +403,6 @@ public sealed partial class MainWindow : Window
         NavFrame.Navigated += NavFrame_OnNavigated;
         _nav.Attach(NavFrame);
         Activated += OnWindowActivated;
-        Activated += OnFirstActivated;
         SettingsSession.Current.DirtyChanged += (_, _) =>
         {
             _home?.SyncSummaryFooterFromSession();
@@ -576,14 +611,6 @@ public sealed partial class MainWindow : Window
 
     private void OnWindowActivated(object sender, WindowActivatedEventArgs e) =>
         UpdateBackButton();
-
-    private void OnFirstActivated(object sender, WindowActivatedEventArgs e)
-    {
-        if (e.WindowActivationState == WindowActivationState.Deactivated)
-            return;
-
-        TryCompleteColdStartBootstrap();
-    }
 
     /// <summary>Применить тему и backdrop из реестра GlassSettings.</summary>
     public void ApplyAppPreferencesFromRegistry()
@@ -858,8 +885,34 @@ public sealed partial class MainWindow : Window
     {
         TrySetWindowIcon();
 
-        // Иконка — только визуал прозрачного индикатора. Окно больше не reveal'ится,
-        // поэтому ждать decode (ImageOpened) перед показом не зачем.
+        // Иконка индикатора: XAML уже даёт ms-appx:///Assets/app.ico, decode стартует на
+        // InitializeComponent — это самый ранний возможный кадр. Переприсваивание Source
+        // (файловый BitmapImage) перезапускает decode и дарит кадр без иконки, поэтому
+        // трогаем источник только если XAML-источник не поднялся (ImageFailed).
+        if (LoadingIcon.Source is not null)
+        {
+            LoadingIcon.ImageFailed -= LoadingIcon_OnImageFailed;
+            LoadingIcon.ImageFailed += LoadingIcon_OnImageFailed;
+            LoadingIcon.Opacity = 1;
+            LoadingIcon.Visibility = Visibility.Visible;
+            return;
+        }
+
+        ApplyLoadingIconFallbackSource();
+    }
+
+    private void LoadingIcon_OnImageFailed(object sender, ExceptionRoutedEventArgs e)
+    {
+        LoadingIcon.ImageFailed -= LoadingIcon_OnImageFailed;
+        ApplyLoadingIconFallbackSource();
+    }
+
+    private void ApplyLoadingIconFallbackSource()
+    {
+        if (_loadingIconFallbackApplied)
+            return;
+
+        _loadingIconFallbackApplied = true;
         var iconSource = AppIconSourceFactory.CreateImageSource();
         if (iconSource is null)
         {
