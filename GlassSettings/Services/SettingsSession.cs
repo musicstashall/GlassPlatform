@@ -324,6 +324,23 @@ public sealed class SettingsSession
         ReconcileScopeDirtyFlags();
     }
 
+    /// <summary>
+    /// Автоматический перенос применённого отражения на новый профиль дисплея
+    /// не является пользовательской правкой: принимаем опубликованный PNG в
+    /// baseline ключа и пересчитываем индикаторы из снимка, поэтому прочие
+    /// несохранённые параметры остаются dirty.
+    /// </summary>
+    internal bool AcceptAutomaticReflectionBaseline(string? previousOutput, string expectedOutput)
+    {
+        if (!_baselineCaptured || ReflectionRenderState.ReadForOutput(expectedOutput) is null
+            || !_snapshot.AcceptAutomaticReflectionBaseline(previousOutput, expectedOutput)) return false;
+        StampDirtyScopesFromSnapshot();
+        ReconcileScopeDirtyFlags();
+        RegistrySnapshotWatchService.Current?.SyncFingerprintFromSnapshot(_snapshot);
+        RaiseDirtyChanged();
+        return true;
+    }
+
     /// <summary>Переснимок baseline Root после автополитики OpenGlass (без reload).</summary>
     public void SyncRootBackdropBaseline()
     {

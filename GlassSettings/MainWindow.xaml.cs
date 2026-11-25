@@ -1571,6 +1571,7 @@ public sealed partial class MainWindow : Window
                 primaryButton,
                 footerBand,
                 () => ApplyHostedDialogBounds(liveResize: true),
+                width => { if (_hostedDialogRequestedSpec is not null) _hostedDialogRequestedSpec.MaxWidth = width; },
                 CloseHostedDialog,
                 showChildDialog);
         }
@@ -1582,6 +1583,7 @@ public sealed partial class MainWindow : Window
                 primaryButton,
                 footerRow: null,
                 () => ApplyHostedDialogBounds(liveResize: true),
+                width => { if (_hostedDialogRequestedSpec is not null) _hostedDialogRequestedSpec.MaxWidth = width; },
                 CloseHostedDialog,
                 showChildDialog);
         }
@@ -1739,6 +1741,12 @@ public sealed partial class MainWindow : Window
 
     internal void UpdateHostedDialogSurfaceClip()
     {
+        if (HostedDialogHost.Visibility != Visibility.Visible)
+        {
+            HostedDialogSurface.Clip = null;
+            return;
+        }
+
         var width = HostedDialogSurface.ActualWidth;
         var height = HostedDialogSurface.ActualHeight;
         if (width <= 0 || height <= 0)
@@ -2206,6 +2214,10 @@ public sealed partial class MainWindow : Window
         };
         AppTitleBar.SizeChanged += (_, _) => UpdateHostedDialogVerticalInset();
         DialogBoundsHost.SizeChanged += OnDialogBoundsHostSizeChanged;
+        // The clip must follow the real surface size. Updating it only from the
+        // bounds helper can read the pre-layout ActualWidth and leave an old
+        // narrower clip after the panel grows in place (display topology change).
+        HostedDialogSurface.SizeChanged += (_, _) => UpdateHostedDialogSurfaceClip();
         RootGrid.SizeChanged += (_, _) => ApplyLayoutMode(GetLayoutWidth());
         RootGrid.Loaded += RootGrid_OnLoaded;
     }
