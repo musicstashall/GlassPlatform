@@ -275,6 +275,11 @@ assert '.Where(item => item.Visibility == Visibility.Visible).ToArray()' in dial
 assert 'Grid.SetRow(_desktopView, 1)' not in desktop_preview
 assert 'Margin = new Thickness(12)' in desktop_preview
 assert 'ReflectionDisplayProfile.GetDisplayNumber' in desktop_preview
+assert 'bool SharesVerticalEdge(' in desktop_preview and 'bool SharesHorizontalEdge(' in desktop_preview
+assert 'sharedLeft ? 0 : unit, sharedTop ? 0 : unit' in desktop_preview
+assert 'sharedRight ? 0 : unit, sharedBottom ? 0 : unit' in desktop_preview
+assert 'double halfStroke = unit / 2;' in desktop_preview
+assert 'CornerRadius = new CornerRadius(6 * unit)' in desktop_preview
 assert 'desktop.Children.Add(outline)' in desktop_preview
 assert 'public int MonitorCount => _bounds.Length' in desktop_preview
 assert 'public string ProfileKey { get; }' in desktop_preview

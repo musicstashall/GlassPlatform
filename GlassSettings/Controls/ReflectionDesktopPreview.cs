@@ -119,13 +119,42 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
             _wallpapers.Add(new WallpaperPreviewCrossfade(a, b, fallback));
         }
         double unit = Math.Max(1, DesktopWidth / 740.0);
+        // Frames follow the outer silhouette only. An edge shared with another
+        // monitor is not stroked, so one desktop picture has no internal divider.
+        bool SharesVerticalEdge(Windows.Graphics.RectInt32 a, Windows.Graphics.RectInt32 b) =>
+            (a.X + a.Width == b.X || b.X + b.Width == a.X)
+            && Math.Min(a.Y + a.Height, b.Y + b.Height) > Math.Max(a.Y, b.Y);
+        bool SharesHorizontalEdge(Windows.Graphics.RectInt32 a, Windows.Graphics.RectInt32 b) =>
+            (a.Y + a.Height == b.Y || b.Y + b.Height == a.Y)
+            && Math.Min(a.X + a.Width, b.X + b.Width) > Math.Max(a.X, b.X);
         for (int i = 0; i < bounds.Length; i++)
         {
             var monitor = bounds[i];
+            bool sharedLeft = false, sharedTop = false, sharedRight = false, sharedBottom = false;
+            for (int j = 0; j < bounds.Length; j++)
+            {
+                if (i == j) continue;
+                if (SharesVerticalEdge(monitor, bounds[j]))
+                {
+                    sharedLeft |= bounds[j].X < monitor.X;
+                    sharedRight |= bounds[j].X > monitor.X;
+                }
+                if (SharesHorizontalEdge(monitor, bounds[j]))
+                {
+                    sharedTop |= bounds[j].Y < monitor.Y;
+                    sharedBottom |= bounds[j].Y > monitor.Y;
+                }
+            }
+            // Keep a few inset DIPs inside the uniform-scaled Viewbox, so the
+            // outer stroke stays visible and the rounded looks/tuning are sane.
+            double halfStroke = unit / 2;
             var outline = new Border
             {
-                Width = monitor.Width - 12 * unit, Height = monitor.Height - 12 * unit,
-                CornerRadius = new CornerRadius(7 * unit), BorderThickness = new Thickness(unit),
+                Width = Math.Max(0, monitor.Width - unit), Height = Math.Max(0, monitor.Height - unit),
+                CornerRadius = new CornerRadius(6 * unit),
+                BorderThickness = new Thickness(
+                    sharedLeft ? 0 : unit, sharedTop ? 0 : unit,
+                    sharedRight ? 0 : unit, sharedBottom ? 0 : unit),
                 BorderBrush = (Brush)Application.Current.Resources["ControlStrongStrokeColorDefaultBrush"],
                 IsHitTestVisible = false,
                 // Only the number gets a scrim: the wallpaper stays visible and the frame stays quiet.
@@ -142,8 +171,8 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
                     }
                 }
             };
-            Canvas.SetLeft(outline, monitor.X - left + 6 * unit);
-            Canvas.SetTop(outline, monitor.Y - top + 6 * unit);
+            Canvas.SetLeft(outline, monitor.X - left + halfStroke);
+            Canvas.SetTop(outline, monitor.Y - top + halfStroke);
             desktop.Children.Add(outline);
         }
         _watcher = DesktopEnvironmentWatcher.Current;
