@@ -36,6 +36,7 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
     private DwmCompositionCascadePreview.PreviewState? _lastGlassState;
     public int DesktopWidth { get; }
     public int DesktopHeight { get; }
+    public int MonitorCount => _bounds.Length;
 
     public ReflectionDesktopPreview()
     {
@@ -52,11 +53,15 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
         var desktop = new Canvas { Width = DesktopWidth, Height = DesktopHeight };
         // Physical desktop coordinates are retained inside one proportionally scaled Viewbox.
         _desktopView = new Viewbox { Child = desktop, Stretch = Stretch.Uniform, MaxHeight = 280, Opacity = 0 };
+        // Keep the source name outside monitor geometry, never on a seam.
+        RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        Grid.SetRow(_desktopView, 1);
         Children.Add(_desktopView);
         _sourceBadge = new Border
         {
-            Child = _sourceName, HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(12),
+            Child = _sourceName, HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 0, 0, 8),
             Padding = new Thickness(10, 4, 10, 4), CornerRadius = new CornerRadius(6),
             BorderThickness = new Thickness(1),
             Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"],
@@ -64,14 +69,17 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
             Visibility = Visibility.Collapsed, IsHitTestVisible = false
         };
         Children.Add(_sourceBadge);
-        Children.Add(new Border
+        var displayBadge = new Border
         {
             HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom,
             Margin = new Thickness(12), Padding = new Thickness(6, 2, 6, 2), CornerRadius = new CornerRadius(4),
             Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"],
             IsHitTestVisible = false, Opacity = .65,
             Child = new TextBlock { Text = profile.Label, FontSize = 10 }
-        });
+        };
+        Grid.SetRow(displayBadge, 1);
+        Children.Add(displayBadge);
+        Grid.SetRow(_loading, 1);
         Children.Add(_loading);
         Margin = new Thickness(8, 8, 8, 16);
         foreach (var monitor in bounds)

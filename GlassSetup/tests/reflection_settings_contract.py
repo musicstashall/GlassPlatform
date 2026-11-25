@@ -194,7 +194,7 @@ assert '_wallpaperReady || !_reflectionReady' in desktop_preview
 assert '_desktopView.Opacity = 1' in desktop_preview and 'Opacity = 0' in desktop_preview
 print('PASS: shared checked swatches, standard flyout picker, pixel-scale texture vs desktop-scale SVG, loading readiness gate')
 
-assert 'GetDialogWidth(preview.DesktopWidth, preview.DesktopHeight)' in dialog
+assert 'GetDialogWidth(preview.DesktopWidth, preview.DesktopHeight, preview.MonitorCount)' in dialog
 assert 'Math.Clamp(previewWidth + 64, 480, 1120)' in dialog
 assert 'bool inline = width >= parameterBudget + cell + 2 * gap + pickerWidth' in dialog
 assert 'colorFlyout.Content = null' in dialog and 'colorFlyout.Content = picker' in dialog
@@ -218,7 +218,8 @@ assert 'ReadCustom()' in history and '"CustomColor"' in history
 print('PASS: fourth custom preset, previous custom enters history, all preset duplicates excluded, no imported Windows colors')
 
 assert 'Themes_Colors_RecentColors' not in dialog
-assert '280.0 * desktopWidth / Math.Max(1, desktopHeight)' in dialog
+assert 'monitorCount > 1 ? 210.0 : 280.0' in dialog
+assert 'preferredHeight * desktopWidth / Math.Max(1, desktopHeight)' in dialog
 assert 'MonitorFromWindow' not in dialog and 'XamlRoot?.Size.Width' not in dialog
 assert 'Grid.SetRow(pickerRail, stacked ? 1 : 0)' in dialog
 print('PASS: preview-aspect dialog width, vertical narrow palettes/history, stacked fallback and no detached history heading')
@@ -231,7 +232,7 @@ print('PASS: always-visible custom picker launcher, no redundant button, left-al
 assert 'var presets = new Grid' in dialog
 assert 'paletteBudget >= 4 * cell + 3 * cellGap ? 4' in dialog
 assert 'paletteBudget >= 2 * cell + cellGap ? 2 : 1' in dialog
-assert 'Grid.SetColumn((FrameworkElement)presets.Children[i], i % columns)' in dialog
+assert 'Grid.SetColumn(visiblePresets[i], i % columns)' in dialog
 assert 'double pickerWidth = Math.Max(300, picker.DesiredSize.Width)' in dialog
 assert 'Width = new GridLength(1, GridUnitType.Star)' in dialog
 assert 'MaxWidth = 420, Height = 176' in dialog
@@ -263,3 +264,11 @@ assert '_glassLayers[i].RefreshAsync(_glassWallpaperPaths[i] ?? state.WallpaperP
 assert 'SetReflection' not in live_glass and 'ReadMonitorWallpapers' not in live_glass
 assert 'new RegistryValueChangeWatcher' not in desktop_preview
 print('PASS: live glass reuses session registry notifications, debounces/deduplicates and preserves reflection/wallpaper sources')
+
+assert 'customPreset.Visibility = inline ? Visibility.Collapsed : Visibility.Visible' in dialog
+assert '.Where(item => item.Visibility == Visibility.Visible).ToArray()' in dialog
+assert 'Grid.SetRow(_desktopView, 1)' in desktop_preview
+assert 'Grid.SetRow(displayBadge, 1)' in desktop_preview and 'Grid.SetRow(_loading, 1)' in desktop_preview
+assert 'public int MonitorCount => _bounds.Length' in desktop_preview
+assert 'MaxHeight = 280' in desktop_preview
+print('PASS: name above monitor seams, inline picker hides launcher without empty grid slots, smaller multi-display preferred width and proportional growth')

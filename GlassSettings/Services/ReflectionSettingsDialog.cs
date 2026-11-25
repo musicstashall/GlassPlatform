@@ -154,6 +154,7 @@ public static class ReflectionSettingsDialog
                 inlinePicker.Children.Clear(); colorFlyout.Content = picker;
             }
             inlinePicker.Visibility = inline ? Visibility.Visible : Visibility.Collapsed;
+            customPreset.Visibility = inline ? Visibility.Collapsed : Visibility.Visible;
             bool stacked = width < 380;
             double paletteBudget = stacked ? width
                 : width - parameterBudget - gap - (inline ? pickerWidth + gap : 0);
@@ -166,12 +167,14 @@ public static class ReflectionSettingsDialog
             presets.ColumnDefinitions.Clear(); presets.RowDefinitions.Clear();
             for (int i = 0; i < columns; i++)
                 presets.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            for (int i = 0; i < (presets.Children.Count + columns - 1) / columns; i++)
+            var visiblePresets = presets.Children.OfType<FrameworkElement>()
+                .Where(item => item.Visibility == Visibility.Visible).ToArray();
+            for (int i = 0; i < (visiblePresets.Length + columns - 1) / columns; i++)
                 presets.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            for (int i = 0; i < presets.Children.Count; i++)
+            for (int i = 0; i < visiblePresets.Length; i++)
             {
-                Grid.SetRow((FrameworkElement)presets.Children[i], i / columns);
-                Grid.SetColumn((FrameworkElement)presets.Children[i], i % columns);
+                Grid.SetRow(visiblePresets[i], i / columns);
+                Grid.SetColumn(visiblePresets[i], i % columns);
             }
 
         }
@@ -346,7 +349,7 @@ public static class ReflectionSettingsDialog
         preview.SizeChanged += (_, _) => _ = RefreshAsync();
         System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] dialog: start reflection render");
         _ = RefreshAsync();
-        double dialogWidth = GetDialogWidth(preview.DesktopWidth, preview.DesktopHeight);
+        double dialogWidth = GetDialogWidth(preview.DesktopWidth, preview.DesktopHeight, preview.MonitorCount);
         try
         {
             System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] dialog: show hosted dialog");
@@ -385,11 +388,13 @@ public static class ReflectionSettingsDialog
         }
     }
 
-    private static double GetDialogWidth(int desktopWidth, int desktopHeight)
+    private static double GetDialogWidth(int desktopWidth, int desktopHeight, int monitorCount)
     {
-        // Match the preview's 280 DIP height and physical desktop aspect ratio.
-        // The hosted shell still clamps this preferred width to available space.
-        double previewWidth = 280.0 * desktopWidth / Math.Max(1, desktopHeight);
+        // Multiple displays start at a smaller preferred scale. Do not cap
+        // the Viewbox at that scale: extra dialog width can still grow it to 280 DIP.
+        // The hosted shell clamps this preference to available space.
+        double preferredHeight = monitorCount > 1 ? 210.0 : 280.0;
+        double previewWidth = preferredHeight * desktopWidth / Math.Max(1, desktopHeight);
         return Math.Clamp(previewWidth + 64, 480, 1120);
     }
 
