@@ -130,37 +130,42 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
             _wallpapers.Add(new WallpaperPreviewCrossfade(a, b, fallback));
         }
         double unit = Math.Max(1, DesktopWidth / 740.0);
-        // Every monitor gets a complete rounded frame, shrunk inside its footprint
-        // so neighbouring frames keep a clear gap and no shared edge is collapsed
-        // into a divider. The inset is uniform, so the screen keeps its aspect.
-        double inset = Math.Max(6 * unit, bounds.Min(m => Math.Min(m.Width, m.Height)) * 0.045);
+        // One stroke per monitor, inset inside its footprint. Nothing is drawn on
+        // the shared edge between two monitors and no border sits next to it, so
+        // no vertical line can appear at the seam; the gap shows the dialog
+        // background. The inset is uniform, so screen proportions are preserved.
+        double inset = Math.Max(8 * unit, bounds.Min(m => Math.Min(m.Width, m.Height)) * 0.06);
+        var stroke = (Brush)Application.Current.Resources["ControlStrongStrokeColorDefaultBrush"];
+        var scrim = (Brush)Application.Current.Resources["LayerFillColorDefaultBrush"];
         for (int i = 0; i < bounds.Length; i++)
         {
             var monitor = bounds[i];
-            var outline = new Border
+            double width = Math.Max(1, monitor.Width - inset * 2), height = Math.Max(1, monitor.Height - inset * 2);
+            var frame = new Border
             {
-                Width = Math.Max(0, monitor.Width - inset * 2), Height = Math.Max(0, monitor.Height - inset * 2),
-                CornerRadius = new CornerRadius(8 * unit),
-                BorderThickness = new Thickness(unit),
-                BorderBrush = (Brush)Application.Current.Resources["ControlStrongStrokeColorDefaultBrush"],
-                IsHitTestVisible = false,
-                // Only the number gets a scrim: the wallpaper stays visible and the frame stays quiet.
-                Child = new Border
+                Width = width, Height = height, CornerRadius = new CornerRadius(8 * unit),
+                BorderThickness = new Thickness(unit), BorderBrush = stroke, IsHitTestVisible = false
+            };
+            Canvas.SetLeft(frame, monitor.X - left + inset); Canvas.SetTop(frame, monitor.Y - top + inset);
+            desktop.Children.Add(frame);
+            var number = new Border
+            {
+                CornerRadius = new CornerRadius(10 * unit),
+                Padding = new Thickness(14 * unit, 2 * unit, 14 * unit, 4 * unit),
+                Background = scrim, IsHitTestVisible = false,
+                Child = new TextBlock
                 {
-                    HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
-                    CornerRadius = new CornerRadius(10 * unit), Padding = new Thickness(14 * unit, 2 * unit, 14 * unit, 4 * unit),
-                    Background = (Brush)Application.Current.Resources["LayerFillColorDefaultBrush"],
-                    Child = new TextBlock
-                    {
-                        Text = ReflectionDisplayProfile.GetDisplayNumber(profile.Monitors[i], i + 1).ToString(),
-                        FontSize = 32 * unit, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                        Foreground = (Brush)Application.Current.Resources["TextFillColorPrimaryBrush"]
-                    }
+                    Text = ReflectionDisplayProfile.GetDisplayNumber(profile.Monitors[i], i + 1).ToString(),
+                    FontSize = 32 * unit, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground = (Brush)Application.Current.Resources["TextFillColorPrimaryBrush"]
                 }
             };
-            Canvas.SetLeft(outline, monitor.X - left + inset);
-            Canvas.SetTop(outline, monitor.Y - top + inset);
-            desktop.Children.Add(outline);
+            var numberHost = new Grid { Width = width, Height = height, IsHitTestVisible = false };
+            number.HorizontalAlignment = HorizontalAlignment.Center;
+            number.VerticalAlignment = VerticalAlignment.Center;
+            numberHost.Children.Add(number);
+            Canvas.SetLeft(numberHost, monitor.X - left + inset); Canvas.SetTop(numberHost, monitor.Y - top + inset);
+            desktop.Children.Add(numberHost);
         }
         _watcher = DesktopEnvironmentWatcher.Current;
         if (_watcher is not null) _watcher.Changed += OnEnvironmentChanged;

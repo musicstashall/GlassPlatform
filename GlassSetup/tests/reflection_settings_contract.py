@@ -281,11 +281,13 @@ assert 'Visibility = Visibility.Visible;' not in desktop_preview
 assert 'ReflectionDisplayProfile.GetDisplayNumber' in desktop_preview
 assert 'SharesVerticalEdge' not in desktop_preview and 'sharedLeft' not in desktop_preview
 assert 'BorderThickness = new Thickness(unit)' in desktop_preview
-assert 'Width = Math.Max(0, monitor.Width - inset * 2)' in desktop_preview
-assert 'double inset = Math.Max(6 * unit' in desktop_preview
-assert 'Canvas.SetLeft(outline, monitor.X - left + inset)' in desktop_preview
-assert 'CornerRadius = new CornerRadius(8 * unit)' in desktop_preview
-assert 'desktop.Children.Add(outline)' in desktop_preview
+assert 'Width = width, Height = height, CornerRadius = new CornerRadius(8 * unit)' in desktop_preview
+assert 'double inset = Math.Max(8 * unit' in desktop_preview
+assert 'Canvas.SetLeft(frame, monitor.X - left + inset)' in desktop_preview
+# the previous per-side stripe implementation could border the seam; it is gone
+assert 'strokeWidth, strokeHeight, strokeX, strokeY' not in desktop_preview
+assert 'desktop.Children.Add(frame)' in desktop_preview
+assert 'desktop.Children.Add(numberHost)' in desktop_preview
 assert 'public int MonitorCount => _bounds.Length' in desktop_preview
 assert 'public string ProfileKey { get; }' in desktop_preview
 assert 'MaxHeight = 280' in desktop_preview
