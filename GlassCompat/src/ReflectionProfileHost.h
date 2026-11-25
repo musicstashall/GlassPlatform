@@ -42,6 +42,17 @@ namespace ReflectionProfileHost
             // Optional installed Settings payload beside the already loaded platform.
             // No registry/CWD/PATH fallback and no installer policy change.
             std::wstring target = directory + L"\\GlassSettings\\GlassSettings.Native.dll";
+#ifdef _DEBUG
+            // VC build output is flat (Native.vcxproj OutDir), unlike MSI layout.
+            // Only an absent installed-layout file permits this Debug-only sibling.
+            // Never fall back on load/ABI failure or an unsafe existing payload.
+            if (GetFileAttributesW(target.c_str()) == INVALID_FILE_ATTRIBUTES)
+            {
+                const DWORD error = GetLastError();
+                if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND)
+                    target = directory + L"\\GlassSettings.Native.dll";
+            }
+#endif
             std::wstring probe = target;
             while (!probe.empty())
             {
@@ -103,5 +114,20 @@ namespace ReflectionProfileHost
             signal();
         }
     }
-    inline void Poll() noexcept { if (tick) (void)tick(); }
+    inline void Poll() noexcept
+    {
+#if defined(_DEBUG) && defined(GLASS_ENABLE_LOGGING)
+        // Startup diagnostics can precede LogViewer capture. Keep a bounded
+        // host-thread heartbeat; no extra observer, timer or DLL load attempt.
+        static ULONGLONG nextStatus = 0;
+        const ULONGLONG now = GetTickCount64();
+        if (now >= nextStatus)
+        {
+            DebugLog(DBG_NORMAL, L"[GlassCompat][ReflectionProfiles] host loop alive; optional helper=%ls",
+                tick ? L"ready" : L"inactive (absent/incompatible or non-native architecture); see startup log");
+            nextStatus = now + 30000;
+        }
+#endif
+        if (tick) (void)tick();
+    }
 }

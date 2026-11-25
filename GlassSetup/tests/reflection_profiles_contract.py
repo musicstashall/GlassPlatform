@@ -28,6 +28,16 @@ assert 'IsWow64Process' in host and '|| wow)' in host
 assert 'LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32' in host
 assert 'FILE_ATTRIBUTE_REPARSE_POINT' in host and 'if (!module)' in host
 assert 'optional helper load failed' in host and 'helper ready:' in host
+assert 'host loop alive; optional helper=' in host
+assert 'nextStatus = now + 30000' in host
+# Flat Native build payload is allowed only in Debug, only when installed path is absent.
+flat_start = host.index('// VC build output is flat')
+assert host.rfind('#ifdef _DEBUG', 0, flat_start) > host.index('std::wstring target')
+flat_end = host.index('#endif', flat_start)
+flat = host[flat_start:flat_end]
+assert 'ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND' in flat
+assert 'target = directory + L"\\\\GlassSettings.Native.dll"' in flat
+assert flat_end < host.index('std::wstring probe = target') < host.index('LoadLibraryExW')
 assert 'skip unmanaged:' in native and 'selection=%ls active=%ls output=%ls' in native
 assert 'WM_THEMECHANGED posted=%d error=%lu' in native
 assert '_wcsicmp(path, target.c_str())' in host
