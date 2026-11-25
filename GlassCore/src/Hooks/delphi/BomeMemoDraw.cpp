@@ -175,7 +175,7 @@ namespace GlassCore::BomeMemo
         }
     }
 
-    bool IsClassName(LPCWSTR name) noexcept
+    static bool IsClassName(LPCWSTR name) noexcept
     { return name && (!_wcsicmp(name, L"TBomeMemo") || !_wcsicmp(name, L"TBMGutter")); }
     bool IsWindow(HWND hwnd) noexcept
     {

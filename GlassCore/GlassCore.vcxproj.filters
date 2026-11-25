@@ -145,9 +145,6 @@
     <ClCompile Include="src\Hooks\delphi\TListBoxDraw.cpp">
       <Filter>src\Hooks\delphi</Filter>
     </ClCompile>
-    <ClCompile Include="src\Hooks\delphi\TListBoxProbe.cpp">
-      <Filter>src\Hooks\delphi</Filter>
-    </ClCompile>
     <ClCompile Include="src\Hooks\delphi\TBitBtnHooks.cpp">
       <Filter>src\Hooks\delphi</Filter>
     </ClCompile>
@@ -421,9 +418,6 @@
       <Filter>Include\Hooks\delphi</Filter>
     </ClInclude>
     <ClInclude Include="Include\Hooks\delphi\TListBoxDraw.h">
-      <Filter>Include\Hooks\delphi</Filter>
-    </ClInclude>
-    <ClInclude Include="Include\Hooks\delphi\TListBoxProbe.h">
       <Filter>Include\Hooks\delphi</Filter>
     </ClInclude>
     <ClInclude Include="Include\Hooks\delphi\TBitBtnHooks.h">

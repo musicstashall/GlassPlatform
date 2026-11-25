@@ -85,13 +85,6 @@ namespace GlassCore::DelphiListBox
             RECT checkboxThemeRect{};
             bool pendingCheckboxBackgroundOutline{};
             std::array<bool, Count> hooks{};
-#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-            unsigned long long diagId{};
-            UINT diagItem{};
-            int diagState{};
-            RECT diagThemeRect{};
-            bool diagHasThemeRect{};
-#endif
         };
         thread_local std::vector<Session> g_stack;
         thread_local bool g_inHook = false;
@@ -101,115 +94,6 @@ namespace GlassCore::DelphiListBox
         thread_local WndCompat::Menu::IconBackgroundColorRemoval g_iconRemoval{};
         thread_local bool g_inCheckTheme = false;
         thread_local unsigned long long g_sessionSerial = 0;
-
-#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-        thread_local unsigned long long g_diagSequence = 0;
-        thread_local ULONGLONG g_diagEpoch = 0;
-        thread_local unsigned g_diagBudget = 0;
-        bool CheckProbeBudget() noexcept;
-        void LogComboFill(const Session& s, HDC dc, const RECT& r, const LOGBRUSH& brush,
-            const wchar_t* branch) noexcept
-        {
-            if (!s.combo || !CheckProbeBudget()) return;
-            const DWORD lastError = GetLastError();
-            DebugLog(DBG_NORMAL,
-                L"[GlassCore][DelphiComboDraw] fill hwnd=0x%p dc=0x%p dcType=%u field=%d rect=[%ld,%ld,%ld,%ld] bounds=[%ld,%ld,%ld,%ld] brush=0x%08X branch=%s",
-                s.hwnd, dc, static_cast<unsigned>(GetObjectType(dc)), s.field ? 1 : 0,
-                r.left, r.top, r.right, r.bottom, s.bounds.left, s.bounds.top,
-                s.bounds.right, s.bounds.bottom, static_cast<unsigned>(brush.lbColor), branch);
-            SetLastError(lastError);
-        }
-        void LogComboText(const Session& s, HDC dc, UINT options, UINT count,
-            const RECT* r, COLORREF bk, const wchar_t* branch) noexcept
-        {
-            if (!s.combo || !CheckProbeBudget()) return;
-            const DWORD lastError = GetLastError();
-            DebugLog(DBG_NORMAL,
-                L"[GlassCore][DelphiComboDraw] text hwnd=0x%p dc=0x%p dcType=%u options=0x%X count=%u bk=0x%08X rect=[%ld,%ld,%ld,%ld] branch=%s",
-                s.hwnd, dc, static_cast<unsigned>(GetObjectType(dc)), options, count,
-                static_cast<unsigned>(bk), r ? r->left : 0, r ? r->top : 0,
-                r ? r->right : 0, r ? r->bottom : 0, branch);
-            SetLastError(lastError);
-        }
-        bool CheckProbeBudget() noexcept
-        {
-            const ULONGLONG now = GetTickCount64();
-            if (!g_diagEpoch || now - g_diagEpoch >= 1000) { g_diagEpoch = now; g_diagBudget = 96; }
-            if (!g_diagBudget) return false;
-            --g_diagBudget;
-            return true;
-        }
-        void LogCheckPixels(const Session& s, const wchar_t* stage, const RECT& r, int state) noexcept
-        {
-            if (!s.checkList || !s.dc || !CheckProbeBudget()) return;
-            const long long width = static_cast<long long>(r.right) - r.left;
-            const long long height = static_cast<long long>(r.bottom) - r.top;
-            if (width < 2 || height < 2 || width > 256 || height > 256 || r.left == LONG_MIN) return;
-            const DWORD lastError = GetLastError();
-            GdiFlush();
-            // A few RGB samples, not a screenshot or text. CLR_INVALID means the
-            // DC could not be read. GetPixel cannot report destination alpha.
-            const POINT points[]{ {r.left - 1, r.top + static_cast<LONG>(height / 2)},
-                {r.left, r.top}, {r.left + 1, r.top + 1},
-                {r.left + static_cast<LONG>(width / 2), r.top + static_cast<LONG>(height / 2)},
-                {r.right - 1, r.bottom - 1}, {r.right, r.top + static_cast<LONG>(height / 2)} };
-            COLORREF pixels[_countof(points)]{};
-            for (size_t i = 0; i < _countof(points); ++i)
-                pixels[i] = PtInRect(&s.item, points[i]) ? GetPixel(s.dc, points[i].x, points[i].y) : CLR_INVALID;
-            RECT clip{};
-            const int clipKind = GetClipBox(s.dc, &clip);
-            DebugLog(DBG_NORMAL,
-                L"[GlassCore][CheckBgProbe] stage=%s id=%llu hwnd=0x%p item=%u state=%d dc=0x%p dcType=%u rect=[%ld,%ld,%ld,%ld] clipKind=%d rgbOutsideLeft=0x%08X rgbTL=0x%08X rgbInner=0x%08X rgbCenter=0x%08X rgbBR=0x%08X rgbOutsideRight=0x%08X",
-                stage, s.diagId, s.hwnd, s.diagItem, state, s.dc, static_cast<unsigned>(GetObjectType(s.dc)),
-                r.left, r.top, r.right, r.bottom, clipKind, static_cast<unsigned>(pixels[0]),
-                static_cast<unsigned>(pixels[1]), static_cast<unsigned>(pixels[2]),
-                static_cast<unsigned>(pixels[3]), static_cast<unsigned>(pixels[4]), static_cast<unsigned>(pixels[5]));
-            SetLastError(lastError);
-        }
-        void LogCheckBuffer(const Session& s, HPAINTBUFFER buffer, const RECT& r, int state) noexcept
-        {
-            if (!s.checkList || !CheckProbeBudget()) return;
-            const DWORD lastError = GetLastError();
-            const long long width = static_cast<long long>(r.right) - r.left;
-            const long long height = static_cast<long long>(r.bottom) - r.top;
-            RGBQUAD* bits = nullptr;
-            int stride = 0;
-            const HRESULT bitsResult = GetBufferedPaintBits(buffer, &bits, &stride);
-            unsigned a0 = 0, a255 = 0, apart = 0, white = 0;
-            if (SUCCEEDED(bitsResult) && bits && width > 0 && height > 0
-                && width <= 256 && height <= 256 && stride >= width)
-            {
-                GdiFlush();
-                for (int y = 0; y < height; ++y)
-                    for (int x = 0; x < width; ++x)
-                    {
-                        const RGBQUAD& p = bits[static_cast<size_t>(y) * stride + x];
-                        if (p.rgbReserved == 0) ++a0;
-                        else if (p.rgbReserved == 255) ++a255;
-                        else ++apart;
-                        if (p.rgbReserved != 0 && p.rgbRed >= 240 && p.rgbGreen >= 240 && p.rgbBlue >= 240) ++white;
-                    }
-            }
-            DebugLog(DBG_NORMAL,
-                L"[GlassCore][CheckBgProbe] stage=theme.buffer id=%llu hwnd=0x%p item=%u state=%d bitsHr=0x%08X available=%d size=%lldx%lld stride=%d alpha0=%u alpha255=%u alphaPartial=%u whiteNonzeroAlpha=%u",
-                s.diagId, s.hwnd, s.diagItem, state, static_cast<unsigned>(bitsResult), bits ? 1 : 0,
-                width, height, stride, a0, a255, apart, white);
-            SetLastError(lastError);
-        }
-        void LogCheckFill(const Session& s, HDC dc, const RECT& r, const LOGBRUSH& brush,
-            const wchar_t* branch, BOOL result) noexcept
-        {
-            if (!s.checkList || !CheckProbeBudget()) return;
-            const DWORD lastError = GetLastError();
-            RECT clip{};
-            const int clipKind = GetClipBox(dc, &clip);
-            DebugLog(DBG_NORMAL,
-                L"[GlassCore][CheckBgProbe] stage=fill id=%llu hwnd=0x%p item=%u dc=0x%p rect=[%ld,%ld,%ld,%ld] brushStyle=%u brushColor=0x%08X clipKind=%d branch=%s result=%d",
-                s.diagId, s.hwnd, s.diagItem, dc, r.left, r.top, r.right, r.bottom,
-                static_cast<unsigned>(brush.lbStyle), static_cast<unsigned>(brush.lbColor), clipKind, branch, result);
-            SetLastError(lastError);
-        }
-#endif
 
         template <size_t index, typename T> T Original() noexcept
         {
@@ -766,9 +650,6 @@ namespace GlassCore::DelphiListBox
                     const BOOL cleared = result && width > 0 && width <= INT_MAX
                         && height > 0 && height <= INT_MAX && PatBlt(dc, r->left, r->top,
                             static_cast<int>(width), static_cast<int>(height), BLACKNESS);
-#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-                    LogComboFill(s, dc, *r, lb, cleared ? L"row-system-background" : L"row-native-or-clear-failed");
-#endif
                     (void)cleared;
                     SetLastError(error);
                     return result;
@@ -778,9 +659,6 @@ namespace GlassCore::DelphiListBox
                 SetLastError(entryError);
                 const int result = opaque ? orig(dc, r, opaque.get()) : orig(dc, r, brush);
                 const DWORD error = GetLastError();
-#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-                LogComboFill(s, dc, *r, lb, opaque ? L"row-opaque-brush" : L"row-original");
-#endif
                 opaque.reset();
                 SetLastError(error);
                 return result;
@@ -806,17 +684,11 @@ namespace GlassCore::DelphiListBox
                 {
                     const BOOL cleared = PatBlt(dc, r->left, r->top,
                         r->right - r->left, r->bottom - r->top, BLACKNESS);
-#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-                    LogComboFill(s, dc, *r, lb, cleared ? L"system-background" : L"failed");
-#endif
                     return cleared ? 1 : orig(dc, r, brush);
                 }
                 wil::unique_hbrush opaque{
                     Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(lb.lbColor, 255) };
                 const int result = opaque ? orig(dc, r, opaque.get()) : orig(dc, r, brush);
-#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-                LogComboFill(s, dc, *r, lb, opaque ? L"opaque-brush" : L"original");
-#endif
                 return result;
             }
             const bool sample = IsColorSample(s, *r);
@@ -827,9 +699,6 @@ namespace GlassCore::DelphiListBox
             if (!sample && SystemBackground(lb.lbColor))
             {
                 const BOOL cleared = PatBlt(dc, r->left, r->top, r->right-r->left, r->bottom-r->top, BLACKNESS);
-#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-                LogCheckFill(s, dc, *r, lb, L"system-background", cleared);
-#endif
                 const int result = cleared ? 1 : orig(dc, r, brush);
                 RememberRowBackground(s, *r, lb.lbColor, result);
                 return result;
@@ -840,9 +709,6 @@ namespace GlassCore::DelphiListBox
             wil::unique_hbrush alpha{ Shared::WinApiUtils::CreateSolidColorBrushWithAlpha(lb.lbColor, opacity) };
             const int result = alpha ? orig(dc, r, alpha.get()) : orig(dc, r, brush);
             RememberRowBackground(s, *r, lb.lbColor, result);
-#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-            LogCheckFill(s, dc, *r, lb, alpha ? L"alpha-brush" : L"original", result);
-#endif
             return result;
         }
         BOOL WINAPI MyExtText(HDC dc, int x, int y, UINT options, const RECT* rect,
@@ -859,11 +725,6 @@ namespace GlassCore::DelphiListBox
                 // the themed selection under the text. Drop only the opaque
                 // fill and render the glyphs once through the alpha pipeline.
                 const UINT comboOptions = options & ~static_cast<UINT>(ETO_OPAQUE);
-#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-                const Session s = *current;
-                LogComboText(s, dc, options, count, rect, GetBkColor(dc),
-                    (options & ETO_OPAQUE) ? L"opaque-stripped" : L"text");
-#endif
                 if (!count) return TRUE;
                 if (!text) return orig(dc, x, y, comboOptions, rect, text, count, dx);
                 if (SUCCEEDED(GlassCore::Text::ExtTextOutWithAlpha(dc, x, y, comboOptions,
@@ -924,11 +785,6 @@ namespace GlassCore::DelphiListBox
                 // VCL may paint the field text with DrawTextW on the owner DC.
                 // Composite the glyphs without filling the background so the
                 // selection/theme under the text stays intact.
-#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-                const Session comboSession = *current;
-                LogComboText(comboSession, dc, format, static_cast<UINT>(count), rect,
-                    GetBkColor(dc), L"drawtext");
-#endif
                 int comboResult = 0;
                 if (SUCCEEDED(GlassCore::Text::DrawTextWithAlpha(
                         dc, text, count, rect, format, comboResult, true)))
@@ -1068,10 +924,6 @@ namespace GlassCore::DelphiListBox
                 s.hooks[i] = g_dispatcher.GetRef(i) > before;
             }
         }
-#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-        s.diagId = ++g_diagSequence;
-        s.diagItem = dis->itemID;
-#endif
         g_stack.push_back(s);
         if (s.checkList)
         {
@@ -1115,12 +967,6 @@ namespace GlassCore::DelphiListBox
         if (g_stack.empty() || g_stack.back().serial != session.serial) return false;
         g_stack.back().pendingCheckboxBackgroundOutline = false;
 
-#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-        g_stack.back().diagThemeRect = *rect;
-        g_stack.back().diagState = state;
-        g_stack.back().diagHasThemeRect = true;
-        LogCheckPixels(session, L"theme.before", *rect, state);
-#endif
         // Use the theme's own drawing and per-pixel alpha, not a reconstructed
         // checkbox, colour key, or a substitute clipping region. The buffer is
         // scoped to the API's original rectangle and the original clip is passed on.
@@ -1141,13 +987,7 @@ namespace GlassCore::DelphiListBox
         g_inCheckTheme = true;
         const HRESULT draw = orig(theme, bufferDc, part, state, rect, clip);
         g_inCheckTheme = false;
-#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-        LogCheckBuffer(session, buffer, *rect, state);
-#endif
         const HRESULT end = EndBufferedPaint(buffer, SUCCEEDED(draw));
-#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-        LogCheckPixels(session, L"theme.after", *rect, state);
-#endif
 #if defined(_DEBUG)
         static thread_local ULONGLONG epoch = 0;
         static thread_local unsigned budget = 0;
@@ -1173,9 +1013,6 @@ namespace GlassCore::DelphiListBox
     {
         if (g_stack.empty()) return;
         const Session s = g_stack.back();
-#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-        if (s.diagHasThemeRect) LogCheckPixels(s, L"item.end", s.diagThemeRect, s.diagState);
-#endif
         g_stack.pop_back();
         if (s.themeDetourAcquired)
             GlassCore::Hooks::UxThemeHooks::EnableThemeHooks(false);

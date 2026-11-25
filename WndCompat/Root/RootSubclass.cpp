@@ -1402,7 +1402,7 @@ namespace
                 }
             }
             // VCL рисует строку в HDC из DRAWITEMSTRUCT. Production сессия
-            // обрабатывает только этот DC; необязательная probe ничего не меняет.
+            // обрабатывает только этот DC.
             const bool listOwnerDraw = dis->CtlType == ODT_LISTBOX && dis->hwndItem
                 && GetParent(dis->hwndItem) == hWnd
                 && (WndCompat::IsWindowClass(dis->hwndItem, L"TListBox")
@@ -1422,20 +1422,11 @@ namespace
                 using BeginFn = BOOL (WINAPI*)(HWND, const DRAWITEMSTRUCT*) noexcept;
                 using EndFn = void (WINAPI*)() noexcept;
                 const HMODULE core = GetModuleHandleW(L"GlassCore.dll");
-                const auto begin = core ? reinterpret_cast<BeginFn>(GetProcAddress(core, "GlassCore_BeginDelphiListBoxProbe")) : nullptr;
-                const auto end = core ? reinterpret_cast<EndFn>(GetProcAddress(core, "GlassCore_EndDelphiListBoxProbe")) : nullptr;
                 const auto drawBegin = core ? reinterpret_cast<BeginFn>(GetProcAddress(core, "GlassCore_BeginDelphiListBoxDraw")) : nullptr;
                 const auto drawEnd = core ? reinterpret_cast<EndFn>(GetProcAddress(core, "GlassCore_EndDelphiListBoxDraw")) : nullptr;
                 if (drawBegin && drawEnd && drawBegin(hWnd, dis))
                 {
                     auto finishDraw = wil::scope_exit([&]() noexcept { drawEnd(); });
-                    const bool probing = listOwnerDraw && begin && end && begin(hWnd, dis);
-                    auto finishProbe = wil::scope_exit([&]() noexcept { if (probing) end(); });
-                    return DefSubclassProc(hWnd, uMsg, wParam, lParam);
-                }
-                if (listOwnerDraw && begin && end && begin(hWnd, dis))
-                {
-                    auto finish = wil::scope_exit([&]() noexcept { end(); });
                     return DefSubclassProc(hWnd, uMsg, wParam, lParam);
                 }
             }

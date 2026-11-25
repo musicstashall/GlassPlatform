@@ -37,9 +37,14 @@ namespace WndCompat::DelphiShowErase
     // 'Delphi%.8X' of the process id (Controls.pas, InitControls).
     [[nodiscard]] inline bool IsVclWindow(HWND hwnd) noexcept
     {
-        wchar_t name[] = L"Delphi00000000";
-        DWORD pid = GetCurrentProcessId();
-        for (int i = 13; i >= 6; --i, pid >>= 4) name[i] = L"0123456789ABCDEF"[pid & 0xF];
+        static const wchar_t* name = []() -> const wchar_t*
+        {
+            static wchar_t buffer[] = L"Delphi00000000";
+            DWORD pid = GetCurrentProcessId();
+            for (int i = 13; i >= 6; --i, pid >>= 4)
+                buffer[i] = L"0123456789ABCDEF"[pid & 0xF];
+            return buffer;
+        }();
         return GetPropW(hwnd, name) != nullptr;
     }
 
