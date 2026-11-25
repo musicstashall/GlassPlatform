@@ -325,7 +325,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 .comp-slim-desc{color:#b2b6cd;font-size:10.5px}
 .comp-card{position:relative;display:flex;align-items:flex-start;gap:12px;min-height:auto;padding:8px 14px;border:1px solid #c7bdff28;border-radius:13px;background:linear-gradient(145deg,#1d2038eb,#131528f2);box-shadow:inset 0 1px #ffffff0c,0 10px 26px #07081336;cursor:pointer;user-select:none;transition:border-color .2s ease,background .2s ease,transform .15s ease}
 .comp-card:hover:not(.is-locked):not(.is-disabled){border-color:#c1b4ff6e;background:linear-gradient(145deg,#242846f0,#171a31f5)}
-.comp-card.is-checked{border-color:#c1b4ff66;background:linear-gradient(145deg,#252647f2,#16182ff5);box-shadow:inset 0 1px #ffffff12,0 10px 28px #08091848}
+.comp-card.is-checked,.cleanup-option:has(> .comp-check:checked){border-color:#c1b4ff66;background:linear-gradient(145deg,#252647f2,#16182ff5);box-shadow:inset 0 1px #ffffff12,0 10px 28px #08091848}
 .comp-card.is-locked{cursor:default;border-color:#a7dddf52}
 .comp-card.is-disabled{cursor:default;opacity:.48}
 .comp-check{appearance:none;-webkit-appearance:none;flex:0 0 auto;width:20px;height:20px;margin:2px 0 0;border:1px solid #aaa6c9;border-radius:5px;background:#191b30;box-shadow:inset 0 1px 2px #0005;cursor:inherit}
@@ -773,11 +773,8 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 #stage[data-mode="full-cleanup"] #confirm-body{flex-shrink:0;width:auto;max-width:100%;white-space:pre-line;font-size:14px;line-height:1.5;color:#c4c1d4;margin:0 0 24px}
 #stage[data-mode="full-cleanup"] #confirm-note{order:5;flex-shrink:0;width:auto;max-width:none;margin:10px 0 0;padding:0;border:0;border-radius:0;background:none;box-shadow:none;color:#aaa6bc;font-size:12px;line-height:1.5}
 #cleanup-explanation:not([hidden]){order:4;flex-shrink:0;max-width:780px;margin:6px 0 4px;color:#b5b1c6;font-size:13px;line-height:1.55}
-.cleanup-option:not([hidden]){display:flex;flex-shrink:0;align-items:flex-start;gap:12px;margin:0 0 10px;padding:12px 16px;border:1px solid #ffffff24;border-radius:10px;background:linear-gradient(150deg,#ffffff12,#ffffff00 40%),linear-gradient(165deg,#343756cf,#131526df);backdrop-filter:blur(22px) saturate(160%);-webkit-backdrop-filter:blur(22px) saturate(160%);box-shadow:inset 0 1px #ffffff1a,0 8px 24px #04050e30;color:#eeeaf7;font-size:15px;cursor:pointer;pointer-events:auto;box-sizing:border-box}
-.cleanup-option strong{display:block;font-weight:600;margin-bottom:5px}
-.cleanup-option small{display:block;color:#bdb9cd;font-size:13px;line-height:1.45}
-.cleanup-option:hover{border-color:#ffffff40;background:linear-gradient(150deg,#ffffff18,#ffffff04 40%),linear-gradient(165deg,#3d405fcf,#1b1c32df)}
-.cleanup-option:has(input:checked){border-color:#a99bc34d;background:linear-gradient(150deg,#c1b4ff18,#ffffff04 40%),linear-gradient(165deg,#3a3658cf,#201e36df)}
+.cleanup-option{flex-shrink:0;margin:0 0 10px;pointer-events:auto}
+.cleanup-option[hidden]{display:none}
 
 /* Cleanup choices and guidance share the maintenance page's acrylic language. */
 #stage[data-mode="full-cleanup"] .cleanup-option{width:480px;max-width:100%}
@@ -921,7 +918,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 <section id="confirm-panel" class="mode-panel confirm-scene" role="alertdialog" aria-labelledby="confirm-title" aria-describedby="confirm-body">
 <img id="confirm-banner" class="banner-portrait" alt="" aria-hidden="true"><div class="confirm-ambient" aria-hidden="true"></div><div class="native-brand">GlassPlatform</div>
 <div class="error-copy"><div id="confirm-tag" class="confirm-tag"></div><h1 id="confirm-title" class="complete-title"></h1><p id="confirm-body" class="complete-body"></p>
-<p id="cleanup-explanation" hidden></p><div id="confirm-note" class="confirm-callout"></div><label id="full-cleanup-option" class="cleanup-option" hidden><input id="full-cleanup-choice" class="comp-check choice-dot" type="checkbox"><span><strong>GlassPlatform</strong><small></small></span></label><label id="og-cleanup-option" class="cleanup-option" hidden><input id="og-cleanup-choice" class="comp-check choice-dot" type="checkbox"><span><strong>OpenGlass</strong><small></small></span></label></div>
+<p id="cleanup-explanation" hidden></p><div id="confirm-note" class="confirm-callout"></div><label id="full-cleanup-option" class="comp-card cleanup-option" hidden><input id="full-cleanup-choice" class="comp-check" type="checkbox"><span class="comp-body"><strong class="comp-head comp-name">GlassPlatform</strong><small class="comp-desc"></small></span></label><label id="og-cleanup-option" class="comp-card cleanup-option" hidden><input id="og-cleanup-choice" class="comp-check" type="checkbox"><span class="comp-body"><strong class="comp-head comp-name">OpenGlass</strong><small class="comp-desc"></small></span></label></div>
 <aside id="cleanup-backup" class="cleanup-backup" hidden aria-labelledby="cleanup-backup-title"><h2><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.3 4.5a2 2 0 0 1 3.4 0l7.5 13a2 2 0 0 1-1.7 3H4.5a2 2 0 0 1-1.7-3z"/><path d="M12 9v4m0 3v.2"/></svg><span id="cleanup-backup-title"></span></h2><p id="cleanup-backup-body"></p><p id="cleanup-backup-note"></p></aside>
 <div class="complete-visual" aria-hidden="true"><svg class="complete-svg" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
 <circle class="complete-halo" cx="200" cy="200" r="157"/><circle class="complete-orbit" cx="200" cy="200" r="158"/><circle class="complete-orbit inner" cx="200" cy="200" r="132"/>

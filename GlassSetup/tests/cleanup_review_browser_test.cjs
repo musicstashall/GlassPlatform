@@ -28,6 +28,8 @@ const binary=pkg.default||pkg,path=require('node:path'),assert=require('node:ass
    const opacities=[...overlay.matchAll(/rgba\([^)]*,\s*([\d.]+)\)/g)].map(m=>Number(m[1]));
    assert.equal(opacities.length,2);assert.ok(opacities.every(alpha=>alpha>=.4));
   }
+  const cardSkin=e=>{const s=getComputedStyle(e);return {padding:s.padding,borderRadius:s.borderRadius,background:s.backgroundImage,shadow:s.boxShadow};};
+  const certificateSkin=await page.locator('#certificate-options .cert-card:not(.is-checked)').evaluate(cardSkin);
   let headingPosition;
   for(const locale of ['ru','en'])for(const [platform,og] of [[true,true],[true,false],[false,true]]){
    await page.evaluate(({locale,platform,og})=>{window.messages=[];window.receive({data:{type:'state',page:'full-cleanup',locale,cleanupBody:locale==='ru'?'Выберите, параметры каких продуктов нужно удалить.\nНеотмеченные параметры сохранятся для повторной установки.':'Choose which product settings to remove.\nUnchecked settings are kept for reinstallation.',cleanupPlatformEligible:platform,cleanupOgEligible:og,cleanupUserData:false,cleanupOpenGlassConfig:false}})}, {locale,platform,og});
@@ -44,9 +46,10 @@ const binary=pkg.default||pkg,path=require('node:path'),assert=require('node:ass
    assert.equal(paragraphs[0].font,paragraphs[1].font);assert.equal(paragraphs[0].line,paragraphs[1].line);
    assert.ok(paragraphs.every(p=>p.bullet.includes('•')));
    assert.match(await backup.innerText(),locale==='ru'?/страницу «Системы»/:/System page/);
+   await page.mouse.move(0,0);
    for(const card of await page.locator('.cleanup-option:not([hidden])').all()){
     const rect=await card.boundingBox();assert.ok(rect.width<=480&&rect.x+rect.width<backupBox.x&&rect.height<78);
-    assert.match(await card.evaluate(e=>getComputedStyle(e).backdropFilter),/blur/);
+    assert.deepEqual(await card.evaluate(cardSkin),certificateSkin);
    }
    const choices=await page.locator('.cleanup-option:not([hidden]) small').allTextContents();
    assert.equal(choices.length,Number(platform)+Number(og));
@@ -72,8 +75,8 @@ const binary=pkg.default||pkg,path=require('node:path'),assert=require('node:ass
     const choice=page.locator('#'+id+'-cleanup-choice');
     await label.click();assert.equal(await choice.isChecked(),true);
     assert.equal(await choice.getAttribute('type'),'checkbox');
-    const marker=await choice.evaluate(e=>({radius:getComputedStyle(e).borderRadius,dot:getComputedStyle(e,'::after').borderRadius}));
-    assert.deepEqual(marker,{radius:'50%',dot:'50%'});
+    const marker=await choice.evaluate(e=>{const mark=getComputedStyle(e,'::after');return {radius:getComputedStyle(e).borderRadius,left:mark.borderLeftWidth,bottom:mark.borderBottomWidth};});
+    assert.deepEqual(marker,{radius:'5px',left:'2px',bottom:'2px'});
     assert.ok((await page.evaluate(()=>window.messages)).includes('cleanup:'+key+':1'));
     assert.equal(await label.evaluate(e=>getComputedStyle(e).outlineStyle),'none','mouse click must not outline the whole card');
     await choice.focus();
