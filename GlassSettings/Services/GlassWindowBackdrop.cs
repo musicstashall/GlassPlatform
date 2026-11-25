@@ -56,8 +56,9 @@ public sealed class GlassWindowBackdrop : SystemBackdrop
         // Theme / IsInputActive / IsHighContrast ведёт фреймворк — конфигурация не наша.
         _configuration = GetDefaultSystemBackdropConfiguration(connectedTarget, xamlRoot);
         RebuildController();
-        // Зонд Э7: материал активен с этого момента; если метка идёт позже first-present, кадр
-        // может быть ещё без него (это и есть «стартует без акрила»).
+        // Зонд Э7: материал активен с этого момента. Сравнивать нужно с кадровой меткой запуска
+        // (`splash:frame-rendered` / `shell:frame-rendered`, `CompositionTarget.Rendered`): если она
+        // раньше подключения цели, кадр ушёл без материала — это и есть «стартует без акрила».
         StartupPhaseTrace.Mark($"backdrop:target-connected {DescribeController()}");
     }
 

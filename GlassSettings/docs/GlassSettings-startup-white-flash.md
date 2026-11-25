@@ -4,37 +4,46 @@
 
 **Статус:** попытки устранения вспышки только в GlassSettings **откачены** (2026-06-08). Код возвращён к состоянию до экспериментов. Документ фиксирует матрицу, чтобы не повторять неудачные ветки.
 
-**Статус (2026-11-25):** вместо управления видимостью окна реализован план: один `Activate()`,
-`Window.SystemBackdrop` присвоен один раз до показа (`GlassWindowBackdrop`), shell строится до
-`Activate()`, заставка → панель in-app acrylic в области страницы (Э7.2). **Код изменён, не собран** —
-проверка только на Windows, см. разделы 12–13 плана.
+**Статус (2026-11-25, Э8.1):** вместо управления видимостью окна — полноэкранная заставка: один
+`Activate()`, `Window.SystemBackdrop` присвоен один раз (`GlassWindowBackdrop`), `StartupSplash`
+(значок по центру, прозрачный слой на всю клиентскую область) показывается первым кадром, shell
+строится **под** ней и раскрывается в одном UI-проходе. Проверка — только на Windows,
+механика и чек-лист: раздел 15 плана.
 
 См. также: [GlassSettings-development.md](GlassSettings-development.md), [GlassSettings-visual-styles.md](GlassSettings-visual-styles.md).
 
-> **Правило (уточнено Э8, 2026-11-25).** Первый кадр обеспечивается **порядком**
-> `лёгкий shell → Activate` (тема корня → `Window.SystemBackdrop` → chrome/иконка → nav-элементы +
-> панель заставки → единственный `Activate()`), а не состоянием окна. **Тяжёлый контент в первый
-> кадр не пускаем**: `NavigateToRoot(typeof(HomePage))` до `Activate()` дал 985 мс между
-> `activate:end` и `first-present` (BuildCards/Refresh/measure дерева Home выполняются в том самом
-> первом layout-проходе), т.е. ровно «секунда пустого окна без акрила». Home навигируется из очереди
-> `RunAfterFirstPresent`, пока её область перекрыта заставкой. Любая попытка
-> «выторговать» кадр через `DWMWA_CLOAK`, `IsShownInSwitchers`, `SW_HIDE`/`SW_SHOW`, парковку за
-> экран, solid-подложку или отложенное переприсваивание `SystemBackdrop` даёт либо серую
-> рамку, либо «дырку», либо скачок геометрии: WinUI сам включает прозрачность острова и
-> подключает backdrop-цель в момент активации, и всё, что происходит после
-> `Activate()`, уже видно. Разделы «Solid bootstrap + DWM cloak → splash-first show», «StartupSplashWindow
-> + hidden MainWindow» и «Single-window splash на Main» считать *superseded* (оставлены как
-> анти-паттерны); пункты матрицы #9/#12/#13/#16 закрыты сменой порядка запуска, а не
-> состоянием окна. Подробно: [GlassSettings-startup-window-plan.md](GlassSettings-startup-window-plan.md).
+> **Правило (Э8.1, 2026-11-25).** Первый кадр обеспечивается **порядком**, а не состоянием окна:
+> тема корня → `Window.SystemBackdrop` один раз → `StartupSplash` (прозрачный слой на всю клиентскую
+> область + значок) → единственный `Activate()` → `CompositionTarget.Rendered` (кадр заставки реально
+> отправлен на композицию) → предзагрузка + `PreNav` + `NavigateToRoot(HomePage)` → `PostNav/Ensure` →
+> `RevealStartupShell` (shell `Opacity=1` + сворачивание заставки в том же проходе, без fade).
 >
-> **Форма индикатора (Э7.2 → Э8).** Заставка — `LoadingOverlay` с `AcrylicInAppFillColorDefaultBrush`
-> **рядом с `PageContentHost`** (область страницы `NavigationView`), а не `Grid.RowSpan="2"` над всем окном:
-> caption и pane остаются живыми в первом кадре, материал окна не перекрывается. Панель **видима с первого
-> кадра** (XAML `Visibility="Visible"`), снимается по готовности Home, фейд — на следующем кадре
-> (`FadeOutIndicatorOnNextFrame`). Отложенный показ (150 мс из Э7.2) **не работает и убран**:
-> `DispatcherQueueTimer` получает Tick только когда UI-поток свободен, поэтому панель появлялась через
-> 0.9 с ПОСЛЕ первого кадра — то есть поверх уже готового контента, что и было изначальным дефектом.
-> Аварийный потолок — `LoadingIndicatorMaxMs` (2500 мс от `Activate()`).
+> **Тяжёлый контент в нулевой кадр не пускаем.** `NavigateToRoot(typeof(HomePage))` **до** `Activate()`
+> давал 985 мс между `activate:end` и `first-present`: `BuildCards()/Refresh()` и первый
+> measure/arrange дерева Home выполняются в том же layout-проходе, поэтому «секунда пустого окна без
+> акрила» — это цена контента в первом кадре, а не поведение DWM.
+>
+> **Индикатор «по таймеру» — анти-паттерн.** `DispatcherQueueTimer` получает `Tick` только когда
+> UI-поток свободен: панель, отложенная на 150 мс, выезжала через 932 мс уже **поверх** готового
+> контента (замер Э7.2). Отсюда — никаких задержек показа и никаких «дожиданий данных»: заставка
+> видима с первого кадра и снимается фактом раскрытия shell.
+>
+> Любая попытка «выторговать» кадр через `DWMWA_CLOAK`, `IsShownInSwitchers`, `SW_HIDE`/`SW_SHOW`,
+> парковку за экран, solid-подложку или отложенное переприсваивание `SystemBackdrop` даёт либо серую
+> рамку, либо «дырку», либо скачок геометрии: WinUI сам включает прозрачность острова и подключает
+> backdrop-цель в момент активации, и всё, что происходит после `Activate()`, уже видно. Разделы
+> «Solid bootstrap + DWM cloak → splash-first show», «StartupSplashWindow + hidden MainWindow» и
+> «Single-window splash на Main» считать *superseded* (оставлены как анти-паттерны); пункты матрицы
+> #9/#12/#13/#16 закрыты сменой порядка запуска, а не состоянием окна. Подробно:
+> [GlassSettings-startup-window-plan.md](GlassSettings-startup-window-plan.md).
+>
+> **Форма заставки (Э8.1).** `StartupSplash` — `Grid` на всю клиентскую область (`RootGrid`),
+> `Background="Transparent"`: материал рисует системный Desktop Acrylic окна, а не кисть поверх shell.
+> Значок 108 (`Assets\app.ico`, декод синхронно, при ошибке — `FontIcon`), стартового `ProgressRing`
+> нет. Shell под заставкой: `WindowBlurSourceHost Visibility=Visible, Opacity=0, IsHitTestVisible=False`,
+> `NavView`/`AppTitleBar IsEnabled=False` → участвует в layout, но не виден и не кликабелен;
+> сохранённый материал возвращается `GlassWindowBackdrop.TryApplyMode` в момент раскрытия.
+> `WindowBusyOverlay` (операции, hosted-диалоги) не изменён.
 
 ---
 
