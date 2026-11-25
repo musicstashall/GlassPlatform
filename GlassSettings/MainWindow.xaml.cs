@@ -50,7 +50,7 @@ public sealed partial class MainWindow : Window
     private bool _shellInteractiveReady;
     private bool _postDismissHooksDone;
     private bool _navigationReady;
-    /// <summary>Момент РЕАЛЬНОГО показа заставки (не начала старта): от него считаются min/max видимости.</summary>
+    /// <summary>Момент арминга заставки (`Activate()`): длительность панели печатается в метке снятия.</summary>
     private DateTimeOffset _loadingShownAt = DateTimeOffset.UtcNow;
     private Task? _attachIconPreload;
     private SettingsLayoutMode _layoutMode = SettingsLayoutMode.Medium;
@@ -101,23 +101,23 @@ public sealed partial class MainWindow : Window
     /// <summary>Fade-out заставки при снятии: анимация контента, окна не касается.</summary>
     private const int LoadingIndicatorFadeOutMs = 220;
     /// <summary>
-    /// Задержка показа заставки-панели (Э7.2): тёплый старт, где Home успевает подготовиться
-    /// раньше, проходит без индикатора вовсе — панель не мелькает.
+    /// Аварийный потолок жизни заставки (Э8). Панель видима с ПЕРВОГО кадра (в XAML Visible) и
+    /// снимается готовностью Home; таймер от Activate нужен только чтобы «Home не построилась»
+    /// не превратилось в вечную шторку.
+    ///
+    /// Задержку показа (150 мс в Э7.2) пришлось убрать: DispatcherQueueTimer обрабатывает Tick
+    /// только когда UI-поток свободен, т.е. уже ПОСЛЕ построения контента — в замерах панель
+    /// появлялась на +2327 мс при первом кадре +1395 мс, ровно «поверх готового контента».
     /// </summary>
-    private const int LoadingIndicatorShowDelayMs = 150;
-    /// <summary>
-    /// Жёсткий потолок ВИДИМОСТИ заставки: дольше она только висела бы поверх готового контента,
-    /// поэтому снимаем даже если данные ещё догружаются (они догружаются и так — снизу).
-    /// </summary>
-    private const int LoadingIndicatorMaxMs = 900;
-    /// <summary>Очень короткий показ гасим без фейда: 1-2 кадра с анимацией читаются как мигание.</summary>
-    private const int LoadingIndicatorMinVisibleMs = 90;
+    private const int LoadingIndicatorMaxMs = 2500;
     private bool _indicatorArmed;
-    private bool _indicatorShown;
-    /// <summary>Показ запрошен таймером, но ждёт первого present (акрил панели в нулевом кадре дорог).</summary>
-    private bool _indicatorPendingShow;
-    private DispatcherQueueTimer? _indicatorShowTimer;
+    /// <summary>Фейд заставки ждёт следующий кадр после готовности Home (страховка — 400 мс).</summary>
+    private bool _indicatorFadeScheduled;
+    /// <summary>Поле держит страховочный таймер фейда: DispatcherQueueTimer не должен стать мусором до Tick.</summary>
+    private DispatcherQueueTimer? _indicatorFadeFallbackTimer;
     private DispatcherQueueTimer? _indicatorCapTimer;
+    /// <summary>Стартовая навигация на Home планируется ровно один раз (после первого кадра).</summary>
+    private bool _homeNavScheduled;
 
     /// <summary>Планирует cold start на следующий проход dispatcher (не внутри Activate/reentrancy).</summary>
     internal void TryCompleteColdStartBootstrap()
@@ -187,14 +187,6 @@ public sealed partial class MainWindow : Window
         Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnFirstPresentRendering;
         StartupPhaseTrace.MarkWindow(phase, this);
 
-        // Заставку поднимаем только после present: тот же урок, что и с PostNav, — лишняя
-        // acrylic-панель в нулевом кадре удорожает и сдвигает первый кадр целиком.
-        if (_indicatorPendingShow)
-        {
-            _indicatorPendingShow = false;
-            ShowLoadingIndicatorNow();
-        }
-
         var pending = _afterFirstPresent.ToArray();
         _afterFirstPresent.Clear();
         foreach (var work in pending)
@@ -229,11 +221,17 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Shell первого кадра строится ДО Activate (порядок WinUI Gallery): PreNav → NavigateToRoot.
-    /// Иначе первый present — пустая рамка, и «первый кадр» приходится выторговывать трюками с окном.
-    /// x86-контракт сохраняется: PostNav (Presence/watchers) — только после HomePage.OnLoaded.
-    /// Вызывается из <c>App.OnLaunched</c> (после App.ShellWindow = window) и продублировано в
-    /// <see cref="ActivateAtStartup"/> как страховка: активировать окно без shell нельзя.
+    /// До Activate строится ЛЁГКИЙ shell: PreNav (nav-элементы, breadcrumb-хост, search, layout) +
+    /// заставка в области страницы. Сама HomePage — после первого present
+    /// (<see cref="NavigateHomeAfterFirstFrame"/>).
+    ///
+    /// Почему так (замер 2026-11-25): при «NavigateToRoot до Activate» между activate:end и
+    /// first-present было 985 мс — BuildCards/Refresh/measure дерева Home случаются в первом же
+    /// layout-проходе, и вместе с ними уезжал и acrylic material («секунда пустого окна без акрила»).
+    /// Кадр с pane + caption + заставкой дешёвый, поэтому material и значок видны сразу;
+    /// «пустой рамки» нет — заставка и есть содержимое первого кадра.
+    ///
+    /// x86-контракт сохранён: PreNav → Navigate (пост-кадр) → PostNav из HomePage.OnLoaded.
     /// </summary>
     internal void PrepareShellForStartup()
     {
@@ -247,10 +245,6 @@ public sealed partial class MainWindow : Window
 
         _currentTag = "home";
         _nav.CurrentSidebarTag = "home";
-        _nav.NavigateToRoot(
-            typeof(HomePage),
-            "home",
-            GlassSettingsResources.Get("NavHome"));
         SelectNavItem("home");
 
         // Layout-режим и поиск в title bar — до первого кадра: иначе окно «дёрнется» после снятия индикатора.
@@ -403,6 +397,31 @@ public sealed partial class MainWindow : Window
 
         // Тяжёлый cold start — после первого present (кадр уже живой).
         RunAfterFirstPresent(TryCompleteColdStartBootstrap);
+        RunAfterFirstPresent(NavigateHomeAfterFirstFrame);
+    }
+
+    /// <summary>
+    /// Э8: навигация на Home — только после первого кадра. Пока дерево страницы строится,
+    /// в области страницы стоит заставка со значком, поэтому ~1 с построения пользователь видит
+    /// «заставку», а не пустое окно без акрила. Очередь первого present обрабатывается и на
+    /// fallback-таймере, так что страница не останется пустой, даже если `Rendering` не наступил.
+    /// </summary>
+    internal void NavigateHomeAfterFirstFrame()
+    {
+        if (_homeNavScheduled)
+            return;
+
+        _homeNavScheduled = true;
+        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Normal, () =>
+        {
+            StartupPhaseTrace.MarkWindow("home-nav:begin", this);
+            _nav.NavigateToRoot(
+                typeof(HomePage),
+                "home",
+                GlassSettingsResources.Get("NavHome"));
+            SelectNavItem("home");
+            StartupPhaseTrace.MarkWindow("home-nav:end", this);
+        });
     }
 
     /// <summary>XamlRoot окна — для ContentDialog и полноэкранной шторы.</summary>
@@ -958,10 +977,10 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Отложенный показ заставки (Э7.2). Таймер на LoadingIndicatorShowDelayMs от Activate:
-    /// если shell успел подготовиться раньше, панель не показывается вообще. Таймер-потолок
-    /// стартует в момент фактического показа и ограничивает только ВИДИМОСТЬ — заставка не
-    /// имеет права висеть поверх уже отрисованного контента, пока догружаются данные.
+    /// Заставка видима с первого кадра (XAML `Visibility="Visible"`), поэтому из кода нужен только
+    /// аварийный потолок: `LoadingIndicatorMaxMs` от `Activate()` снимает панель, если конвейер Home
+    /// завис. Никакого «показать через N мс»: Tick диспетчера не успевает сработать до построения
+    /// контента и превращает заставку в оверлей над уже готовой страницей.
     /// </summary>
     private void ArmStartupLoadingIndicator()
     {
@@ -969,41 +988,7 @@ public sealed partial class MainWindow : Window
             return;
 
         _indicatorArmed = true;
-
-        var show = DispatcherQueue.CreateTimer();
-        show.Interval = TimeSpan.FromMilliseconds(LoadingIndicatorShowDelayMs);
-        show.IsRepeating = false;
-        show.Tick += (_, _) => RequestShowLoadingIndicator();
-        show.Start();
-        _indicatorShowTimer = show;
-    }
-
-    /// <summary>Запрос показа по таймеру: удовлетворяется не раньше первого present окна.</summary>
-    private void RequestShowLoadingIndicator()
-    {
-        if (_contentReady || _indicatorShown)
-            return;
-
-        if (!_firstPresentSeen)
-        {
-            _indicatorPendingShow = true;
-            return;
-        }
-
-        ShowLoadingIndicatorNow();
-    }
-
-    private void ShowLoadingIndicatorNow()
-    {
-        if (_contentReady || _indicatorShown)
-            return;
-
-        _indicatorShown = true;
         _loadingShownAt = DateTimeOffset.UtcNow;
-        LoadingOverlay.Opacity = 1;
-        LoadingOverlay.Visibility = Visibility.Visible;
-        LoadingRing.IsActive = true;
-        StartupPhaseTrace.MarkWindow("indicator-shown", this);
 
         var cap = DispatcherQueue.CreateTimer();
         cap.Interval = TimeSpan.FromMilliseconds(LoadingIndicatorMaxMs);
@@ -1022,18 +1007,15 @@ public sealed partial class MainWindow : Window
 
     private void StopLoadingIndicatorTimers()
     {
-        _indicatorPendingShow = false;
         try
         {
-            _indicatorShowTimer?.Stop();
             _indicatorCapTimer?.Stop();
         }
         catch
         {
-            /* таймеры best-effort: окно может закрываться */
+            /* таймер best-effort: окно может закрываться */
         }
 
-        _indicatorShowTimer = null;
         _indicatorCapTimer = null;
     }
 
@@ -1060,18 +1042,12 @@ public sealed partial class MainWindow : Window
         // Заставка снимается как обычная анимация контента: видимость/позиция/клоак
         // окна не трогаются. Hit-test subtree остаётся off до MarkReady — иначе клики,
         // полученные во время достройки Home, доезжают как навигация с Главной.
-        if (_indicatorShown &&
-            (DateTimeOffset.UtcNow - _loadingShownAt).TotalMilliseconds < LoadingIndicatorMinVisibleMs)
-        {
-            _ = HoldIndicatorBrieflyAsync(() => BeginIndicatorFadeOut(LoadingIndicatorFadeOutMs, FinishIndicatorDismiss));
-        }
-        else
-        {
-            FinishIndicatorDismiss();
-        }
+        FadeOutIndicatorOnNextFrame();
 
         DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, StartPostDismissShellHooks);
-        StartupPhaseTrace.MarkWindow("indicator-dismiss", this);
+        StartupPhaseTrace.MarkWindow(
+            $"indicator-dismiss (veil {(int)(DateTimeOffset.UtcNow - _loadingShownAt).TotalMilliseconds}ms)",
+            this);
     }
 
     /// <summary>Панель снята: hit-test shell включаем только здесь.</summary>
@@ -1088,24 +1064,60 @@ public sealed partial class MainWindow : Window
         ShellContentReadyGate.MarkReady();
     }
 
-    private async Task HoldIndicatorBrieflyAsync(Action resume)
+    /// <summary>
+    /// Фейд заставки — на следующем кадре: без этого панель начинает гаснуть в том же pump, где
+    /// построенная Home ещё не ушла на композицию, и виден промежуточный кадр «пустая область
+    /// страницы под полупрозрачным acrylic». `CompositionTarget.Rendering` может и не прийти
+    /// (окно свернули/потеряло активость ровно в момент снятия), поэтому есть страховка на 400 мс.
+    /// </summary>
+    private void FadeOutIndicatorOnNextFrame()
     {
-        try
+        if (LoadingOverlay.Visibility != Visibility.Visible)
         {
-            await Task.Delay(LoadingIndicatorMinVisibleMs).ConfigureAwait(true);
-        }
-        catch
-        {
+            FinishIndicatorDismiss();
             return;
         }
 
+        if (_indicatorFadeScheduled)
+            return;
+
+        _indicatorFadeScheduled = true;
+        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += OnIndicatorFadeRendering;
+
+        var fallback = DispatcherQueue.CreateTimer();
+        fallback.Interval = TimeSpan.FromMilliseconds(400);
+        fallback.IsRepeating = false;
+        fallback.Tick += (_, _) => FadeOutIndicatorNow();
+        fallback.Start();
+        _indicatorFadeFallbackTimer = fallback;
+    }
+
+    private void OnIndicatorFadeRendering(object? sender, object e) => FadeOutIndicatorNow();
+
+    private void FadeOutIndicatorNow()
+    {
+        if (!_indicatorFadeScheduled)
+            return;
+
+        _indicatorFadeScheduled = false;
+        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnIndicatorFadeRendering;
         try
         {
-            resume();
+            _indicatorFadeFallbackTimer?.Stop();
         }
         catch
         {
-            /* dismiss best-effort */
+            /* страховка best-effort */
+        }
+
+        _indicatorFadeFallbackTimer = null;
+        try
+        {
+            BeginIndicatorFadeOut(LoadingIndicatorFadeOutMs, FinishIndicatorDismiss);
+        }
+        catch
+        {
+            FinishIndicatorDismiss();
         }
     }
 

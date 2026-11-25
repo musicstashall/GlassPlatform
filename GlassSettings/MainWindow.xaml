@@ -182,18 +182,17 @@
                         </Grid>
                     </Grid>
                     <!--
-                        Заставка cold start (Э7.2, вариант А): панель in-app acrylic над ОБЛАСТЬЮ
-                        СТРАНИЦЫ — caption и pane остаются живыми с первого кадра, материал окна не
-                        перекрывается. Показ отложен (LoadingIndicatorShowDelayMs): если Home успела
-                        подготовиться раньше, панель не показывается вовсе — нет мигания на тёплом
-                        старте. Видимостью/состоянием окна НЕ управляет:
-                        docs/GlassSettings-startup-window-plan.md.
+                        Заставка cold start (Э8): панель in-app acrylic над ОБЛАСТЬЮ СТРАНИЦЫ, видима
+                        с ПЕРВОГО кадра — до неё в этой области ничего нет, HomePage навигируется уже
+                        под заставкой (MainWindow.PrepareShellForStartup / NavigateHomeAfterFirstFrame).
+                        caption и pane живые, материал окна не перекрыт. Видимостью/состоянием окна НЕ
+                        управляет: docs/GlassSettings-startup-window-plan.md.
                     -->
                     <Grid
                         x:Name="LoadingOverlay"
                         Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}"
                         IsHitTestVisible="True"
-                        Visibility="Collapsed"
+                        Visibility="Visible"
                         PointerPressed="LoadingOverlay_OnPointerInput"
                         PointerReleased="LoadingOverlay_OnPointerInput"
                         PointerCanceled="LoadingOverlay_OnPointerInput"
@@ -219,7 +218,7 @@
                                 HorizontalAlignment="Center"
                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                 IsHitTestVisible="False"
-                                IsActive="False" />
+                                IsActive="True" />
                         </StackPanel>
                     </Grid>
                 </Grid>

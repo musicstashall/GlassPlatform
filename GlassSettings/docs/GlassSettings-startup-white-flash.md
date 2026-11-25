@@ -11,9 +11,13 @@
 
 См. также: [GlassSettings-development.md](GlassSettings-development.md), [GlassSettings-visual-styles.md](GlassSettings-visual-styles.md).
 
-> **Правило (закреплено реализацией плана 2026-11-25).** Первый кадр обеспечивается
-> **порядком** `content → Activate` (тема корня → `Window.SystemBackdrop` → chrome/иконка →
-> `NavigateToRoot` → единственный `Activate()`), а не состоянием окна. Любая попытка
+> **Правило (уточнено Э8, 2026-11-25).** Первый кадр обеспечивается **порядком**
+> `лёгкий shell → Activate` (тема корня → `Window.SystemBackdrop` → chrome/иконка → nav-элементы +
+> панель заставки → единственный `Activate()`), а не состоянием окна. **Тяжёлый контент в первый
+> кадр не пускаем**: `NavigateToRoot(typeof(HomePage))` до `Activate()` дал 985 мс между
+> `activate:end` и `first-present` (BuildCards/Refresh/measure дерева Home выполняются в том самом
+> первом layout-проходе), т.е. ровно «секунда пустого окна без акрила». Home навигируется из очереди
+> `RunAfterFirstPresent`, пока её область перекрыта заставкой. Любая попытка
 > «выторговать» кадр через `DWMWA_CLOAK`, `IsShownInSwitchers`, `SW_HIDE`/`SW_SHOW`, парковку за
 > экран, solid-подложку или отложенное переприсваивание `SystemBackdrop` даёт либо серую
 > рамку, либо «дырку», либо скачок геометрии: WinUI сам включает прозрачность острова и
@@ -23,12 +27,14 @@
 > анти-паттерны); пункты матрицы #9/#12/#13/#16 закрыты сменой порядка запуска, а не
 > состоянием окна. Подробно: [GlassSettings-startup-window-plan.md](GlassSettings-startup-window-plan.md).
 >
-> **Форма индикатора (Э7.2, 2026-11-25).** Заставка — `LoadingOverlay` с `AcrylicInAppFillColorDefaultBrush`
+> **Форма индикатора (Э7.2 → Э8).** Заставка — `LoadingOverlay` с `AcrylicInAppFillColorDefaultBrush`
 > **рядом с `PageContentHost`** (область страницы `NavigationView`), а не `Grid.RowSpan="2"` над всем окном:
-> caption и pane остаются живыми в первом кадре, материал окна не перекрывается. Показ **отложен** на
-> ~150 мс от `Activate()` (тёплый старт проходит без индикатора вовсе) и ограничен ~900 мс видимости:
-> «бублик/иконка поверх загруженного контента» — дефект. Тяжёлые данные (`DesktopWallpaperImageCache`,
-> composition blur) дожидаются снятия только в пределах этого окна (`maxPreviewWaitMs` 250 мс).
+> caption и pane остаются живыми в первом кадре, материал окна не перекрывается. Панель **видима с первого
+> кадра** (XAML `Visibility="Visible"`), снимается по готовности Home, фейд — на следующем кадре
+> (`FadeOutIndicatorOnNextFrame`). Отложенный показ (150 мс из Э7.2) **не работает и убран**:
+> `DispatcherQueueTimer` получает Tick только когда UI-поток свободен, поэтому панель появлялась через
+> 0.9 с ПОСЛЕ первого кадра — то есть поверх уже готового контента, что и было изначальным дефектом.
+> Аварийный потолок — `LoadingIndicatorMaxMs` (2500 мс от `Activate()`).
 
 ---
 

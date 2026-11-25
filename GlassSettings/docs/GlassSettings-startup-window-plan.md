@@ -341,6 +341,9 @@ App.OnLaunched
 
 ### Э7.2 — реализовано (выбран вариант А + отложенный показ)
 
+> **Пересмотрено в Э8 (раздел 14):** форма панели (вариант А) осталась, но «отложенный показ» и
+> «потолок видимости» оказались вредны — панель видима с первого кадра, а Home строится после него.
+
 Форма: `LoadingOverlay` — панель `AcrylicInAppFillColorDefaultBrush` **внутри области страницы**
 (`NavigationView` → `Grid`, сосед `PageContentHost`), а не `Grid.RowSpan="2"` над всем окном: caption и pane
 живые с первого кадра, материал окна не перекрыт. Внутри — значок 108 и `ProgressRing` 28. `SystemBackdrop`
@@ -376,3 +379,55 @@ App.OnLaunched
 Трасса после Э7.2 обязана показать: `activate:begin → first-present` ≤ ~500 мс (цель ≤100 на x64),
 затем `indicator-shown` (на тёплом старте — его отсутствие), `indicator-dismiss − indicator-shown` ≤ ~900 мс,
 `backdrop:mode=… <controller>` в первых строках.
+
+---
+
+## 14. Э8 — первый кадр без Home (правка по трассе после Э7.2, 2026-11-25)
+
+### Что показал прогон
+
+```
++215ms backdrop:target-connected acrylic     +410ms activate:end  (visible=True, cloaked=0)
++222ms chrome+backdrop                        +1395ms first-present   ← +985 мс от activate:end
++238ms placement                              +1463ms titlebar-chrome
++240ms ctor:exit                              +1464ms cold-start-core
++380ms shell-ready-for-first-frame             +2327ms indicator-shown ← +932 мс ПОСЛЕ кадра
++382ms activate:begin                          +2727ms indicator-dismiss
+```
+
+Между `cold-start-core` и `indicator-shown` в логе — `[ReflectionConfigure] shared wallpaper decode:
+SetSourceAsync begin/complete`. То есть Э7.1 сработал (chrome/cold-start-core переехали за кадр), но:
+
+| # | Дефект | Причина |
+|---|--------|---------|
+| О1 | `activate:end → first-present` = 985 мс: «секунда пустого окна без акрила» | Home навигируется **до** `Activate()` (принцип Э4 «content → Activate»). `HomePage.OnLoaded → BuildCards()/Refresh()` и первый measure/arrange огромного дерева попадают в тот же проход, что и нулевой кадр → кадр стоит столько, сколько стоит построение Home. Material появляется только вместе с кадром, поэтому «без акрила» |
+| О2 | Заставка показалась через 932 мс **после** кадра, т.е. поверх готового контента | отложенный показ висит на `DispatcherQueueTimer`, а его Tick обрабатывается только когда UI-поток освобождается; весь pre-кадровый блок (О1) его и задержал. «Отложенный показ» в такой схеме принципиально non-функционален |
+| О3 | Бублик жил ещё ~400 мс поверх контента | снятие ждёт `maxPreviewWaitMs`/`_attachIconPreload` — данные, а не факт готовности страницы |
+
+### Решение (Э8)
+
+1. **Порядок старта изменён**: до `Activate()` — только лёгкий shell (`FinishDeferredInitializationPreNav`
+   → nav-элементы, search, layout, `SelectNavItem("home")`) и **видимая с XAML** панель заставки;
+   `NavigateToRoot(typeof(HomePage))` перенесён в очередь первого кадра
+   (`ActivateAtStartup` → `RunAfterFirstPresent(NavigateHomeAfterFirstFrame)` → `TryEnqueue(Normal)`).
+   Метка `NavigateToRoot` до `Activate` была страховкой от «пустой рамки» — теперь пустоту закрывает
+   заставка, а не контент, поэтому рамка не пустая, а кадр дешёвый.
+2. **Заставка видима с первого кадра**: `LoadingOverlay Visibility="Visible"`,
+   `LoadingRing IsActive="True"`; `LoadingIndicatorShowDelayMs`, `_indicatorPendingShow`,
+   `ShowLoadingIndicatorNow()`, `LoadingIndicatorMinVisibleMs` и `HoldIndicatorBrieflyAsync` удалены
+   (О2). `ArmStartupLoadingIndicator()` оставляет только аварийный потолок `LoadingIndicatorMaxMs` = 2500 мс.
+3. **Снятие — по кадру, а не по данным**: `TryDismissLoadingOverlay()` → `FadeOutIndicatorOnNextFrame()`
+   (один `CompositionTarget.Rendering`, затем 220 мс фейд) — панель гаснет на кадре, на котором Home
+   уже отрисована; в метку снятия добавлена длительность: `indicator-dismiss (veil Nms)`.
+4. **Диагностика О1/О3**: в `HomePage.OnLoaded` добавлены метки `home:onloaded:begin`,
+   `home:build:end`, `home:refresh:end`; в `MainWindow` — `home-nav:begin`/`home-nav:end`.
+
+Ожидаемая трасса после Э8: `activate:begin → first-present` ≤ ~100 мс (дерево = caption + pane +
+панель заставки), `backdrop:mode=…` рядом с `first-present`, `home-nav:begin` сразу после кадра,
+`home:build:end`/`home:refresh:end` показывают реальную цену построения Home (уже под заставкой),
+`indicator-dismiss (veil …)` — сразу после готовности страницы, а не через секунду.
+
+Риск, который надо проверить глазами: pane и caption в первом кадре живые, **область страницы пуста и
+перекрыта acrylic-панелью со значком** — это и есть задуманная заставка; если захотим, чтобы значок был
+по центру всего окна (в т.ч. над pane), панель возвращается на уровень `RootGrid` `Grid.Row="1"` —
+одно свойство в XAML, без изменения очерёдности.

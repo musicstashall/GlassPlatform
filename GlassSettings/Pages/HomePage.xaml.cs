@@ -335,6 +335,9 @@ public sealed partial class HomePage : Page
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        // Э8-диагностика: этот блок (BuildCards + Refresh) и есть цена первого кадра, если Home
+        // навигируется до Activate. Метки нужны, чтобы видеть, сколько он занимает пост-кадром.
+        StartupPhaseTrace.Mark("home:onloaded:begin");
         if (!_built)
         {
             BuildCards();
@@ -347,6 +350,7 @@ public sealed partial class HomePage : Page
                 ColGap,
                 ColRight);
         }
+        StartupPhaseTrace.Mark("home:build:end");
         Refresh();
         HookEnvironmentWatcher();
         ApplyOpenGlassUiVisibility();
@@ -357,6 +361,7 @@ public sealed partial class HomePage : Page
         PlatformPresenceService.Instance.PresenceChanged -= OnPresenceChanged;
         PlatformPresenceService.Instance.PresenceChanged += OnPresenceChanged;
         PlatformPresenceService.Instance.AddSubscriber();
+        StartupPhaseTrace.Mark("home:refresh:end");
         // RuntimeMonitor/PostNav — после выхода из Loaded (иначе x86 AV до следующего pump).
         App.ShellWindow?.ScheduleColdStartPostNavAfterHomeLoaded(this);
     }
