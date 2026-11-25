@@ -71,7 +71,11 @@ assert 'Directory.Enumerate' not in service and 'Inventory(' not in service
 assert 'saved.Profile == profile.Key' in service and 'saved.SourceHash == sourceHash' in service
 assert 'ReflectionRenderState.ReleaseManagement()' in page and 'ReflectionRenderState.MarkManaged' in page
 assert 'expectedProfile != profile.Key' in service
-assert 'args.DisplayChanged' in dialog and 'dialogContext?.CloseDismissed()' in dialog
+assert 'args.DisplayChanged' in dialog and 'var replacement = new ReflectionDesktopPreview()' in dialog
+assert 'CloseDismissed()' not in dialog
+assert 'old.Dispose()' in dialog and 'preview.Dispose()' in dialog
+assert '!ReferenceEquals(treeAtStart, previewTree)' in dialog
+assert 'initialProfile = replacement.ProfileKey' in dialog
 assert 'ReflectionDisplayProfile.Capture().Key == initialProfile' in dialog
 assert '_pendingDisplay' in watcher and 'DisplayChanged = displayChanged' in watcher
 assert 'new RegistryValueChangeWatcher' not in wrapper
@@ -99,3 +103,23 @@ assert key(a) != key(a[:1])
 assert key(a) != key([a[0], (1920, 100, 2560, 1440, 144, 144)])
 print('PASS: canonical identity specification: enumeration/origin invariant, geometry/DPI/connectivity sensitive')
 print('NOTE: Windows compilation, optional loader, HKCU/DWM, mixed-DPI and hot-plug require Windows testing')
+
+assert 'SettingsSession.Current.AcceptAutomaticReflectionBaseline(baselineAtSignal, path)' in page
+assert 'StillSelected, activeAtSignal);' in page
+assert 'if (canApply is not null' in page
+snapshot = read('GlassSettings/Core/Snapshot/SettingsSnapshot.cs')
+session = read('GlassSettings/Services/SettingsSession.cs')
+watch = read('GlassSettings/Services/RegistrySnapshotWatchService.cs')
+assert 'ReconcileAutomaticReflectionFromWatch' not in watch and 'ReconcileAutomaticReflectionFromWatch' not in session
+profile = read('GlassSettings/Services/ReflectionDisplayProfile.cs')
+assert 'GetMonitorInfoW' in profile and 'MonitorDefaultToNearest' in profile
+assert 'TakeWhile(character => char.IsDigit(character))' in profile
+assert 'internal bool AcceptAutomaticReflectionBaseline(string? previousOutput, string expectedOutput)' in snapshot
+assert 'internal bool AcceptAutomaticReflectionBaseline(string? previousOutput, string expectedOutput)' in session
+assert 'ReflectionRenderState.ReadForOutput(expectedOutput) is null' in session
+assert 'StampDirtyScopesFromSnapshot();' in session
+assert 'string.Equals(previousOutput, expectedOutput, StringComparison.OrdinalIgnoreCase)' in snapshot
+assert 'CaptureDwmKeySubset([name], DwmRegistryHive.Hkcu)' in snapshot
+assert 'ReconcileScopeDirtyFlags();' in session
+assert 'Save(' not in snapshot[snapshot.index('internal bool AcceptAutomaticReflectionBaseline'):snapshot.index('internal bool AcceptAutomaticReflectionBaseline') + 700]
+print('PASS: live dialog re-layout preserves draft, single reflection canvas and targeted automatic path baseline reconciliation')

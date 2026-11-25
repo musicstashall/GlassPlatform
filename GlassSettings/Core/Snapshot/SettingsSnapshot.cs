@@ -667,6 +667,30 @@ public sealed class SettingsSnapshot
             _dwmPartitions[partition] = FilterDwmPartition(_dwmFullSnapshot, partition);
     }
 
+    /// <summary>
+    /// Display-change rebind replaces the applied canvas for the same recipe.
+    /// Accept that exact key as baseline, but only if the baseline still holds
+    /// the output this rebind replaced and the registry holds the expected new
+    /// PNG. Other unsaved reflection settings remain dirty through reconciliation.
+    /// </summary>
+    internal bool AcceptAutomaticReflectionBaseline(string? previousOutput, string expectedOutput)
+    {
+        const string name = "CustomThemeReflection";
+        if (string.IsNullOrWhiteSpace(previousOutput)
+            || string.Equals(previousOutput, expectedOutput, StringComparison.OrdinalIgnoreCase)) return false;
+        var baseline = _dwmFullSnapshot.FirstOrDefault(e => e.DwmHive == DwmRegistryHive.Hkcu
+            && string.Equals(e.ValueName, name, StringComparison.OrdinalIgnoreCase));
+        if (baseline is null || baseline.Type != 1
+            || !string.Equals(System.Text.Encoding.Unicode.GetString(baseline.Data).TrimEnd('\0'),
+                previousOutput, StringComparison.OrdinalIgnoreCase)) return false;
+        var active = TryReadDwmValueEntry(DwmRegistryHive.Hkcu, name);
+        if (active is null || active.Type != 1
+            || !string.Equals(System.Text.Encoding.Unicode.GetString(active.Data).TrimEnd('\0'),
+                expectedOutput, StringComparison.OrdinalIgnoreCase)) return false;
+        CaptureDwmKeySubset([name], DwmRegistryHive.Hkcu);
+        return true;
+    }
+
     /// <summary>Ключ уже в полном DWM-снимке (в т.ч. subset для исключённых value).</summary>
     public bool ContainsDwmKey(string valueName, DwmRegistryHive? hive = null) =>
         _dwmFullSnapshot.Any(e =>

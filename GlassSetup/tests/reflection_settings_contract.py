@@ -97,6 +97,7 @@ assert 'Checkerboard' not in desktop_preview and 'preview.Opacity' not in dialog
 print('PASS: process-only Pivot selection, shared wallpaper without image dimming, top content inset')
 assert 'groups.Loaded +=' in dialog and 'groups.Unloaded +=' in dialog
 assert 'pickerRail.Children.Add(presets)' in dialog and 'var reset =' not in dialog
+assert 'One full-desktop reflection bitmap' in desktop_preview
 assert 'Shadow = new ThemeShadow()' in desktop_preview
 assert 'Reflection_NoiseSand' in (root / 'GlassSettings/Strings/ru-RU/Resources.resw').read_text()
 assert 'if (type == 4)' in effects and 'u < 1311' in effects and 'u < 64004' in effects
@@ -131,7 +132,11 @@ flat = (root / 'GlassSettings/Controls/FlatGlassPreviewLayer.cs').read_text()
 shared_state = (root / 'GlassSettings/Services/CompositionPreviewRegistryStates.cs').read_text()
 stylization = (root / 'GlassSettings/Controls/StylizationLayeredPreview.xaml.cs').read_text()
 assert desktop_preview.index('layers.Children.Add(a)') < desktop_preview.index('layers.Children.Add(glass)')
-assert desktop_preview.index('layers.Children.Add(glass)') < desktop_preview.index('layers.Children.Add(reflectionCanvas)')
+assert 'layers.Children.Add(glass);' in desktop_preview
+assert 'var reflection = new Image { Width = DesktopWidth, Height = DesktopHeight, Stretch = Stretch.Fill }' in desktop_preview
+assert 'reflectionViewport.Children.Add(reflection);' in desktop_preview
+assert 'layers.Children.Add(reflectionViewport);' in desktop_preview
+assert 'desktop.Children.Add(layers);' in desktop_preview
 assert 'CompositionWallpaperPipelineBuilder.Build(' in flat
 assert 'CompositionPreviewRegistryStates.BuildRuntimeActive()' in flat and 'CompositionPreviewRegistryStates.BuildRuntimeActive()' in stylization
 assert 'CompositionWallpaperPipelineBuilder.CreateBitmap(' in flat and 'CompositionWallpaperPipelineBuilder.CreateBitmap(' in stylization
@@ -267,8 +272,11 @@ print('PASS: live glass reuses session registry notifications, debounces/dedupli
 
 assert 'customPreset.Visibility = inline ? Visibility.Collapsed : Visibility.Visible' in dialog
 assert '.Where(item => item.Visibility == Visibility.Visible).ToArray()' in dialog
-assert 'Grid.SetRow(_desktopView, 1)' in desktop_preview
-assert 'Grid.SetRow(displayBadge, 1)' in desktop_preview and 'Grid.SetRow(_loading, 1)' in desktop_preview
+assert 'Grid.SetRow(_desktopView, 1)' not in desktop_preview
+assert 'Margin = new Thickness(12)' in desktop_preview
+assert 'ReflectionDisplayProfile.GetDisplayNumber' in desktop_preview
+assert 'desktop.Children.Add(outline)' in desktop_preview
 assert 'public int MonitorCount => _bounds.Length' in desktop_preview
+assert 'public string ProfileKey { get; }' in desktop_preview
 assert 'MaxHeight = 280' in desktop_preview
-print('PASS: name above monitor seams, inline picker hides launcher without empty grid slots, smaller multi-display preferred width and proportional growth')
+print('PASS: source name on the preview card, monitor outlines with system numbers, one reflection canvas, inline picker hides its launcher')

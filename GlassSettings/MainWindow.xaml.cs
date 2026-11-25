@@ -1571,6 +1571,7 @@ public sealed partial class MainWindow : Window
                 primaryButton,
                 footerBand,
                 () => ApplyHostedDialogBounds(liveResize: true),
+                width => { if (_hostedDialogRequestedSpec is not null) _hostedDialogRequestedSpec.MaxWidth = width; },
                 CloseHostedDialog,
                 showChildDialog);
         }
@@ -1582,6 +1583,7 @@ public sealed partial class MainWindow : Window
                 primaryButton,
                 footerRow: null,
                 () => ApplyHostedDialogBounds(liveResize: true),
+                width => { if (_hostedDialogRequestedSpec is not null) _hostedDialogRequestedSpec.MaxWidth = width; },
                 CloseHostedDialog,
                 showChildDialog);
         }

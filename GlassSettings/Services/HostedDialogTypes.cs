@@ -21,7 +21,7 @@ public sealed class HostedDialogSpec
 
     public double MinWidth { get; init; } = 480;
 
-    public double MaxWidth { get; init; } = 560;
+    public double MaxWidth { get; set; } = 560;
 
     public double? MaxHeight { get; init; }
 
@@ -80,12 +80,14 @@ public sealed class HostedDialogHostContext
         Button primaryButton,
         Grid? footerRow,
         Action refreshBounds,
+        Action<double> updateMaxWidth,
         Action<HostedDialogResult> close,
         Func<HostedDialogSpec, Task<HostedDialogResult>>? showChildDialog = null)
     {
         PrimaryButton = primaryButton;
         FooterRow = footerRow;
         _refreshBounds = refreshBounds;
+        _updateMaxWidth = updateMaxWidth;
         _close = close;
         _showChildDialog = showChildDialog;
     }
@@ -96,12 +98,20 @@ public sealed class HostedDialogHostContext
     public Grid? FooterRow { get; }
 
     private readonly Action _refreshBounds;
+    private readonly Action<double> _updateMaxWidth;
     private readonly Action<HostedDialogResult> _close;
     private readonly Func<HostedDialogSpec, Task<HostedDialogResult>>? _showChildDialog;
 
     public void SetPrimaryEnabled(bool enabled) => PrimaryButton.IsEnabled = enabled;
 
     public void RequestBoundsRefresh() => _refreshBounds();
+
+    /// <summary>Preferred width may follow a live topology change; shell still clamps it.</summary>
+    public void UpdateMaxWidth(double maxWidth)
+    {
+        _updateMaxWidth(maxWidth);
+        _refreshBounds();
+    }
 
     public Task<HostedDialogResult> ShowChildDialogAsync(HostedDialogSpec spec) =>
         _showChildDialog?.Invoke(spec) ?? Task.FromResult(HostedDialogResult.Dismissed);

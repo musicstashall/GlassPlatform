@@ -457,7 +457,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
                     && (SamePath(active, selectedPath) || (matching is not null && SamePath(active, matching.Output))
                         || string.IsNullOrWhiteSpace(active));
             }
-            await ApplyReflectionSourceAsync(recipe.Source, recipe.Settings, profile, StillSelected);
+            await ApplyReflectionSourceAsync(recipe.Source, recipe.Settings, profile, StillSelected, activeAtSignal);
         }
         catch (Exception error)
         {
@@ -881,8 +881,8 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] click: opening dialog");
         try
         {
-            string profile = ReflectionDisplayProfile.Capture().Key;
             var settings = await ReflectionSettingsDialog.ShowAsync(source);
+            string profile = ReflectionDisplayProfile.Capture().Key;
             System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] dialog: closed");
             if (settings is not null) await ApplyReflectionSourceAsync(source, settings, profile);
         }
@@ -1176,7 +1176,8 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         await ApplyReflectionSourceAsync(model.FilePath);
     }
 
-    private async Task ApplyReflectionSourceAsync(string source, ReflectionRenderSettings? settings = null, string? expectedProfile = null, Func<bool>? canApply = null)
+    private async Task ApplyReflectionSourceAsync(string source, ReflectionRenderSettings? settings = null,
+        string? expectedProfile = null, Func<bool>? canApply = null, string? baselineAtSignal = null)
     {
         if (canApply is null)
         {
@@ -1196,6 +1197,11 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
                 {
                     path = await ReflectionTextureService.PrepareAsync(source, settings, expectedProfile);
                     TrySelectCustomImage(ReflectionRegistryKey, path, refreshNotice: false, canApply: canApply);
+                    // Only the display-change rebind passes canApply; manual tile or
+                    // Configure Apply selections stay unsaved as before.
+                    if (canApply is not null
+                        && SamePath(DwmRegistryStore.ReadString(_hive, ReflectionRegistryKey), path))
+                        SettingsSession.Current.AcceptAutomaticReflectionBaseline(baselineAtSignal, path);
                 }
                 catch (Exception error)
                 {
