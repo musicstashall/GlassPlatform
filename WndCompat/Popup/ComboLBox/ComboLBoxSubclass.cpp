@@ -427,27 +427,6 @@ namespace WndCompat
         if (std::find(g_comboLBoxWindows.begin(), g_comboLBoxWindows.end(), hWnd) != g_comboLBoxWindows.end())
             return;
 
-        // VCL TPopupListbox может приходить как WS_CHILD; DWM corner/backdrop для Glass
-        // применимы к top-level popup-окну. Нормализуем только этот класс.
-        if (WndCompat::IsWindowClass(hWnd, L"TPopupListbox"))
-        {
-            const LONG_PTR style = GetWindowLongPtrW(hWnd, GWL_STYLE);
-            if (style & WS_CHILD)
-            {
-                HWND owner = GetParent(hWnd);
-                if (!owner || !IsWindow(owner))
-                    owner = GetAncestor(hWnd, GA_ROOT);
-                SetWindowLongPtrW(hWnd, GWL_STYLE, (style & ~WS_CHILD) | WS_POPUP);
-                SetParent(hWnd, nullptr);
-                if (owner && IsWindow(owner))
-                    SetWindowLongPtrW(hWnd, GWLP_HWNDPARENT, reinterpret_cast<LONG_PTR>(owner));
-                SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
-                DebugLog(L"[WndCompat][ComboLBox] TPopupListbox normalized WS_CHILD->WS_POPUP hwnd=0x%p owner=0x%p",
-                    hWnd, owner);
-            }
-        }
-
         if (SetWindowSubclass(hWnd, ComboLBoxSubclassProc, 1, 0))
         {
             // DWM/UXTheme: dark-mode самого списка — иначе у нативного ComboBox в диалоге
