@@ -313,8 +313,7 @@ namespace GlassCore::DropDown
 
         [[nodiscard]] bool IsComboLBoxClass(HWND hwnd) noexcept
         {
-            return IsWindowClassName(hwnd, L"ComboLBox")
-                || IsWindowClassName(hwnd, L"TPopupListbox");
+            return IsWindowClassName(hwnd, L"ComboLBox");
         }
 
         void CollectChildWindowsByClass(HWND root, LPCWSTR className, std::vector<HWND>& out) noexcept

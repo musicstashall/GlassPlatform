@@ -145,7 +145,6 @@ namespace GlassCore::TextGlow
             if (IsWindowClassHwnd(hWnd, L"DropDown")
                 || IsWindowClassHwnd(hWnd, L"ViewControlClass")
                 || IsWindowClassHwnd(hWnd, L"ComboLBox")
-                || IsWindowClassHwnd(hWnd, L"TPopupListbox")
                 || IsWindowClassHwnd(hWnd, L"ListviewPopup")
                 || IsWindowClassHwnd(hWnd, L"tooltips_class32")
                 || IsWindowClassHwnd(hWnd, L"MicrosoftWindowsTooltip"))

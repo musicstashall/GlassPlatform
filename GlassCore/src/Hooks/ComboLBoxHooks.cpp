@@ -108,48 +108,6 @@ namespace GlassCore::ComboLBox
     static bool                      g_user32AnimateDetourInstalled{ false };
     static BOOL WINAPI Detour_User32AnimateWindow(HWND, DWORD, DWORD);
 
-    // VCL TPopupListbox: библиотечный паттерн — SetParent(Handle,0) в CreateWnd,
-    // оставляя WS_CHILD. Блокируем reparent-to-NULL, чтобы окно осталось child
-    // исходного родителя и получало Glass через родительский путь.
-    static decltype(&::SetParent) g_trueSetParent = ::SetParent;
-    static bool                   g_setParentDetourInstalled{ false };
-
-    static HWND WINAPI Detour_SetParent(HWND hWndChild, HWND hWndNewParent)
-    {
-        if (!g_shutdown.load(std::memory_order_acquire)
-            && hWndNewParent == nullptr && hWndChild && ::IsWindow(hWndChild))
-        {
-            wchar_t cls[64]{};
-            if (::GetClassNameW(hWndChild, cls, static_cast<int>(std::size(cls))) > 0
-                && _wcsicmp(cls, L"TPopupListbox") == 0)
-            {
-                HWND curParent = ::GetParent(hWndChild);
-                DebugLog(L"[GlassCore][ComboLBox] Block SetParent(NULL) for TPopupListbox hwnd=0x%p keepParent=0x%p",
-                    hWndChild, curParent);
-                return curParent;
-            }
-        }
-        return g_trueSetParent(hWndChild, hWndNewParent);
-    }
-
-    static void EnsureSetParentDetour() noexcept
-    {
-        if (g_setParentDetourInstalled)
-            return;
-        const HRESULT hr = Hooks::Detours::Write([&] {
-            Hooks::Detours::Attach(
-                reinterpret_cast<void**>(&g_trueSetParent),
-                reinterpret_cast<void*>(&Detour_SetParent));
-        });
-        if (FAILED(hr))
-        {
-            DebugLog(DBG_WARNING, L"[GlassCore][ComboLBox] SetParent Detour attach hr=0x%08X", hr);
-            return;
-        }
-        g_setParentDetourInstalled = true;
-        DebugLog(DBG_IMPORTANT, L"[GlassCore][ComboLBox] SetParent Detour installed");
-    }
-
     static inline bool IsActive() noexcept
     {
         if (g_paintRef <= 0 && g_hotRef <= 0 && g_scrollRef <= 0)
@@ -225,7 +183,7 @@ namespace GlassCore::ComboLBox
         HWND w = WindowFromDC(hdc);
         wchar_t cls[64]{};
         const auto isComboLBoxCls = [](const wchar_t* c) noexcept
-        { return StrEq(c, L"ComboLBox") || StrEq(c, L"TPopupListbox"); };
+        { return StrEq(c, L"ComboLBox"); };
         if (w)
         {
             if (GetClassNameW(w, cls, _countof(cls)) > 0 && isComboLBoxCls(cls))
@@ -1234,7 +1192,7 @@ namespace GlassCore::ComboLBox
         GetClassNameW(hWnd, cls, 64);
 
         const bool allowCombo =
-            (StrEq(cls, L"ComboLBox") || StrEq(cls, L"ATL:LISTBOX") || StrEq(cls, L"TPopupListbox"))
+            (StrEq(cls, L"ComboLBox") || StrEq(cls, L"ATL:LISTBOX"))
             && (!detourPath || g_comboAnimateArmed.load(std::memory_order_acquire));
 
         WCHAR callerFile[MAX_PATH]{};
@@ -1849,7 +1807,6 @@ namespace GlassCore::ComboLBox
         DebugLog(DBG_IMPORTANT, L"[GlassCore][ComboLBox] Startup: PaintDispatcher providers registered");
 
         EnsureUser32AnimateDetour();
-        EnsureSetParentDetour();
     }
 
     void Shutdown()
@@ -1870,18 +1827,6 @@ namespace GlassCore::ComboLBox
             if (FAILED(hr))
                 DebugLog(DBG_WARNING, L"[GlassCore][ComboLBox] AnimateWindow Detour detach hr=0x%08X", hr);
             g_user32AnimateDetourInstalled = false;
-        }
-
-        if (g_setParentDetourInstalled)
-        {
-            const HRESULT hr = Hooks::Detours::Write([&] {
-                Hooks::Detours::Detach(
-                    reinterpret_cast<void**>(&g_trueSetParent),
-                    reinterpret_cast<void*>(&Detour_SetParent));
-            });
-            if (FAILED(hr))
-                DebugLog(DBG_WARNING, L"[GlassCore][ComboLBox] SetParent Detour detach hr=0x%08X", hr);
-            g_setParentDetourInstalled = false;
         }
 
 #if defined(_DEBUG)
