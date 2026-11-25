@@ -207,6 +207,7 @@ bool WindowClassifier::IsSpecialWindow(const std::wstring& cls, ControlKind& out
         return true;
     }
 
+
     return false;
 }
 

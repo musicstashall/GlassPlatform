@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <atomic>
 #include <windowsx.h>
+#include <Tracker/WindowClassUtils.h>
 
 namespace
 {

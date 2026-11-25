@@ -182,16 +182,18 @@ namespace GlassCore::ComboLBox
             return nullptr;
         HWND w = WindowFromDC(hdc);
         wchar_t cls[64]{};
+        const auto isComboLBoxCls = [](const wchar_t* c) noexcept
+        { return StrEq(c, L"ComboLBox"); };
         if (w)
         {
-            if (GetClassNameW(w, cls, _countof(cls)) > 0 && StrEq(cls, L"ComboLBox"))
+            if (GetClassNameW(w, cls, _countof(cls)) > 0 && isComboLBoxCls(cls))
                 return w;
             return nullptr;
         }
         w = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
         if (!w || !IsWindow(w))
             return nullptr;
-        if (GetClassNameW(w, cls, _countof(cls)) > 0 && StrEq(cls, L"ComboLBox"))
+        if (GetClassNameW(w, cls, _countof(cls)) > 0 && isComboLBoxCls(cls))
             return w;
         if (h_combolbox && IsWindow(h_combolbox))
             return h_combolbox;

@@ -2,7 +2,7 @@
 // Без SubclassProc — все хуки ставятся через ToolbarHooks (GlassCore).
 
 #include "WndPch.h"
-#include "ToolBarSubclass.h"
+#include "ToolbarSubclass.h"
 #include <WndCompat.h>
 #include <GlassControlKind.h>
 #include <RootPolicyQuery.h>

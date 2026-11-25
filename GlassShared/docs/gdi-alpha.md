@@ -31,8 +31,7 @@ stock/OEM не преобразуются.
 Границы class/module/session/DC и исключение клиентского framebuffer задаёт
 вызывающий hook. Нельзя применять этот helper к общему final blit или всему
 окну ради DoubleBuffered. Подробности/ограничения —
-[Delphi-VCL, тест 101](../../GlassCore/docs/Delphi-VCL.md#тест-101-непрозрачность-изображений-ttoolbar-и-вложенного-tpanel--native-bwm-пути)
-и [тест 102](../../GlassCore/docs/Delphi-VCL.md#тест-102-tlistview--native-maskblt-паритет-restorator).
+[Delphi VCL](../../GlassCore/docs/Delphi-VCL.md).
 
 Ещё два потребителя — `GlassCore::RestoratorImages` (стартовые подсказки и
 графические ресурсы Restorator в `TResTreeView` и `TImgViewBox`, SRCCOPY
@@ -56,9 +55,6 @@ stock/OEM не преобразуются.
 белом, по разнице восстанавливается прозрачность каждого пикселя, и результат
 один раз смешивается `GdiAlphaBlend`. Границы class/module/session/DC задаёт
 вызывающий hook; подробности и пределы —
-[Delphi-VCL, тест 131](../../GlassCore/docs/Delphi-VCL.md#тест-131-стили-ttoolbar-restorator--картинки-значки-и-подписи-tscrollbox)
-(значки) и
-[тест 132](../../GlassCore/docs/Delphi-VCL.md#тест-132-restorator--шахматная-подложка-вместо-выреза-цвета-окна)
-(картинки и подложка).
+[Delphi VCL](../../GlassCore/docs/Delphi-VCL.md).
 
 При добавлении новых хуков ищи **существующий** паттерн в ближайшем `*Hooks.cpp` или в GlassShared, а не новый стек на GDI+.

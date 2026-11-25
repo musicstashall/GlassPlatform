@@ -36,6 +36,21 @@ namespace GlassCore::ScrollBarTheme
     {
         if (!hWnd || !IsWindow(hWnd))
             return false;
+
+        // Исключённые классы: не обрабатываем скроллбары этих окон, даже если
+        // они находятся под приаттаченным Full root.
+        auto isExcludedScrollBarClass = [](HWND hw) noexcept -> bool
+        {
+            wchar_t cls[64]{};
+            if (::GetClassNameW(hw, cls, static_cast<int>(std::size(cls))) <= 0)
+                return false;
+            return _wcsicmp(cls, L"TPopupListbox") == 0;
+        };
+        if (isExcludedScrollBarClass(hWnd))
+            return false;
+        if (const HWND hParent = ::GetParent(hWnd); hParent && isExcludedScrollBarClass(hParent))
+            return false;
+
         // NoBackdrop=1 / exempt от backdrop — passthrough, как и раньше.
         if (!GlassShared::GlassIsBackdropAllowedForHwnd(hWnd))
             return false;

@@ -216,20 +216,6 @@ namespace GlassCore::DelphiInputIcons
         HookDispatcher<1, 3> g_fillDispatcher{g_fillDep, nullptr};
         thread_local bool g_inFillHook = false;
 
-#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-        bool TakeProbe(bool fill) noexcept
-        {
-            struct Budget { ULONGLONG epoch{}; unsigned remaining{}; bool started{}; };
-            static thread_local Budget budgets[2]{};
-            auto& b = budgets[fill ? 0 : 1];
-            const ULONGLONG now = GetTickCount64();
-            if (!b.started || now - b.epoch >= 1000) b = {now, fill ? 24u : 12u, true};
-            if (!b.remaining) return false;
-            --b.remaining;
-            return true;
-        }
-#endif
-
         int WINAPI Fill(HDC dc, const RECT* rect, HBRUSH brush)
         {
             const DWORD entryError = GetLastError();
@@ -243,33 +229,6 @@ namespace GlassCore::DelphiInputIcons
             const HWND owner = rect && brush ? IconOwner(dc, &target) : nullptr;
             BackgroundPatches patches = PlanButtonBackground(owner, target, dc, rect, brush);
             if (!patches.count) patches = PlanSearchBackground(owner, target, dc, rect, brush);
-#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-            const bool trace = owner && TakeProbe(true);
-            const RECT r = rect ? *rect : RECT{};
-            wchar_t cls[64]{};
-            RECT clip{}, client{}, window{};
-            POINT dcOrg{}, clientOrg{}, viewport{}, windowOrg{};
-            int clipKind{};
-            BOOL clientOk{}, windowOk{}, dcOrgOk{}, clientOrgOk{}, viewportOk{}, windowOrgOk{};
-            LOGBRUSH lb{};
-            bool systemBrush = false, brushValid = false, rgbValid = false;
-            if (trace)
-            {
-                GetClassNameW(target, cls, _countof(cls));
-                clipKind = GetClipBox(dc, &clip);
-                clientOk = GetClientRect(target, &client);
-                windowOk = GetWindowRect(target, &window);
-                dcOrgOk = GetDCOrgEx(dc, &dcOrg);
-                clientOrgOk = ClientToScreen(target, &clientOrg);
-                viewportOk = GetViewportOrgEx(dc, &viewport);
-                windowOrgOk = GetWindowOrgEx(dc, &windowOrg);
-                const ULONG_PTR value = reinterpret_cast<ULONG_PTR>(brush);
-                systemBrush = value && value <= COLOR_MENUBAR + 1u;
-                brushValid = systemBrush || GetObjectW(brush, sizeof(lb), &lb) == sizeof(lb);
-                if (systemBrush) { lb.lbStyle = BS_SOLID; lb.lbColor = GetSysColor(static_cast<int>(value - 1)); }
-                rgbValid = brushValid && lb.lbStyle == BS_SOLID;
-            }
-#endif
             SetLastError(entryError);
             const int result = orig(dc, rect, brush); // original arguments/result exactly once
             const DWORD error = GetLastError();
@@ -282,57 +241,9 @@ namespace GlassCore::DelphiInputIcons
                     // BLACKNESS clears RGB/alpha only in the proven button area.
                     if (PatBlt(dc, p.left, p.top, p.right - p.left, p.bottom - p.top, BLACKNESS)) ++patched;
                 }
-#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-            if (trace)
-                DebugLog(DBG_NORMAL,
-                    L"[GlassCore][DelphiInputIconProbe] stage=fill api=FillRect hwnd=0x%p target=0x%p class=\"%s\" dc=0x%p rect=[%ld,%ld,%ld,%ld] clipKind=%d clip=[%ld,%ld,%ld,%ld] clientOk=%d client=[%ld,%ld,%ld,%ld] windowOk=%d window=[%ld,%ld,%ld,%ld] dcOrgOk=%d dcOrg=[%ld,%ld] clientOrgOk=%d clientOrg=[%ld,%ld] viewportOk=%d viewport=[%ld,%ld] windowOrgOk=%d windowOrg=[%ld,%ld] brush=0x%p brushValid=%d systemBrush=%d brushStyle=%u brushRGBValid=%d brushRGB=0x%06X result=%d patched=%u",
-                    owner, target, cls, dc, r.left, r.top, r.right, r.bottom, clipKind,
-                    clip.left, clip.top, clip.right, clip.bottom, clientOk, client.left, client.top, client.right, client.bottom,
-                    windowOk, window.left, window.top, window.right, window.bottom, dcOrgOk, dcOrg.x, dcOrg.y,
-                    clientOrgOk, clientOrg.x, clientOrg.y, viewportOk, viewport.x, viewport.y,
-                    windowOrgOk, windowOrg.x, windowOrg.y, brush, brushValid ? 1 : 0, systemBrush ? 1 : 0,
-                    static_cast<unsigned>(lb.lbStyle), rgbValid ? 1 : 0, static_cast<unsigned>(lb.lbColor & 0xFFFFFFu), result, patched);
-#else
-            (void)patched;
-#endif
             SetLastError(error);
             return result;
         }
-
-#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-        void ProbePixels(const wchar_t* api, HWND owner, HWND target, HIMAGELIST images, int index,
-            HDC dc, const RECT& bounds, UINT style, BOOL drawn, HRESULT bitsResult, BOOL flushed,
-            const RGBQUAD* pixels, int stride, int width, int height) noexcept
-        {
-            const DWORD error = GetLastError();
-            auto restore = wil::scope_exit([error]() noexcept { SetLastError(error); });
-            if (!TakeProbe(false)) return;
-            const bool available = drawn && SUCCEEDED(bitsResult) && pixels && stride >= width && flushed;
-            unsigned a0 = 0, a255 = 0, apart = 0, white = 0, nonPremul = 0;
-            // Read the complete image, excluding row padding. No alpha/RGB writes
-            // or policy decisions; alpha/legacy-mask handling stays below.
-            if (available)
-                for (int row = 0; row < height; ++row)
-                    for (int col = 0; col < width; ++col)
-                    {
-                        const RGBQUAD& p = pixels[static_cast<size_t>(row) * stride + col];
-                        if (p.rgbReserved == 0) ++a0;
-                        else if (p.rgbReserved == 255) ++a255;
-                        else ++apart;
-                        if (p.rgbReserved && p.rgbRed >= 240 && p.rgbGreen >= 240 && p.rgbBlue >= 240) ++white;
-                        if (p.rgbRed > p.rgbReserved || p.rgbGreen > p.rgbReserved || p.rgbBlue > p.rgbReserved) ++nonPremul;
-                    }
-            wchar_t cls[64]{};
-            GetClassNameW(target, cls, _countof(cls));
-            RECT clip{};
-            const int clipKind = GetClipBox(dc, &clip);
-            DebugLog(DBG_NORMAL,
-                L"[GlassCore][DelphiInputIconProbe] stage=pixels api=%s hwnd=0x%p target=0x%p class=\"%s\" dc=0x%p images=0x%p index=%d rect=[%ld,%ld,%ld,%ld] size=%dx%d style=0x%X clipKind=%d clip=[%ld,%ld,%ld,%ld] draw=%d bitsHr=0x%08X flushed=%d available=%d stride=%d alpha0=%u alpha255=%u alphaPartial=%u whiteNonzeroAlpha=%u nonPremul=%u",
-                api, owner, target, cls, dc, images, index, bounds.left, bounds.top, bounds.right, bounds.bottom,
-                width, height, style, clipKind, clip.left, clip.top, clip.right, clip.bottom, drawn,
-                static_cast<unsigned>(bitsResult), flushed, available ? 1 : 0, stride, a0, a255, apart, white, nonPremul);
-        }
-#endif
 
         template<typename Paint> bool RestoreLegacyMaskAlpha(HDC dc, const RECT& bounds,
             RGBQUAD* black, int blackStride, int width, int height, UINT style, Paint& paint)
@@ -429,12 +340,6 @@ namespace GlassCore::DelphiInputIcons
                 bitsResult = GetBufferedPaintBits(buffer, &pixels, &stride);
                 if (SUCCEEDED(bitsResult) && pixels && stride >= width) flushed = GdiFlush();
             }
-#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-            // Log the original native bytes before commit or legacy-mask recovery,
-            // so missing pixels are not confused with an empty/RGB-only icon.
-            ProbePixels(api, owner, target, images, index, dc, bounds, style, drawn,
-                bitsResult, flushed, pixels, stride, width, height);
-#endif
             [[maybe_unused]] bool legacyMask = false;
             if (drawn)
             {
@@ -528,11 +433,6 @@ namespace GlassCore::DelphiInputIcons
         g_fillDispatcher.moduleAddress = GlassCore::ModuleHandler::g_entryPointModule;
         g_fillDispatcher.CacheHookData();
         g_fillDispatcher.EnableHook(0, true);
-#if defined(_DEBUG) && defined(GLASS_DELPHI_DRAW_PROBE)
-        DebugLog(DBG_NORMAL, L"[GlassCore][DelphiInputIconProbe] stage=arm exe=0x%p fillRef=%d imageRefs=[%d,%d,%d]",
-            GlassCore::ModuleHandler::g_entryPointModule, g_fillDispatcher.GetRef(0),
-            g_dispatcher.GetRef(DrawSlot), g_dispatcher.GetRef(DrawExSlot), g_dispatcher.GetRef(IndirectSlot));
-#endif
         g_shutdown.store(false, std::memory_order_release);
     }
     void Shutdown()
