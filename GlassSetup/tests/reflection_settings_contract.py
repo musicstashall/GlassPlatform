@@ -293,3 +293,11 @@ assert 'public int MonitorCount => _bounds.Length' in desktop_preview
 assert 'public string ProfileKey { get; }' in desktop_preview
 assert 'MaxHeight = 280' in desktop_preview
 print('PASS: labels in own rows, complete monitor frames with real gap and system numbers, one reflection canvas, inline picker hides its launcher')
+
+# Documentation must describe the current preview/dialog implementation.
+docs = (root / 'GlassSettings/docs/ReflectionTextures.md').read_text()
+assert 'высота 210 DIP' in docs or '210 DIP' in docs
+assert 'диалог следует открыть заново' not in docs
+assert 'ярлычок поверх верхней части' not in docs
+assert 'в промежутках между мониторами отражение не рисуется' not in docs.lower()
+print('PASS: reflection documentation matches the current preview, labels and live display-change behaviour')
