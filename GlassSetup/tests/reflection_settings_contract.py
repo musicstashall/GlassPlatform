@@ -97,7 +97,7 @@ assert 'Checkerboard' not in desktop_preview and 'preview.Opacity' not in dialog
 print('PASS: process-only Pivot selection, shared wallpaper without image dimming, top content inset')
 assert 'groups.Loaded +=' in dialog and 'groups.Unloaded +=' in dialog
 assert 'pickerRail.Children.Add(presets)' in dialog and 'var reset =' not in dialog
-assert 'One full-desktop reflection bitmap' in desktop_preview
+assert 'One reflection canvas for the whole virtual desktop' in desktop_preview
 assert 'Shadow = new ThemeShadow()' in desktop_preview
 assert 'Reflection_NoiseSand' in (root / 'GlassSettings/Strings/ru-RU/Resources.resw').read_text()
 assert 'if (type == 4)' in effects and 'u < 1311' in effects and 'u < 64004' in effects
@@ -133,9 +133,9 @@ shared_state = (root / 'GlassSettings/Services/CompositionPreviewRegistryStates.
 stylization = (root / 'GlassSettings/Controls/StylizationLayeredPreview.xaml.cs').read_text()
 assert desktop_preview.index('layers.Children.Add(a)') < desktop_preview.index('layers.Children.Add(glass)')
 assert 'layers.Children.Add(glass);' in desktop_preview
-assert 'var reflection = new Image { Width = DesktopWidth, Height = DesktopHeight, Stretch = Stretch.Fill }' in desktop_preview
-assert 'reflectionViewport.Children.Add(reflection);' in desktop_preview
-assert 'layers.Children.Add(reflectionViewport);' in desktop_preview
+assert 'One reflection canvas for the whole virtual desktop' in desktop_preview
+assert 'desktop.Children.Add(reflection);' in desktop_preview
+assert 'reflectionViewport' not in desktop_preview
 assert 'desktop.Children.Add(layers);' in desktop_preview
 assert 'CompositionWallpaperPipelineBuilder.Build(' in flat
 assert 'CompositionPreviewRegistryStates.BuildRuntimeActive()' in flat and 'CompositionPreviewRegistryStates.BuildRuntimeActive()' in stylization
@@ -168,11 +168,12 @@ assert 'EnumDisplayMonitors(nullptr, nullptr, Enumerate' in native_profile
 assert 'rect->right - rect->left, rect->bottom - rect->top' in native_profile
 print('PASS: monitor snapshot uses native full monitor rectangles, without WinRT DisplayArea calls')
 
-assert 'layers.Clip = new RectangleGeometry' in desktop_preview
+assert 'layers.Clip' not in desktop_preview
 assert 'CreateGeometricClip(' not in desktop_preview
 assert 'GetElementVisual(layers)' not in desktop_preview
 assert 'layers.Loaded +=' not in desktop_preview
-print('PASS: XAML owns monitor clipping; no geometric Composition clip on its visual')
+assert 'No per-monitor clip' in desktop_preview
+print('PASS: no monitor clip (no seam fringe) and no geometric Composition clip on XAML visuals')
 
 assert 'layout.Children.Add(body); layout.Children.Add(editors);' in dialog
 assert 'editors.Children.Add(groups); editors.Children.Add(pickerRail);' in dialog

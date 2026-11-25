@@ -105,30 +105,27 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
             };
             var a = new Image { Stretch = Stretch.UniformToFill };
             var b = new Image { Stretch = Stretch.UniformToFill };
-            // One full-desktop reflection bitmap; every monitor shows its own clipped viewport.
-            var reflection = new Image { Width = DesktopWidth, Height = DesktopHeight, Stretch = Stretch.Fill };
-            var reflectionViewport = new Canvas();
-            Canvas.SetLeft(reflection, -(monitor.X - left));
-            Canvas.SetTop(reflection, -(monitor.Y - top));
-            reflectionViewport.Children.Add(reflection);
-            _reflections.Add(reflection);
             var layers = new Grid { Width = monitor.Width, Height = monitor.Height };
             layers.Children.Add(fallback); layers.Children.Add(a); layers.Children.Add(b);
             var glass = new FlatGlassPreviewLayer(monitor.Width, monitor.Height);
-            // Flat, co-located layers: wallpaper → factual glass → edited reflection.
+            // Flat, co-located layers: wallpaper → factual glass.
             layers.Children.Add(glass);
-            layers.Children.Add(reflectionViewport);
             _glassLayers.Add(glass); _fallbacks.Add(fallback);
-            // Clip each monitor, including the reflection's viewport into the full canvas.
-            layers.Clip = new RectangleGeometry { Rect = new Rect(0, 0, monitor.Width, monitor.Height) };
-            // Do not assign CompositionGeometricClip to a XAML-owned visual.
-            // WinUI processes that clip later during rendering and can fail QI
-            // with E_NOINTERFACE in UpdateVisualClipAndTransform (stowed failfast).
-            // The XAML RectangleGeometry above owns content clipping instead.
+            // No per-monitor clip: a clipped, fractionally scaled edge leaves a dark
+            // fringe exactly on the seam between neighbouring displays, which reads
+            // as a divider. Each layer covers its own rect and nothing overflows.
             Canvas.SetLeft(layers, monitor.X - left); Canvas.SetTop(layers, monitor.Y - top);
             desktop.Children.Add(layers);
             _wallpapers.Add(new WallpaperPreviewCrossfade(a, b, fallback));
         }
+        // One reflection canvas for the whole virtual desktop: no per-monitor
+        // copies and no clipping, so the desktop picture stays continuous.
+        var reflection = new Image
+        {
+            Width = DesktopWidth, Height = DesktopHeight, Stretch = Stretch.Fill
+        };
+        desktop.Children.Add(reflection);
+        _reflections.Add(reflection);
         double unit = Math.Max(1, DesktopWidth / 740.0);
         // One stroke per monitor, inset inside its footprint. Nothing is drawn on
         // the shared edge between two monitors and no border sits next to it, so
