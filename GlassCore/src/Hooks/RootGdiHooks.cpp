@@ -408,7 +408,7 @@ namespace GlassCore::Root
         // comctl32/COMDLG32/MFC42u — ComboBoxControlHooks::Overall_MyExtTextOutW.
         [[nodiscard]] static bool WantComboBoxStyleExtTextOut(HMODULE caller, LPCWSTR cls) noexcept
         {
-            if (!StrEqI(cls, L"ComboBox") && !StrEqI(cls, L"ComboLBox"))
+            if (!StrEqI(cls, L"ComboBox") && !StrEqI(cls, L"ComboLBox") && !StrEqI(cls, L"TPopupListbox"))
                 return false;
             return CallerBaseIs(caller, L"dmdskmgr.dll") || CallerBaseIs(caller, L"dmview.ocx")
                 || CallerBaseIs(caller, L"MFC42u.dll") || CallerBaseIs(caller, L"comctl32.dll");
@@ -2189,7 +2189,7 @@ namespace GlassCore::Root
             const bool isAfx = StrEqI(cls, L"AfxWnd42u");
             const bool isDmView = CallerBaseIs(caller, L"dmview.ocx");
             const bool isDmdskmgr = CallerBaseIs(caller, L"dmdskmgr.dll");
-            const bool isCombo = StrEqI(cls, L"ComboBox") || StrEqI(cls, L"ComboLBox");
+            const bool isCombo = StrEqI(cls, L"ComboBox") || StrEqI(cls, L"ComboLBox") || StrEqI(cls, L"TPopupListbox");
 
             if (!lprc || !hbr)
                 return o(hDC, lprc, hbr);

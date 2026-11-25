@@ -672,7 +672,8 @@ namespace
         {
             const HWND hChild = reinterpret_cast<HWND>(lParam);
             if (GlassShared::GlassGetWindowKind(hChild) == GlassShared::GlassControlKind::ComboLBox
-                || WndCompat::IsWindowClass(hChild, L"ComboLBox"))
+                || WndCompat::IsWindowClass(hChild, L"ComboLBox")
+                || WndCompat::IsWindowClass(hChild, L"TPopupListbox"))
                 return false;
         }
 
@@ -920,7 +921,8 @@ namespace
         const HWND hChild = reinterpret_cast<HWND>(lParam);
         const bool comboLBoxChild =
             GlassShared::GlassGetWindowKind(hChild) == GlassShared::GlassControlKind::ComboLBox
-            || WndCompat::IsWindowClass(hChild, L"ComboLBox");
+            || WndCompat::IsWindowClass(hChild, L"ComboLBox")
+            || WndCompat::IsWindowClass(hChild, L"TPopupListbox");
         if (!comboLBoxChild)
             return false;
 
@@ -1185,6 +1187,7 @@ namespace
                 GlassShared::GlassGetWindowKind(hChild) == GlassShared::GlassControlKind::ComboLBox;
             if (!comboLBoxChild
                 && !WndCompat::IsWindowClass(hChild, L"ComboLBox")
+                && !WndCompat::IsWindowClass(hChild, L"TPopupListbox")
                 && WndCompat::WinEventHook_GetMode() != Shared::InjectionMode::Full)
                 break;
 

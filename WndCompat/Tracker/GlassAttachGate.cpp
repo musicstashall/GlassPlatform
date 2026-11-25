@@ -17,9 +17,10 @@ namespace WndCompat::GlassAttachGate
         if (!hWnd || !IsWindow(hWnd))
             return true;
 
-        // ComboLBox — отдельное top-level popup списка комбобокса; не наследует запрет поддерева
+        // ComboLBox/TPopupListbox — popup списка комбобокса/VCL; не наследует запрет поддерева
         // от exempt root (Rainmeter и т.п.). Единственный запрет — отсутствие инжекции в процесс.
-        if (WndCompat::IsWindowClass(hWnd, L"ComboLBox"))
+        if (WndCompat::IsWindowClass(hWnd, L"ComboLBox")
+            || WndCompat::IsWindowClass(hWnd, L"TPopupListbox"))
             return true;
 
         {

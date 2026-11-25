@@ -182,16 +182,18 @@ namespace GlassCore::ComboLBox
             return nullptr;
         HWND w = WindowFromDC(hdc);
         wchar_t cls[64]{};
+        const auto isComboLBoxCls = [](const wchar_t* c) noexcept
+        { return StrEq(c, L"ComboLBox") || StrEq(c, L"TPopupListbox"); };
         if (w)
         {
-            if (GetClassNameW(w, cls, _countof(cls)) > 0 && StrEq(cls, L"ComboLBox"))
+            if (GetClassNameW(w, cls, _countof(cls)) > 0 && isComboLBoxCls(cls))
                 return w;
             return nullptr;
         }
         w = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
         if (!w || !IsWindow(w))
             return nullptr;
-        if (GetClassNameW(w, cls, _countof(cls)) > 0 && StrEq(cls, L"ComboLBox"))
+        if (GetClassNameW(w, cls, _countof(cls)) > 0 && isComboLBoxCls(cls))
             return w;
         if (h_combolbox && IsWindow(h_combolbox))
             return h_combolbox;
@@ -1190,7 +1192,7 @@ namespace GlassCore::ComboLBox
         GetClassNameW(hWnd, cls, 64);
 
         const bool allowCombo =
-            (StrEq(cls, L"ComboLBox") || StrEq(cls, L"ATL:LISTBOX"))
+            (StrEq(cls, L"ComboLBox") || StrEq(cls, L"ATL:LISTBOX") || StrEq(cls, L"TPopupListbox"))
             && (!detourPath || g_comboAnimateArmed.load(std::memory_order_acquire));
 
         WCHAR callerFile[MAX_PATH]{};

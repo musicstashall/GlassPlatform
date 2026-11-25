@@ -665,6 +665,7 @@ namespace
                         if (allowGlassShow)
                             WndCompat::ViewControl_AttachIfNeeded(hWnd);
                         break;
+                    case ControlKind::ComboLBox:
                     case ControlKind::Atl_ListBox:
                         if (allowGlassShow)
                             WndCompat::ComboLBox_Attach(hWnd);
@@ -760,12 +761,11 @@ namespace
                     break;
 
                 case ControlKind::ComboLBox:
-                    break;
                 case ControlKind::Atl_ListBox:
                     if (allowGlassCreate)
                     {
-                        DebugLog(L"[WndCompat][WinEvent] ComboLBox_Attach (Special): hwnd=0x%p kind=%d", hWnd,
-                            static_cast<int>(kind));
+                        DebugLog(L"[WndCompat][WinEvent] ComboLBox_Attach (Special): hwnd=0x%p kind=%d class=%ls",
+                            hWnd, static_cast<int>(kind), className);
                         WndCompat::ComboLBox_Attach(hWnd); // под вопросом, возможно вызовет зависание при применении анимации.
                     }
                     break;
