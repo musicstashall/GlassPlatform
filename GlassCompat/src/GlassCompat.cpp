@@ -1669,7 +1669,13 @@ namespace
                         hCheckTaskbar2 = GetModuleHandleW(L"TaskbarCompat.dll");
                     }
                     if (hCheckTaskbar2)
+                    {
                         forcedUnloadMask |= 0x8ULL;
+                        // Образ оставлен с живыми COM-ссылками (например, watcher в LVT
+                        // после неудачного Unadvise — дамп explorer.exe.11524). CompatDone
+                        // не публикуем: слепой ForceUnload извне снял бы образ под callback.
+                        anyModuleKept = true;
+                    }
                     DebugLog(
                         DBG_IMPORTANT,
                         L"[GlassCompat][Core] [Shutdown] TaskbarCompat after residual reclaim: %s (dropped=%d)",

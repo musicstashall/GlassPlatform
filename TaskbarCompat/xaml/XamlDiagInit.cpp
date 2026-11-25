@@ -575,7 +575,8 @@ void TaskbarCompat_StopXamlDiagnostics() noexcept
 {
     UnregisterGlassCoreXamlDllNotifyFromTaskbarCompat();
 
-    // DllCanUnloadNow=S_OK до CoFree на STA IXDE/marshal — GlassCompat ещё держит LoadLibrary.
+    // Гейт новой работы (SetSite/таймеры/ретраи). Выгружаемость решает только честный
+    // COM-счётчик: живой watcher в LVT держит образ (см. DllCanUnloadNow).
     TaskbarCompatCom::g_shutdownDone.store(true, std::memory_order_release);
 
     // Снимаем сессию TAP всегда — даже если Advise не удался: marshal-окно

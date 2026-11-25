@@ -8,8 +8,9 @@ namespace TaskbarCompatCom
     extern std::atomic<long> g_objectCount;
     extern std::atomic<long> g_serverLocks;
 
-    // После корректного TaskbarCompat_Shutdown разрешаем COM выгрузить DLL,
-    // даже если WinUI/UWP оболочка удерживает IUnknown на TAP-объекте
-    // (все коллбэки нейтрализованы Unadvise + RestoreAll).
+    // Гейт новой работы после TaskbarCompat_Shutdown (SetSite/таймеры/ретраи)
+    // и бит 32 TaskbarCompat_DebugComState. DllCanUnloadNow его НЕ учитывает:
+    // живая COM-ссылка (в т.ч. watcher в LVT после неудачного Unadvise) держит
+    // образ — выгрузка под ссылкой даёт AV (дамп explorer.exe.11524).
     extern std::atomic<bool> g_shutdownDone;
 }

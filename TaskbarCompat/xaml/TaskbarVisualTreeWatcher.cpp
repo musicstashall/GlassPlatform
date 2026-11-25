@@ -7,6 +7,7 @@
 #include "xaml/TrayTooltipPanelRegistry.hpp"
 #include "xaml/TrayMenuFlyoutPanelRegistry.hpp"
 #include "xaml/TaskbarTapSite.hpp"
+#include "xaml/XamlComLifetime.hpp"
 
 #include <unknwn.h>
 
@@ -98,6 +99,12 @@ namespace TaskbarCompat
         , m_menuFlyoutRegistry(std::make_unique<TrayMenuFlyoutPanelRegistry>(
             Registry::ReadSurface(Registry::SurfaceKind::Menu)))
     {
+        // COM-ссылка LVT на watcher обязана быть видна DllCanUnloadNow и
+        // TaskbarCompat_DebugComState (гейт residual reclaim в GlassCompat).
+        // Без учёта watcher образ выгружался, а XAML продолжал звать его vtable —
+        // AV в AddElementToLVT (дамп explorer.exe.11524, 25.11.2026).
+        TaskbarCompatCom::g_objectCount.fetch_add(1, std::memory_order_relaxed);
+
         m_xamlDiagnostics = diagnostics;
         if (m_xamlDiagnostics)
             m_xamlDiagnostics->AddRef();
@@ -139,7 +146,10 @@ namespace TaskbarCompat
     {
         const ULONG c = m_ref.fetch_sub(1, std::memory_order_acq_rel) - 1;
         if (c == 0)
+        {
+            TaskbarCompatCom::g_objectCount.fetch_sub(1, std::memory_order_relaxed);
             delete this;
+        }
         return c;
     }
 
