@@ -351,7 +351,6 @@ public sealed class InjectRuntimeMonitor
                     try
                     {
                         ApplySnapshot(generation, snapshot);
-                        App.ShellWindow?.RunDeferredShellReadyWorkAfterFirstProbe();
                     }
                     finally
                     {

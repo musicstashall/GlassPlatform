@@ -8,6 +8,7 @@ using GlassSettings.Core.Placement;
 using GlassSettings.Core.Platform;
 using GlassSettings.Core.Registry;
 using GlassSettings.Core.Snapshot;
+using GlassSettings.Core.Text;
 using GlassSettings.Navigation;
 using GlassSettings.Pages;
 using GlassSettings.Pages.Dwm;
@@ -21,7 +22,6 @@ using Microsoft.UI.Input;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
@@ -45,18 +45,6 @@ public sealed partial class MainWindow : Window
     private bool _suppressNav;
     private bool _initialNavDone;
     private bool _contentReady;
-    /// <summary>После fade/MarkReady: shell принимает клики (до этого клики со splash не должны доезжать).</summary>
-    private bool _shellInputArmed;
-    /// <summary>Home Build/Refresh/Presence/Ensure под заставкой завершены — можно снимать overlay.</summary>
-    private bool _shellInteractiveReady;
-    private bool _postDismissHooksDone;
-    private bool _navigationReady;
-    private DateTimeOffset _loadingShownAt = DateTimeOffset.UtcNow;
-    private const int LoadingMinimumMs = 800;
-    private Task? _attachIconPreload;
-    /// <summary>ImageOpened/Failed LoadingIcon — dismiss не раньше decode (x86 async BitmapImage).</summary>
-    private TaskCompletionSource<bool> _splashIconReadyTcs =
-        new(TaskCreationOptions.RunContinuationsAsynchronously);
     private SettingsLayoutMode _layoutMode = SettingsLayoutMode.Medium;
     private DesktopEnvironmentWatcher? _desktopEnvironmentWatcher;
     private DispatcherQueueTimer? _themeBaselineReloadTimer;
@@ -90,158 +78,170 @@ public sealed partial class MainWindow : Window
     private ScrollViewer? _hostedDialogScrollViewer;
     private bool _hostedDialogBoundsUpdatePending;
     private bool _pendingUiLanguagePageReload;
-    private bool _deferredInitDone;
-    /// <summary>Последний применённый WindowBackdrop; null — ещё не применяли (startup).</summary>
-    private AppWindowBackdropMode? _appliedWindowBackdropMode;
-    private bool _transparentChromeApplied;
-    private bool _loadingOverlaySizeHooked;
-    private bool _deferredWindowChromeApplied;
-    private bool _coldStartBootstrapScheduled;
-    private bool _glassRuntimeEnsured;
-    private bool _bootstrapCoreDone;
-    private bool _deferredStartupTasksDone;
-    private bool _splashSurfaceActivated;
-    private bool _startupCloaked;
-    private bool _startupHiddenFromSwitchers;
-    private bool _splashFirstPaintReady;
-    private int _splashWarmupFramesLeft;
-    private const int ShellContentFadeInMs = 500;
-    private const int WindowRevealFadeInMs = 400;
+    private bool _startupActivated;
+    private bool _startupPostNavScheduled;
 
-    /// <summary>Планирует cold start на следующий проход dispatcher (не внутри Activate/reentrancy).</summary>
-    internal void TryCompleteColdStartBootstrap()
+    internal void ActivateAtStartup()
     {
-        if (_bootstrapCoreDone || _coldStartBootstrapScheduled)
+        if (_startupActivated)
             return;
 
-        _coldStartBootstrapScheduled = true;
-        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Normal, RunColdStartBootstrapCore);
-    }
-
-    private void RunColdStartBootstrapCore()
-    {
-        if (_bootstrapCoreDone)
-            return;
-
-        // Минимум видимости заставки — с ActivateAsSplashSurface.
-        if (_loadingShownAt == default)
-            _loadingShownAt = DateTimeOffset.UtcNow;
-
-        DesktopWallpaperImageCache.BeginLoad(DispatcherQueue);
-        // Recent thumbs для страницы «Фон» — под заставкой, до drill-навигации.
-        RecentWallpaperThumbCache.BeginLoad(DispatcherQueue);
-
-        // TitleBar chrome; SystemBackdrop уже на splash-surface (ActivateAsSplashSurface).
-        ApplyDeferredWindowChrome();
-        EnsureSplashBackdropAndTransparent();
-
-        // x86: Presence/watchers до Frame.Navigate → AV на следующем pump (callback cold-nav не стартует).
-        // PreNav (BuildNavigation) → Navigate → PostNav (Presence).
-        if (!_initialNavDone)
-        {
-            _initialNavDone = true;
-            DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Normal, RunColdStartHomeNavigation);
-        }
-
-        _bootstrapCoreDone = true;
-        Activated -= OnFirstActivated;
-        TrySetWindowIcon();
-    }
-
-    private void RunColdStartHomeNavigation()
-    {
-        if (!_deferredInitDone)
-        {
-            FinishDeferredInitializationPreNav();
-        }
-
-        _currentTag = "home";
-        _nav.CurrentSidebarTag = "home";
-        _nav.NavigateToRoot(
-            typeof(HomePage),
-            "home",
-            GlassSettingsResources.Get("NavHome"));
-        SelectNavItem("home");
-
-        // Fallback: если pipeline завис — снять заставку через несколько секунд.
-        _ = LoadingOverlayFallbackAsync();
-    }
-
-    /// <summary>
-    /// После HomePage.OnLoaded (уже под заставкой): Presence/Ensure, затем dismiss.
-    /// Subclass/InjectRuntimeMonitor — только после снятия заставки.
-    /// Повторный заход на Home: без cold-idle wipe — сразу AttachColdStartRuntimeHooks.
-    /// </summary>
-    internal void ScheduleColdStartPostNavAfterHomeLoaded(HomePage home)
-    {
-
-        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Normal, () =>
-        {
-            // После первого dismiss: новая HomePage иначе остаётся без InjectRuntimeMonitor
-            // (OnNavigatedTo при !_built пропускает StartRuntimeMonitor; cold-idle затирает Latest).
-            if (_postDismissHooksDone || _contentReady)
-            {
-                home.AttachColdStartRuntimeHooks();
-                return;
-            }
-
-            CompleteColdStartPostNavIfNeeded();
-            // Ensure на этом же Normal-pump сразу после PostNav. Low после pump_normal_after
-            // на x86 не доживает: между ними успевает чужой Normal (icon preload → UI marshal).
-            InjectRuntimeMonitor.Instance.PublishColdStartIdleSnapshot();
-            CompleteColdStartEnsureUnderSplash();
-            MarkShellInteractiveReady();
-        });
-    }
-
-    private void CompleteColdStartEnsureUnderSplash()
-    {
-        if (_glassRuntimeEnsured)
-        {
-            return;
-        }
-
-        _glassRuntimeEnsured = true;
+        _startupActivated = true;
         try
         {
-            _ = NativeHostInterop.EnsureGlassRuntime();
+            // UIPI: medium-IL Explorer иначе не может передать запрос активации в elevated GS.
+            AllowActivateMessageFromLowerIl(WindowNative.GetWindowHandle(this));
         }
-        catch (Exception)
+        catch { /* ignore */ }
+
+        try
         {
-            // Ensure best-effort под заставкой; сбой не блокирует UI.
+            CompositionTarget.Rendered += OnStartupSplashRendered;
+            StartupPhaseTrace.MarkWindow("activate:begin", this);
+            Activate();
+            StartupPhaseTrace.MarkWindow("activate:end", this);
+        }
+        catch (Exception ex)
+        {
+            CompositionTarget.Rendered -= OnStartupSplashRendered;
+            FailStartup(ex);
         }
     }
 
-    private void MarkShellInteractiveReady()
+    private void OnStartupSplashRendered(object? sender, RenderedEventArgs args)
     {
-        if (_shellInteractiveReady)
+        if (_closeInProgress || !StartupSplash.IsLoaded || StartupSplash.ActualWidth <= 0 ||
+            StartupSplash.ActualHeight <= 0 || StartupSplash.XamlRoot?.IsHostVisible != true)
+        {
             return;
+        }
 
-        _shellInteractiveReady = true;
-        PlatformPresenceService.Instance.StartPresenceWatchAfterShellReady();
-        ScheduleDismissLoadingOverlay(fallback: false);
+        // Rendered — после отрисовки XAML. Возвращаемся в диспетчер, чтобы не начинать
+        // предзагрузку внутри кадра. Свернутое окно дождётся кадра при восстановлении.
+        CompositionTarget.Rendered -= OnStartupSplashRendered;
+        StartupPhaseTrace.MarkWindow("splash:frame-rendered", this);
+        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => _ = PrepareShellUnderSplashAsync());
     }
 
-    /// <summary>Presence/watchers после первого pump вне HomePage.OnLoaded.</summary>
-    internal void CompleteColdStartPostNavIfNeeded()
+    private async Task PrepareShellUnderSplashAsync()
     {
-        if (_deferredInitDone)
+        if (_closeInProgress)
             return;
 
-        FinishDeferredInitializationPostNav();
-        _deferredInitDone = true;
+        try
+        {
+            StartupPhaseTrace.Mark("preload:begin");
+            DesktopWallpaperImageCache.BeginLoad(DispatcherQueue);
+            await Task.Run(LoadStartupSettings).ConfigureAwait(true);
+            if (_closeInProgress)
+                return;
+
+            // x86: PreNav → Navigate → отдельный проход DispatcherQueue после Home.Loaded для PostNav.
+            FinishDeferredInitializationPreNav();
+            _nav.CurrentSidebarTag = "home";
+            SelectNavItem("home");
+            ApplyLayoutMode(GetLayoutWidth());
+            // Разрешаем layout и Loaded, но не показываем даже частично собранный интерфейс (Opacity=0).
+            WindowBlurSourceHost.Visibility = Visibility.Visible;
+            _initialNavDone = true;
+
+            StartupPhaseTrace.MarkWindow("home-nav:begin", this);
+            _nav.NavigateToRoot(typeof(HomePage), "home", GlassSettingsResources.Get("NavHome"));
+            if (_home is null)
+                throw new InvalidOperationException("Не удалось открыть страницу «Обзор» при запуске.");
+            StartupPhaseTrace.MarkWindow("home-nav:end", this);
+        }
+        catch (Exception ex)
+        {
+            FailStartup(ex);
+        }
+    }
+
+    private static void LoadStartupSettings()
+    {
+        SystemFontsSpiCache.LoadAtStartup();
+        SettingsBackupAssociation.EnsureIfMissing();
+        try
+        {
+            if (GlassSettingsRegistry.ReadValidateSettingsOnStartup())
+                _ = NativeHostInterop.ValidateRegistryState(applyFixes: true);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"GlassSettings startup validation: {ex}");
+        }
+    }
+
+    internal void ScheduleColdStartPostNavAfterHomeLoaded(HomePage home)
+    {
+        if (_closeInProgress)
+            return;
+
+        if (_contentReady)
+        {
+            // Повторный заход на Home: не затираем текущий снимок монитора стартовым Idle.
+            DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Normal, home.AttachColdStartRuntimeHooks);
+            return;
+        }
+
+        if (_startupPostNavScheduled)
+            return;
+
+        _startupPostNavScheduled = true;
+        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Normal, () => _ = FinishStartupUnderSplashAsync(home));
+    }
+
+    private async Task FinishStartupUnderSplashAsync(HomePage home)
+    {
+        if (_closeInProgress)
+            return;
+
+        try
+        {
+            FinishDeferredInitializationPostNav();
+            // x86: Ensure на том же проходе dispatcher, что и PostNav, до UI marshal фоновых задач.
+            InjectRuntimeMonitor.Instance.PublishColdStartIdleSnapshot();
+            try { _ = NativeHostInterop.EnsureGlassRuntime(); }
+            catch (Exception) { /* best-effort */ }
+            PlatformPresenceService.Instance.StartPresenceWatchAfterShellReady();
+
+            RunDeferredStartupTasks();
+            // Только имена из реестра, без native I/O иконок. На WOW64 этот вызов ещё и
+            // отключает их нативную догрузку до того, как можно открыть «Процессы».
+            var processNames = Task.Run(ProcessIconResolver.PreloadAttachListNamesOnlyAsync);
+
+            // Пока читаются имена, завершить превью, видимое на «Обзоре». Для недоступных
+            // обоев остаётся штатная подложка; прогрев остальных страниц не задерживает показ.
+            if (DesktopWallpaperImageCache.LoadTask is { IsCompleted: false } wallpaperLoad)
+                await Task.WhenAny(wallpaperLoad, Task.Delay(250)).ConfigureAwait(true);
+            try { await processNames.ConfigureAwait(true); }
+            catch (Exception ex) { Debug.WriteLine($"GlassSettings startup process names: {ex}"); }
+            if (_closeInProgress)
+                return;
+
+            if (DesktopWallpaperImageCache.IsReady)
+                home.RefreshWallpaperPreviewUnderSplash();
+            RevealStartupShell();
+        }
+        catch (Exception ex)
+        {
+            FailStartup(ex);
+        }
+    }
+
+    private void FailStartup(Exception error)
+    {
+        StartupPhaseTrace.Mark($"startup:failed {error.GetType().Name}");
+        Debug.WriteLine($"GlassSettings startup: {error}");
+        BeginAppCloseSequence();
     }
 
     /// <summary>
-    /// Baseline сессии + RegWatch в момент dismiss, до MarkReady (startup green/yellow).
+    /// Baseline сессии + RegWatch до открытия shell и показа стартовых уведомлений.
     /// Порядок: стартовые записи → Capture → Watch (не наоборот — иначе ложный dirty).
     /// </summary>
     private void RunDeferredStartupTasks()
     {
-        if (_deferredStartupTasksDone)
-            return;
-
-        _deferredStartupTasksDone = true;
         try
         {
             Core.Platform.OpenGlassBorderPolicyCoordinator.ApplyStartupPolicy();
@@ -261,263 +261,35 @@ public sealed partial class MainWindow : Window
         _home?.Refresh(refreshNotices: false);
     }
 
-    /// <summary>
-    /// SystemBackdrop + transparent — только под уже размеченной заставкой (ActualSize &gt; 0).
-    /// Runtime: backdrop при overlay 0×0 даёт видимую mica до layout splash.
-    /// </summary>
-    private void EnsureSplashBackdropAndTransparent() =>
-        TryApplyBackdropAndTransparentWhenOverlayReady();
-
-    private void TryApplyBackdropAndTransparentWhenOverlayReady()
+    private void RevealStartupShell()
     {
-        if (LoadingOverlay.ActualWidth <= 0 || LoadingOverlay.ActualHeight <= 0)
-        {
-            if (!_loadingOverlaySizeHooked)
-            {
-                _loadingOverlaySizeHooked = true;
-                LoadingOverlay.SizeChanged += OnLoadingOverlaySizeChangedForStartupChrome;
-            }
+        NavView.IsEnabled = true;
+        AppTitleBar.IsEnabled = true;
+        ApplyDeferredWindowChrome();
+        ApplyLayoutMode(GetLayoutWidth());
+        SyncNavigationUserCardLayout();
+        RootGrid.UpdateLayout();
+        RefreshTitleBarDragRegions();
 
-            return;
-        }
-
-        ApplyMainWindowBackdropAndTransparent(keepOverlaySolid: !_splashFirstPaintReady);
+        // Дерево уже собрано и прошло layout. Backdrop и два слоя XAML меняются
+        // в одном проходе UI, без пустого кадра или наложения заставки на контент.
+        WindowBackdropService.ApplyModeFromRegistry(this, RootGrid);
+        CompositionTarget.Rendered += OnStartupShellRendered;
+        WindowBlurSourceHost.Opacity = 1;
+        StartupSplash.Visibility = Visibility.Collapsed;
+        WindowBlurSourceHost.IsHitTestVisible = true;
+        _contentReady = true;
+        StartupPhaseTrace.MarkWindow("shell:ready", this);
     }
 
-    private void OnLoadingOverlaySizeChangedForStartupChrome(object sender, SizeChangedEventArgs e)
+    private void OnStartupShellRendered(object? sender, RenderedEventArgs args)
     {
-        if (e.NewSize.Width <= 0 || e.NewSize.Height <= 0)
+        if (_closeInProgress || !_contentReady || RootGrid.XamlRoot?.IsHostVisible != true)
             return;
 
-        LoadingOverlay.SizeChanged -= OnLoadingOverlaySizeChangedForStartupChrome;
-        TryApplyBackdropAndTransparentWhenOverlayReady();
-    }
-
-    /// <summary>
-    /// Показать Main как splash: SystemBackdrop + иконка.
-    /// Activate под DWM cloak, uncloak когда overlay/icon имеют размер (иначе 1–2 с чёрного кадра).
-    /// </summary>
-    internal void ActivateAsSplashSurface()
-    {
-        if (_splashSurfaceActivated)
-            return;
-
-        _splashSurfaceActivated = true;
-        _loadingShownAt = DateTimeOffset.UtcNow;
-
-        // Solid overlay до первого layout — страховка если cloak недоступен.
-        EnsureLoadingOverlaySolidBootstrap();
-        ApplyMainWindowBackdropAndTransparent(keepOverlaySolid: true);
-        SyncLoadingChrome(loading: true);
-        // Иконка уже из ctor ApplyAppBranding — не сбрасывать Source повторно.
-
-        try
-        {
-            var hwnd = WindowNative.GetWindowHandle(this);
-            // UIPI: medium-IL explorer (ShellExt) иначе не может PostMessage WM_APP в elevated GS.
-            AllowActivateMessageFromLowerIl(hwnd);
-            _startupCloaked = StartupWindowCloakService.TrySetCloaked(hwnd, cloaked: true);
-            HideFromSwitchersDuringSplash();
-        }
-        catch
-        {
-            _startupCloaked = false;
-        }
-
-        try
-        {
-            Activate();
-        }
-        catch
-        {
-            /* ignore */
-        }
-
-        ReapplyWindowBackdropIfChanged();
-        HideFromSwitchersDuringSplash();
-
-        ScheduleSplashFirstPaintReveal();
-        ScheduleColdStartAfterPaintFrames(8);
-        _ = StartupDismissFallbackAsync();
-    }
-
-    private void HideFromSwitchersDuringSplash()
-    {
-        if (_contentReady)
-            return;
-
-        try
-        {
-            AppWindow.IsShownInSwitchers = false;
-            _startupHiddenFromSwitchers = true;
-        }
-        catch
-        {
-            /* ignore */
-        }
-    }
-
-    private void ShowInSwitchersAfterSplash()
-    {
-        if (!_startupHiddenFromSwitchers)
-            return;
-
-        try
-        {
-            AppWindow.IsShownInSwitchers = true;
-        }
-        catch
-        {
-            /* ignore */
-        }
-
-        _startupHiddenFromSwitchers = false;
-    }
-
-    /// <summary>
-    /// Ждём layout overlay+icon и 2 кадра, затем transparent + uncloak — первый видимый кадр = backdrop+иконка.
-    /// </summary>
-    private void ScheduleSplashFirstPaintReveal()
-    {
-        if (_splashFirstPaintReady)
-            return;
-
-        _splashWarmupFramesLeft = 2;
-        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += OnSplashFirstPaintRendering;
-        _ = SplashFirstPaintFallbackAsync();
-    }
-
-    private async Task SplashFirstPaintFallbackAsync()
-    {
-        try
-        {
-            await Task.Delay(1500).ConfigureAwait(true);
-            if (!_splashFirstPaintReady)
-            {
-                Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnSplashFirstPaintRendering;
-                FinishSplashFirstPaintReveal("fallback-timeout");
-            }
-        }
-        catch
-        {
-            /* ignore */
-        }
-    }
-
-    private void OnSplashFirstPaintRendering(object? sender, object e)
-    {
-        if (_splashFirstPaintReady)
-        {
-            Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnSplashFirstPaintRendering;
-            return;
-        }
-
-        if (LoadingOverlay.ActualWidth <= 0 || LoadingOverlay.ActualHeight <= 0
-            || LoadingIcon.ActualWidth <= 0 || LoadingIcon.ActualHeight <= 0)
-        {
-            return;
-        }
-
-        _splashWarmupFramesLeft--;
-        if (_splashWarmupFramesLeft > 0)
-            return;
-
-        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnSplashFirstPaintRendering;
-        FinishSplashFirstPaintReveal("layout-ready");
-    }
-
-    private void FinishSplashFirstPaintReveal(string _)
-    {
-        if (_splashFirstPaintReady)
-            return;
-
-        _splashFirstPaintReady = true;
-
-        // Acrylic через transparent; solid bootstrap больше не нужен.
-        ApplyTransparentSplashChrome(forceOverlayTransparent: true);
-        ReapplyWindowBackdropIfChanged();
-
-        // WinUI fade вместо DWM open-animation: контент 0→1 после uncloak.
-        RootGrid.Opacity = 0;
-
-        if (_startupCloaked)
-        {
-            try
-            {
-                var hwnd = WindowNative.GetWindowHandle(this);
-                StartupWindowCloakService.TrySetCloaked(hwnd, cloaked: false);
-            }
-            catch
-            {
-                /* best-effort */
-            }
-
-            _startupCloaked = false;
-        }
-
-        // Кнопка taskbar — вместе с видимой заставкой.
-        ShowInSwitchersAfterSplash();
-        BeginOpacityFadeIn(RootGrid, WindowRevealFadeInMs);
-    }
-
-    /// <summary>
-    /// Только safety dismiss. Reveal без готовности UI запрещён.
-    /// </summary>
-    private async Task StartupDismissFallbackAsync()
-    {
-        try
-        {
-            await Task.Delay(8000).ConfigureAwait(true);
-            if (_contentReady)
-                return;
-
-            ScheduleDismissLoadingOverlay(fallback: true);
-        }
-        catch
-        {
-            /* ignore */
-        }
-    }
-
-    private void EnsureLoadingOverlaySolidBootstrap()
-    {
-        LoadingOverlay.Background =
-            (Brush)Application.Current.Resources["SolidBackgroundFillColorBaseBrush"];
-    }
-
-    private void ApplyTransparentSplashChrome(bool forceOverlayTransparent = false)
-    {
-        if (!_transparentChromeApplied)
-        {
-            _transparentChromeApplied = true;
-            StartupChromeService.ApplyTransparentLayers(
-                RootGrid, WindowBlurSourceHost, forceOverlayTransparent ? LoadingOverlay : null, NavView, NavFrame);
-            if (!forceOverlayTransparent)
-                EnsureLoadingOverlaySolidBootstrap();
-        }
-        else if (forceOverlayTransparent)
-        {
-            LoadingOverlay.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        }
-    }
-
-    private void ApplyMainWindowBackdropAndTransparent(bool keepOverlaySolid = false)
-    {
-        ReapplyWindowBackdropIfChanged();
-        ApplyTransparentSplashChrome(forceOverlayTransparent: !keepOverlaySolid);
-    }
-
-    /// <summary>
-    /// Применить SystemBackdrop из реестра только при смене режима (startup + live из AppSettings).
-    /// </summary>
-    private void ReapplyWindowBackdropIfChanged()
-    {
-        var mode = GlassSettingsRegistry.ReadWindowBackdrop();
-        if (_appliedWindowBackdropMode == mode)
-            return;
-
-        WindowBackdropService.ApplyFromRegistry(this, AcrylicBackdropLayer);
-        _appliedWindowBackdropMode = mode;
+        CompositionTarget.Rendered -= OnStartupShellRendered;
+        StartupPhaseTrace.MarkWindow("shell:frame-rendered", this);
+        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, StartPostRevealShellHooks);
     }
 
     /// <summary>XamlRoot окна — для ContentDialog и полноэкранной шторы.</summary>
@@ -527,28 +299,13 @@ public sealed partial class MainWindow : Window
 
     public MainWindow()
     {
+        StartupPhaseTrace.Begin();
         InitializeComponent();
-        SearchBox.Loaded += (_, _) => ApplyTitleBarSearchCaret();
-        SearchBox.AddHandler(UIElement.PointerEnteredEvent, new PointerEventHandler(SearchBox_OnPointerMoved), true);
-        SearchBox.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(SearchBox_OnPointerMoved), true);
-        _searchDebounceTimer = DispatcherQueue.CreateTimer();
-        _searchDebounceTimer.Interval = TimeSpan.FromMilliseconds(1000);
-        _searchDebounceTimer.IsRepeating = false;
-        _searchDebounceTimer.Tick += SearchDebounceTimer_OnTick;
+        // Окно можно закрыть с заставки; HWND-subclass ставится только после старта.
+        AppWindow.Closing += OnAppWindowClosing;
+        ApplyStartupChrome();
         ApplyEarlyWindowPlacement();
-        ApplyStartupVisuals();
-        Title = SingleInstance.WindowTitle;
-        ApplyAppBranding();
-        NavFrame.Navigated += NavFrame_OnNavigated;
-        _nav.Attach(NavFrame);
-        Activated += OnWindowActivated;
-        Activated += OnFirstActivated;
-        SettingsSession.Current.DirtyChanged += (_, _) =>
-        {
-            _home?.SyncSummaryFooterFromSession();
-            SettingsUnsavedIndicatorCoordinator.RefreshAll(this, _home);
-        };
-        HomeSessionNoticeState.SummaryFooterRevealedChanged += (_, _) => RefreshDisplayedHomeFooter();
+        StartupPhaseTrace.MarkWindow("ctor:exit", this);
     }
 
     /// <summary>Обновить footer на текущей отображаемой странице «Обзор» (а не на устаревшем экземпляре).</summary>
@@ -562,31 +319,32 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Chrome до Activate: theme + SystemBackdrop + transparent + иконка (рецепт Gallery-splash).
+    /// Содержимое первого кадра: тема корня → backdrop (один раз, до показа) → DWM caption →
+    /// бренд/иконка. Цвета <c>AppWindow.TitleBar.*</c> — только после Activate (см. ApplyDeferredWindowChrome).
+    /// RootGrid остаётся без фона: сквозь него и видно системный материал (F4 в плане старта).
     /// </summary>
-    private void ApplyStartupVisuals()
+    private void ApplyStartupChrome()
     {
-        try
-        {
-            ExtendsContentIntoTitleBar = true;
-            SetTitleBar(AppTitleBar);
-        }
+        // Стартовый слой занимает в том числе область заголовка. До показа AppTitleBar
+        // используем стандартные drag-зону и системные кнопки расширенного заголовка.
+        try { ExtendsContentIntoTitleBar = true; }
         catch { /* TitleBar API может быть недоступен */ }
+        Title = SingleInstance.WindowTitle;
 
+        // Тема — до backdrop: FallbackColor контроллера берёт тон из неё.
         AppThemeService.ApplyFromRegistry(RootGrid);
-        EnsureLoadingOverlaySolidBootstrap();
-        ApplyMainWindowBackdropAndTransparent(keepOverlaySolid: true);
-        SyncLoadingChrome(loading: true);
-        // После темы — снова выставить иконку (иначе LoadingIcon может остаться пустым).
-        ApplyAppBranding();
+        WindowBackdropService.AttachStartupBackdrop(this, RootGrid);
+        TitleBarThemeHelper.ApplyDwmDarkMode(this);
+        TrySetWindowIcon();
+        var icon = AppIconSourceFactory.CreateSplashImageSource();
+        StartupSplashIcon.Source = icon;
+        if (icon is null)
+            StartupSplashIconFallback.Visibility = Visibility.Visible;
+        StartupPhaseTrace.Mark(icon is not null ? "splash:prepared" : "splash:prepared fallback-icon");
     }
 
     private void ApplyDeferredWindowChrome()
     {
-        if (_deferredWindowChromeApplied)
-            return;
-
-        _deferredWindowChromeApplied = true;
         try
         {
             ExtendsContentIntoTitleBar = true;
@@ -594,18 +352,32 @@ public sealed partial class MainWindow : Window
         }
         catch { /* TitleBar API может быть недоступен */ }
 
-        TitleBarThemeHelper.Apply(this, extendsContentIntoTitleBar: true);
-    }
-
-    private void FinishDeferredInitialization()
-    {
-        FinishDeferredInitializationPreNav();
-        FinishDeferredInitializationPostNav();
+        // PreferredHeightOption доступен только после показа окна с расширенным заголовком.
+        ApplyTitleBarPlacementOptions();
+        TitleBarThemeHelper.ApplyTitleBarColors(this, extendsContentIntoTitleBar: true);
+        StartupPhaseTrace.MarkWindow("titlebar-chrome", this);
     }
 
     /// <summary>Shell/nav до первого Frame.Navigate (без Presence — на x86 Presence до Navigate роняет следующий pump).</summary>
     private void FinishDeferredInitializationPreNav()
     {
+        SearchBox.Loaded += (_, _) => ApplyTitleBarSearchCaret();
+        SearchBox.AddHandler(UIElement.PointerEnteredEvent, new PointerEventHandler(SearchBox_OnPointerMoved), true);
+        SearchBox.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(SearchBox_OnPointerMoved), true);
+        _searchDebounceTimer = DispatcherQueue.CreateTimer();
+        _searchDebounceTimer.Interval = TimeSpan.FromMilliseconds(1000);
+        _searchDebounceTimer.IsRepeating = false;
+        _searchDebounceTimer.Tick += SearchDebounceTimer_OnTick;
+        NavFrame.Navigated += NavFrame_OnNavigated;
+        _nav.Attach(NavFrame);
+        Activated += OnWindowActivated;
+        SettingsSession.Current.DirtyChanged += (_, _) =>
+        {
+            _home?.SyncSummaryFooterFromSession();
+            SettingsUnsavedIndicatorCoordinator.RefreshAll(this, _home);
+        };
+        HomeSessionNoticeState.SummaryFooterRevealedChanged += (_, _) => RefreshDisplayedHomeFooter();
+
         ApplyWindowBusyOverlayFill();
         ThemeShadowHost.Attach(DialogShadowRect, DialogShadowCastGrid, DialogShadow);
         HostedDialogHost.AddHandler(
@@ -633,7 +405,7 @@ public sealed partial class MainWindow : Window
         SyncBreadcrumb();
     }
 
-    /// <summary>Presence/политики под заставкой (без HWND-subclass и без InjectRuntimeMonitor).</summary>
+    /// <summary>Presence/политики до показа shell (без HWND-subclass и без подписки на InjectRuntimeMonitor).</summary>
     private void FinishDeferredInitializationPostNav()
     {
         StartGlassSettingsPreferencesWatcher();
@@ -647,34 +419,43 @@ public sealed partial class MainWindow : Window
         OpenGlassUiPolicy.Changed += OnOpenGlassUiPolicyChanged;
         CompositionWallpaperLayersCache.AttachPolicyListener(DispatcherQueue);
         HookWindowChrome();
-        // Closing без SetWindowSubclass — subclass ставится после dismiss (нет гонки с cold-start).
-        AppWindow.Closing += OnAppWindowClosing;
-        // PreloadAttachListAsync — после dismiss: Task.Run→UI marshal на Normal успевал
-        // убить x86 между pump_normal_after и Low Ensure.
-        ApplyPlacement();
+        EnforceMinWindowSize();
         RootGrid.ActualThemeChanged += (_, _) =>
         {
             ApplyWindowBusyOverlayFill();
             NavigationPaneChromeService.Apply(NavView, _layoutMode);
             RefreshMirrorStripChrome();
+            // solid-подложка на ПК без материала (17763) обязана следить за темой.
+            WindowBackdropService.SyncRootBackground(this, RootGrid);
         };
         HookNavigationUserCardLayout();
     }
 
-    /// <summary>После снятия заставки: DesktopEnvironmentWatcher, Close-subclass, runtime monitor.</summary>
-    private void StartPostDismissShellHooks()
+    /// <summary>Запустить наблюдение и передать запрос открытия копии после кадра с готовым shell.</summary>
+    private void StartPostRevealShellHooks()
     {
-        if (_postDismissHooksDone)
+        if (_closeInProgress)
             return;
 
-        _postDismissHooksDone = true;
         StartDesktopEnvironmentWatcher();
         InstallCloseSubclassWhenReady();
         if (NavFrame.Content is HomePage home)
             home.AttachColdStartRuntimeHooks();
-        // Names-only preload уже под заставкой (см. DismissLoadingOverlayWhenReadyAsync).
-        _shellReadyWorkRequested = true;
-        RunDeferredShellReadyWorkAfterFirstProbe();
+
+        if (SettingsBackupOpenRequest.TryPeek(out var backupPath))
+            OpenSettingsBackup(backupPath);
+
+        // Если открываем копию, NavigateToRoot уже поставил переход в «Систему» в ту же очередь Low.
+        // Уведомление «Обзора» не должно успеть открыться перед этой навигацией.
+        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        {
+            if (_closeInProgress)
+                return;
+
+            ShellContentReadyGate.MarkReady();
+            RecentWallpaperThumbCache.BeginLoad(DispatcherQueue);
+            CompositionWallpaperLayersCache.BeginPrewarm(DispatcherQueue);
+        });
     }
 
     private void HookNavigationUserCardLayout()
@@ -710,7 +491,6 @@ public sealed partial class MainWindow : Window
                 SyncNavigationUserCardLayout();
                 ApplySearchPlacement();
             });
-        RootGrid.Loaded += (_, _) => Sync();
     }
 
     private void SyncNavigationUserCardLayout()
@@ -719,47 +499,8 @@ public sealed partial class MainWindow : Window
         NavigationPaneChromeService.Apply(NavView, _layoutMode);
     }
 
-    private bool _firstFrameLogged;
-
-    private void ScheduleColdStartAfterPaintFrames(int frames)
-    {
-        if (frames <= 0)
-        {
-            TryCompleteColdStartBootstrap();
-            return;
-        }
-
-        var left = frames;
-        void OnRendering(object? sender, object e)
-        {
-            left--;
-            if (left > 0)
-                return;
-
-            if (_firstFrameLogged)
-            {
-                Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnRendering;
-                return;
-            }
-
-            _firstFrameLogged = true;
-            Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnRendering;
-            TryCompleteColdStartBootstrap();
-        }
-
-        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += OnRendering;
-    }
-
     private void OnWindowActivated(object sender, WindowActivatedEventArgs e) =>
         UpdateBackButton();
-
-    private void OnFirstActivated(object sender, WindowActivatedEventArgs e)
-    {
-        if (e.WindowActivationState == WindowActivationState.Deactivated)
-            return;
-
-        TryCompleteColdStartBootstrap();
-    }
 
     /// <summary>Применить тему и backdrop из реестра GlassSettings.</summary>
     public void ApplyAppPreferencesFromRegistry()
@@ -767,8 +508,9 @@ public sealed partial class MainWindow : Window
         AppThemeService.ApplyFromRegistry(RootGrid);
         NavigationPaneChromeService.Apply(NavView, _layoutMode);
         ApplyWindowBusyOverlayFill();
-        // Runtime: backdrop по кэшу режима. Startup splash — ApplyMainWindowBackdropAndTransparent.
-        ReapplyWindowBackdropIfChanged();
+        // Режим материала меняется внутри подключённого backdrop — без переприсваивания SystemBackdrop.
+        if (_contentReady)
+            WindowBackdropService.ApplyModeFromRegistry(this, RootGrid);
         TitleBarThemeHelper.Apply(this, extendsContentIntoTitleBar: true);
         ApplyHostedDialogTheme();
         ApplyWindowTopNoticeChrome();
@@ -1030,47 +772,6 @@ public sealed partial class MainWindow : Window
     private void ApplyWindowBusyOverlayFill() =>
         WindowBusyOverlayService.ApplyFill(WindowBusyOverlayFill, RootGrid);
 
-    private void ApplyAppBranding()
-    {
-        TrySetWindowIcon();
-
-        // Decode: dismiss/reveal ждут ImageOpened (ранний TrySetResult давал uncloak без иконки).
-        var iconSource = AppIconSourceFactory.CreateImageSource();
-        if (iconSource is not null)
-        {
-            if (_splashIconReadyTcs.Task.IsCompleted)
-            {
-                _splashIconReadyTcs =
-                    new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            }
-
-            LoadingIcon.ImageOpened -= LoadingIcon_OnImageOpened;
-            LoadingIcon.ImageFailed -= LoadingIcon_OnImageFailed;
-            LoadingIcon.ImageOpened += LoadingIcon_OnImageOpened;
-            LoadingIcon.ImageFailed += LoadingIcon_OnImageFailed;
-            LoadingIcon.Opacity = 1;
-            LoadingIcon.Visibility = Visibility.Visible;
-            LoadingIcon.Source = iconSource;
-            // Уже декодированный BitmapImage — PixelWidth > 0 без ожидания ImageOpened.
-            if (iconSource is BitmapImage { PixelWidth: > 0 })
-                _splashIconReadyTcs.TrySetResult(true);
-        }
-        else
-        {
-            _splashIconReadyTcs.TrySetResult(false);
-        }
-    }
-
-    private void LoadingIcon_OnImageOpened(object sender, RoutedEventArgs e)
-    {
-        _splashIconReadyTcs.TrySetResult(true);
-    }
-
-    private void LoadingIcon_OnImageFailed(object sender, ExceptionRoutedEventArgs e)
-    {
-        _splashIconReadyTcs.TrySetResult(false);
-    }
-
     private void TrySetWindowIcon()
     {
         try
@@ -1080,129 +781,6 @@ public sealed partial class MainWindow : Window
                 AppWindow.SetIcon(iconPath);
         }
         catch { /* ignore */ }
-    }
-
-    private void TryDismissLoadingOverlay()
-    {
-        if (_contentReady)
-            return;
-
-        _contentReady = true;
-        NavView.Visibility = Visibility.Visible;
-        if (NavFrame.Content is not Page)
-            NavigateTo(_currentTag, force: true);
-
-        ApplyLayoutMode(GetLayoutWidth());
-        SyncNavigationUserCardLayout();
-        // Prep строго под splash: loading chrome / hit-test off (SyncLoadingChrome ещё true).
-        RunDeferredStartupTasks();
-        // Keep master’s startup backup-open handoff. ProcessesPage is no longer
-        // pre-warmed here; its staged loading belongs to the search navigation flow.
-        if (SettingsBackupOpenRequest.TryPeek(out var backupPath))
-            OpenSettingsBackup(backupPath);
-
-        // Контент под fade: host Opacity=0, затем 0→1 за 500 ms после снятия splash.
-        // Hit-test остаётся off до MarkReady — иначе клики со splash доезжают как Home GlassDrill.
-        WindowBlurSourceHost.Opacity = 0;
-        LoadingOverlay.Visibility = Visibility.Collapsed;
-        SyncLoadingChrome(loading: false, allowHitTest: false);
-        ShowInSwitchersAfterSplash();
-        // MarkReady — после fade-in: стартовое green со штатным slide-in, не в первом кадре fade.
-        BeginShellContentFadeIn(ShellContentFadeInMs, onCompleted: () =>
-        {
-            ArmShellInputAfterSplash();
-            ShellContentReadyGate.MarkReady();
-        });
-        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, StartPostDismissShellHooks);
-    }
-
-    /// <summary>Включить hit-test shell только после fade — гасит отложенные клики со splash.</summary>
-    private void ArmShellInputAfterSplash()
-    {
-        if (_shellInputArmed)
-            return;
-
-        SyncLoadingChrome(loading: false, allowHitTest: true);
-        _shellInputArmed = true;
-    }
-
-    private void BeginShellContentFadeIn(int durationMs, Action? onCompleted = null) =>
-        BeginOpacityFadeIn(WindowBlurSourceHost, durationMs, onCompleted);
-
-    private static void BeginOpacityFadeIn(UIElement target, int durationMs, Action? onCompleted = null)
-    {
-        try
-        {
-            target.Opacity = 0;
-            var anim = new DoubleAnimation
-            {
-                From = 0,
-                To = 1,
-                Duration = new Duration(TimeSpan.FromMilliseconds(durationMs)),
-                EnableDependentAnimation = true
-            };
-            Storyboard.SetTarget(anim, target);
-            Storyboard.SetTargetProperty(anim, "Opacity");
-            var sb = new Storyboard();
-            sb.Children.Add(anim);
-            if (onCompleted is not null)
-                sb.Completed += (_, _) => onCompleted();
-            sb.Begin();
-        }
-        catch
-        {
-            target.Opacity = 1;
-            onCompleted?.Invoke();
-        }
-    }
-
-    private bool _shellReadyWorkRequested;
-    private bool _shellReadyWorkDone;
-
-    /// <summary>
-    /// Маркер после первой CaptureSnapshot: WarmAttach/composition — только под заставкой.
-    /// </summary>
-    internal void RunDeferredShellReadyWorkAfterFirstProbe()
-    {
-        if (_shellReadyWorkDone || !_shellReadyWorkRequested)
-            return;
-
-        // WarmAttach / composition prewarm — строго под splash (Dismiss/TryDismiss), не после MarkReady.
-        _shellReadyWorkDone = true;
-    }
-
-    private void SyncLoadingChrome(bool loading, bool? allowHitTest = null)
-    {
-        // Не Collapsed: иначе HomePage.OnLoaded не вызывается → dismiss только через 8 с fallback.
-        // Opacity=0: shell не виден под transparent splash, Loaded/Ensure идут как раньше.
-        // allowHitTest: при dismiss визуал уже loading=false, но hit-test держим false до MarkReady.
-        var hit = allowHitTest ?? !loading;
-        NavView.Visibility = Visibility.Visible;
-        NavView.Opacity = loading ? 0 : 1;
-        NavView.IsHitTestVisible = hit;
-        PageContentHost.IsHitTestVisible = hit;
-        NavFrame.IsHitTestVisible = hit;
-        AppTitleBar.Visibility = loading ? Visibility.Collapsed : Visibility.Visible;
-        SearchBox.Visibility = loading ? Visibility.Collapsed : Visibility.Visible;
-        SearchBox.IsHitTestVisible = hit;
-        if (!loading)
-            ApplySearchPlacement();
-    }
-
-    /// <summary>Клики по заставке не должны доходить до shell / тумблеров Главной.</summary>
-    private void LoadingOverlay_OnPointerInput(object sender, PointerRoutedEventArgs e)
-    {
-        e.Handled = true;
-    }
-
-    private void LoadingOverlay_OnTappedInput(object sender, TappedRoutedEventArgs e)
-    {
-        e.Handled = true;
-    }
-
-    private void LoadingOverlay_OnDoubleTappedInput(object sender, DoubleTappedRoutedEventArgs e)
-    {
-        e.Handled = true;
     }
 
     private void TitleBarBackButton_OnClick(object sender, RoutedEventArgs e)
@@ -1886,7 +1464,7 @@ public sealed partial class MainWindow : Window
 
     private void TryInstallCloseSubclass()
     {
-        if (_closeSubclassInstalled)
+        if (_closeInProgress || _closeSubclassInstalled)
             return;
 
         var hwnd = WindowNative.GetWindowHandle(this);
@@ -2052,8 +1630,11 @@ public sealed partial class MainWindow : Window
             }
         }
 
-        WindowBusyOverlayService.Push(showProgress: true);
-        ShutdownPhaseTrace.Mark("curtain");
+        if (_contentReady)
+        {
+            WindowBusyOverlayService.Push(showProgress: true);
+            ShutdownPhaseTrace.Mark("curtain");
+        }
 
         try
         {
@@ -2136,18 +1717,20 @@ public sealed partial class MainWindow : Window
     private void UnhookWindowCloseInterception()
     {
         AppWindow.Closing -= OnAppWindowClosing;
+        Activated -= OnInstallCloseSubclassOnce;
         RemoveCloseSubclass();
     }
 
     /// <summary>Отпускает тяжёлое XAML-дерево до teardown процесса.</summary>
     private void PrepareForProcessExit()
     {
+        CompositionTarget.Rendered -= OnStartupSplashRendered;
+        CompositionTarget.Rendered -= OnStartupShellRendered;
         if (_hostedDialogTcs is not null)
             CloseHostedDialog(HostedDialogResult.Dismissed);
 
         _pages.Clear();
         _home = null;
-        _attachIconPreload = null;
         NavFrame.Content = null;
     }
 
@@ -2219,7 +1802,10 @@ public sealed partial class MainWindow : Window
         // narrower clip after the panel grows in place (display topology change).
         HostedDialogSurface.SizeChanged += (_, _) => UpdateHostedDialogSurfaceClip();
         RootGrid.SizeChanged += (_, _) => ApplyLayoutMode(GetLayoutWidth());
-        RootGrid.Loaded += RootGrid_OnLoaded;
+        // PostNav после Home.Loaded: корень окна уже загружен, повторного Loaded не ждём.
+        if (RootGrid.XamlRoot is { } xamlRoot)
+            xamlRoot.Changed += (_, _) => ApplyLayoutMode(GetLayoutWidth());
+        UpdateHostedDialogVerticalInset();
     }
 
     /// <summary>Верхняя граница зоны hosted-диалога — нижняя кромка TitleBar.</summary>
@@ -2230,14 +1816,6 @@ public sealed partial class MainWindow : Window
 
         if (HostedDialogHost.Visibility == Visibility.Visible && _hostedDialogRequestedSpec is not null)
             ApplyHostedDialogBounds(liveResize: true);
-    }
-
-    private void RootGrid_OnLoaded(object sender, RoutedEventArgs e)
-    {
-        if (RootGrid.XamlRoot != null)
-            RootGrid.XamlRoot.Changed += (_, _) => ApplyLayoutMode(GetLayoutWidth());
-        UpdateHostedDialogVerticalInset();
-        ApplyLayoutMode(GetLayoutWidth());
     }
 
     private double GetLayoutWidth()
@@ -2505,7 +2083,7 @@ public sealed partial class MainWindow : Window
         if (args.InvokedItemContainer is not NavigationViewItem { Tag: string tag })
             return;
 
-        if (!_shellInputArmed)
+        if (!_contentReady)
             return;
 
         NavigateTo(tag, force: true);
@@ -2568,103 +2146,6 @@ public sealed partial class MainWindow : Window
         SettingsPageShell.NotifyPageNavigatedTo(page);
         _pages[tag] = page;
         SyncBreadcrumb();
-        _navigationReady = true;
-        // Dismiss — только после MarkShellInteractiveReady (Home Refresh/Presence/Ensure под заставкой).
-    }
-
-    private void ScheduleDismissLoadingOverlay(bool fallback)
-    {
-        if (_contentReady)
-            return;
-
-        _ = DismissLoadingOverlayWhenReadyAsync(fallback);
-    }
-
-    private async Task DismissLoadingOverlayWhenReadyAsync(bool fallback)
-    {
-        try
-        {
-            if (_contentReady)
-                return;
-
-            if (!fallback)
-            {
-                while (!_shellInteractiveReady)
-                {
-                    await Task.Delay(50);
-                    if (_contentReady)
-                        return;
-                }
-            }
-            else
-            {
-                while (!_navigationReady)
-                {
-                    await Task.Delay(50);
-                    if (_contentReady)
-                        return;
-                }
-            }
-
-            var elapsed = (DateTimeOffset.UtcNow - _loadingShownAt).TotalMilliseconds;
-            var minDelayMs = Math.Max(0, (int)(LoadingMinimumMs - elapsed));
-            var minDelay = Task.Delay(minDelayMs);
-
-            // Names-only (без native SHGetFileInfo) + обои + composition blur — под заставкой.
-            // Раньше wait на icon-preload (~600 ms) маскировал готовность DesktopWallpaperImageCache;
-            // после names-only dismiss шёл сразу → пустой слот превью на Главной.
-            _attachIconPreload ??= ProcessIconResolver.PreloadAttachListNamesOnlyAsync();
-            if (CompositionWallpaperLayersCache.ShouldPrewarm())
-                CompositionWallpaperLayersCache.BeginPrewarm(DispatcherQueue);
-
-            const int maxPreviewWaitMs = 800;
-            var wallpaperTask = DesktopWallpaperImageCache.LoadTask ?? Task.CompletedTask;
-            var wallpaperOrTimeout = Task.WhenAny(wallpaperTask, Task.Delay(maxPreviewWaitMs));
-            var compositionTask = CompositionWallpaperLayersCache.PrewarmTask ?? Task.CompletedTask;
-            var compositionOrTimeout = Task.WhenAny(compositionTask, Task.Delay(maxPreviewWaitMs));
-
-            // x86: BitmapImage ImageOpened часто после wallpaper — иначе dismiss без иконки.
-            const int maxSplashIconWaitMs = 1500;
-            var splashIconOrTimeout = Task.WhenAny(
-                _splashIconReadyTcs.Task,
-                Task.Delay(maxSplashIconWaitMs));
-
-            await Task.WhenAll(
-                    minDelay,
-                    wallpaperOrTimeout,
-                    compositionOrTimeout,
-                    _attachIconPreload,
-                    splashIconOrTimeout)
-                .ConfigureAwait(true);
-
-            if (_contentReady)
-                return;
-
-            // Не вызывать TryDismiss из continuation Delay(0) внутри OnNavigated — иначе нет заставки.
-            DispatcherQueue.TryEnqueue(() =>
-            {
-                if (_contentReady)
-                    return;
-                if (NavFrame.Content is HomePage home)
-                    home.RefreshWallpaperPreviewUnderSplash();
-                TryDismissLoadingOverlay();
-            });
-        }
-        catch
-        {
-            /* dismiss best-effort */
-        }
-    }
-
-    private async Task LoadingOverlayFallbackAsync()
-    {
-        await Task.Delay(8000);
-        if (_contentReady)
-            return;
-
-        _navigationReady = true;
-        _shellInteractiveReady = true;
-        await DismissLoadingOverlayWhenReadyAsync(fallback: true);
     }
 
     private void OnTrailChanged(object? sender, EventArgs e)
@@ -2724,7 +2205,7 @@ public sealed partial class MainWindow : Window
 
     private void Home_OnNavigateRequested(object? sender, HomeNavTarget target)
     {
-        if (!_shellInputArmed)
+        if (!_contentReady)
             return;
 
         NavigateFromHome(target);
@@ -2922,7 +2403,7 @@ public sealed partial class MainWindow : Window
     /// <summary>Открыть страницу «Система» на вкладке восстановления выбранной копии.</summary>
     internal void OpenSettingsBackup(string path)
     {
-        if (string.IsNullOrWhiteSpace(path))
+        if (_closeInProgress || string.IsNullOrWhiteSpace(path))
             return;
 
         if (!_contentReady)
@@ -3513,14 +2994,21 @@ public sealed partial class MainWindow : Window
         SearchBox.PlaceholderText = GlassSettingsResources.Get("Main_SearchPlaceholder");
     }
 
-    /// <summary>Размер и позиция до Activate (сразу на целевые координаты).</summary>
+    /// <summary>
+    /// Размер, позиция и мин-размер — ровно один раз и до Activate(): окно скрыто, поэтому ShowWindow получает
+    /// уже целевой кадр (повторный ApplyPlacement после показа давал «окно дёргается»).
+    /// Единицы — physical px окна (то же, что пишет <see cref="SavePlacement"/>); Window.Width/Height
+    /// не используем: это клиент в DIP + E_NOTIMPL без new windowing (Win10 17763) — смешение
+    /// единиц на масштабированном мониторе дороже, чем выигрыш. SetPresenter(Default) убран: presenter
+    /// и так Overlapped, а вызов шумит в AppWindow.Changed.
+    /// </summary>
     private void ApplyEarlyWindowPlacement()
     {
         var (_, l, t, w, h) = WindowPlacementStore.LoadOrDefault();
         AppWindow.Resize(new Windows.Graphics.SizeInt32(w, h));
         AppWindow.Move(new Windows.Graphics.PointInt32(l, t));
-        AppWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.Default);
         ApplyWindowMinSizeConstraints(AppWindow);
+        StartupPhaseTrace.Mark($"placement {w}x{h} @ {l},{t}");
     }
 
     private void ApplyTitleBarPlacementOptions()
@@ -3533,14 +3021,6 @@ public sealed partial class MainWindow : Window
         {
             System.Diagnostics.Debug.WriteLine($"GlassSettings ApplyTitleBarPlacementOptions: {ex.Message}");
         }
-    }
-
-    private void ApplyPlacement()
-    {
-        ApplyEarlyWindowPlacement();
-        ApplyTitleBarPlacementOptions();
-        EnforceMinWindowSize();
-        ApplyLayoutMode(GetLayoutWidth());
     }
 
     private void SavePlacement()

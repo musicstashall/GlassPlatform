@@ -19,38 +19,17 @@ internal static class AppIconSourceFactory
         return File.Exists(legacy) ? legacy : direct;
     }
 
-    /// <summary>
-    /// Синхронный decode в UI-потоке — иконка на сплэше до async UriSource (x86/x64).
-    /// </summary>
-    public static ImageSource? CreateImageSource()
+    /// <summary>Синхронно декодирует иконку до показа окна, без отложенного UriSource.</summary>
+    public static ImageSource? CreateSplashImageSource()
     {
-        var path = ResolveIconPath();
-        if (File.Exists(path))
-        {
-            try
-            {
-                using var file = File.OpenRead(path);
-                using var ra = file.AsRandomAccessStream();
-                var bitmap = new BitmapImage();
-                bitmap.SetSource(ra);
-                return bitmap;
-            }
-            catch
-            {
-                try
-                {
-                    return new BitmapImage(ToFileUri(path));
-                }
-                catch
-                {
-                    // fallback ниже
-                }
-            }
-        }
-
         try
         {
-            return new BitmapImage(new Uri("ms-appx:///Assets/app.ico"));
+            using var file = File.OpenRead(ResolveIconPath());
+            using var stream = file.AsRandomAccessStream();
+            // Явный размер отключает отложенный decode до расчёта размера Image (decode-to-render-size).
+            var bitmap = new BitmapImage { DecodePixelWidth = 256 };
+            bitmap.SetSource(stream);
+            return bitmap.PixelWidth > 0 ? bitmap : null;
         }
         catch
         {

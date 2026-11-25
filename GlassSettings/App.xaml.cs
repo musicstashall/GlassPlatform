@@ -1,4 +1,3 @@
-using GlassSettings.Core.Text;
 using GlassSettings.Services;
 using Microsoft.UI.Xaml;
 
@@ -30,7 +29,6 @@ public partial class App : Application
             return;
         }
 
-        SettingsBackupAssociation.EnsureIfMissing();
         if (SettingsBackupOpenRequest.FromCommandLine() is { } backupPath)
             SettingsBackupOpenRequest.Set(backupPath);
 
@@ -39,15 +37,10 @@ public partial class App : Application
 
         AppThemeService.ApplyApplicationThemeAtStartup();
         UiLanguageService.ApplyAtStartup();
-        SystemFontsSpiCache.LoadAtStartup();
 
-        // «Проверять настройки при старте» — на фоновом потоке, запуск не задерживает.
-        if (GlassSettings.Core.Registry.GlassSettingsRegistry.ReadValidateSettingsOnStartup())
-            _ = System.Threading.Tasks.Task.Run(() => NativeHostInterop.ValidateRegistryState(applyFixes: true));
-
-        // Single-window: Main сразу как splash (SystemBackdrop + transparent + иконка).
         var window = new MainWindow();
         ShellWindow = window;
-        window.ActivateAsSplashSurface();
+        // Показываем только заставку. Подготовка shell начнётся после её первого кадра.
+        window.ActivateAtStartup();
     }
 }

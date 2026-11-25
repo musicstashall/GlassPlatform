@@ -6,23 +6,20 @@
     xmlns:ctrl="using:GlassSettings.Controls"
     xmlns:nav="using:GlassSettings.Navigation">
     <Grid x:Name="RootGrid">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
-        <Grid x:Name="WindowBlurSourceHost" Grid.RowSpan="2">
+        <Grid
+            x:Name="WindowBlurSourceHost"
+            IsHitTestVisible="False"
+            Opacity="0"
+            Visibility="Collapsed">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
-            <Border
-                x:Name="AcrylicBackdropLayer"
-                Grid.RowSpan="2"
-                Visibility="Collapsed" />
             <TitleBar
                 x:Name="AppTitleBar"
                 Grid.Row="0"
                 Title=""
+                IsEnabled="False"
                 IsBackButtonVisible="False"
                 IsPaneToggleButtonVisible="False"
                 PaneToggleRequested="AppTitleBar_OnPaneToggleRequested">
@@ -86,7 +83,7 @@
                 x:Name="NavView"
                 Grid.Row="1"
                 Background="Transparent"
-                Visibility="Visible"
+                IsEnabled="False"
                 IsBackButtonVisible="Collapsed"
                 IsPaneToggleButtonVisible="False"
                 IsSettingsVisible="False"
@@ -188,9 +185,28 @@
                 </Grid>
             </NavigationView>
         </Grid>
+        <!-- Прозрачный слой на всё окно: материал рисует Desktop Acrylic, а не кисть поверх shell. -->
+        <Grid x:Name="StartupSplash" Background="Transparent">
+            <Image
+                x:Name="StartupSplashIcon"
+                Width="108"
+                Height="108"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                IsHitTestVisible="False"
+                Stretch="Uniform" />
+            <FontIcon
+                x:Name="StartupSplashIconFallback"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                FontSize="72"
+                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                Glyph="&#xE713;"
+                IsHitTestVisible="False"
+                Visibility="Collapsed" />
+        </Grid>
         <Grid
             x:Name="WindowBusyOverlay"
-            Grid.RowSpan="2"
             Background="Transparent"
             IsHitTestVisible="True"
             Visibility="Collapsed">
@@ -205,7 +221,6 @@
         </Grid>
         <Grid
             x:Name="HostedDialogHost"
-            Grid.RowSpan="2"
             Background="Transparent"
             Visibility="Collapsed">
             <Grid
@@ -245,28 +260,6 @@
                     </Border>
                 </Border>
             </Grid>
-        </Grid>
-        <Grid
-            x:Name="LoadingOverlay"
-            Grid.RowSpan="2"
-            Background="Transparent"
-            IsHitTestVisible="True"
-            Visibility="Visible"
-            PointerPressed="LoadingOverlay_OnPointerInput"
-            PointerReleased="LoadingOverlay_OnPointerInput"
-            PointerCanceled="LoadingOverlay_OnPointerInput"
-            PointerCaptureLost="LoadingOverlay_OnPointerInput"
-            Tapped="LoadingOverlay_OnTappedInput"
-            DoubleTapped="LoadingOverlay_OnDoubleTappedInput">
-            <Image
-                x:Name="LoadingIcon"
-                Width="108"
-                Height="108"
-                HorizontalAlignment="Center"
-                VerticalAlignment="Center"
-                IsHitTestVisible="False"
-                Source="ms-appx:///Assets/app.ico"
-                Stretch="Uniform" />
         </Grid>
     </Grid>
 </Window>

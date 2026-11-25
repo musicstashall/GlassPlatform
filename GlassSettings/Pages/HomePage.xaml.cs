@@ -335,6 +335,8 @@ public sealed partial class HomePage : Page
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        // На старте эти фазы выполняются после кадра заставки, пока shell ещё не показан.
+        StartupPhaseTrace.Mark("home:onloaded:begin");
         if (!_built)
         {
             BuildCards();
@@ -347,6 +349,7 @@ public sealed partial class HomePage : Page
                 ColGap,
                 ColRight);
         }
+        StartupPhaseTrace.Mark("home:build:end");
         Refresh();
         HookEnvironmentWatcher();
         ApplyOpenGlassUiVisibility();
@@ -357,20 +360,25 @@ public sealed partial class HomePage : Page
         PlatformPresenceService.Instance.PresenceChanged -= OnPresenceChanged;
         PlatformPresenceService.Instance.PresenceChanged += OnPresenceChanged;
         PlatformPresenceService.Instance.AddSubscriber();
+        StartupPhaseTrace.Mark("home:refresh:end");
         // RuntimeMonitor/PostNav — после выхода из Loaded (иначе x86 AV до следующего pump).
         App.ShellWindow?.ScheduleColdStartPostNavAfterHomeLoaded(this);
     }
 
-    /// <summary>После PostNav Attach — подписка RuntimeMonitor.</summary>
+    /// <summary>Подписки страницы после инициализации наблюдателей окна.</summary>
     internal void AttachColdStartRuntimeHooks()
     {
+        if (!IsLoaded)
+            return;
+
+        HookEnvironmentWatcher();
         StartRuntimeMonitor();
     }
 
     /// <summary>После готовности DesktopWallpaperImageCache — до снятия заставки (иначе пустой слот).</summary>
     internal void RefreshWallpaperPreviewUnderSplash()
     {
-        _platformWallpaperTile?.ForceRefreshPreview();
+        _platformWallpaperTile?.ForceRefreshPreview(animate: false);
     }
 
     private void HookEnvironmentWatcher()
@@ -844,7 +852,7 @@ public sealed partial class HomePage : Page
 
         PlatformSummaryCard.CardDescription = HomeStatusSummary.DeviceHeaderBody();
         _platformWallpaperTile?.RefreshPreview();
-        // После Capture на dismiss notices покажет MarkReady/ShowStartupNotice — не дублировать present.
+        // После стартового Capture уведомления покажет MarkReady/ShowStartupNotice — не дублировать present.
         if (refreshNotices)
             _ = RefreshNoticesAsync();
         RefreshPlatformSummary();

@@ -1,22 +1,88 @@
 using GlassSettings.Core.Registry;
-using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.UI;
 using Windows.UI;
 
 namespace GlassSettings.Services;
 
-/// <summary>Backdrop окна GlassSettings: Mica, Acrylic, системный fallback.</summary>
+/// <summary>
+/// Backdrop окна GlassSettings (один <see cref="GlassWindowBackdrop"/> на окно) и in-app acrylic
+/// для overlay UI. Порядок старта: [GlassSettings-startup-window-plan.md](../docs/GlassSettings-startup-window-plan.md).
+/// </summary>
 public static class WindowBackdropService
 {
-    public static void ApplyFromRegistry(Window window, Border acrylicLayer) =>
-        ApplyMode(GlassSettingsRegistry.ReadWindowBackdrop(), window, acrylicLayer);
+    /// <summary>
+    /// Подключить полнооконный Desktop Acrylic до <c>Activate()</c>. Сохранённый режим
+    /// возвращается при показе shell, без повторного присваивания <c>SystemBackdrop</c>.
+    /// </summary>
+    public static void AttachStartupBackdrop(Window window, Grid rootGrid)
+    {
+        if (window.SystemBackdrop is not null)
+            return;
 
-    /// <summary>Только SystemBackdrop из реестра (splash / окна без acrylic-layer в дереве).</summary>
-    public static void ApplySystemBackdropFromRegistry(Window window) =>
-        ApplyMode(GlassSettingsRegistry.ReadWindowBackdrop(), window, acrylicLayer: new Border());
+        if (GlassWindowBackdrop.IsAnyMaterialSupported())
+        {
+            try
+            {
+                var backdrop = new GlassWindowBackdrop(AppWindowBackdropMode.Acrylic);
+                window.SystemBackdrop = backdrop;
+                if (!backdrop.NeedsSolidFallback)
+                    return;
+            }
+            catch { /* ниже — solid-подложка */ }
+        }
+
+        // Акрил недоступен или контроллер не подключился: фон корня выставляется
+        // до первого кадра, чтобы даже прозрачный остров не оставил «дырку» в desktop.
+        ApplySolidRootBackground(rootGrid);
+    }
+
+    /// <summary>
+    /// Смена режима backdrop (панель настроек приложения или внешний WM_SETTINGCHANGE):
+    /// материал меняется внутри уже подключённого backdrop — без переприсваивания
+    /// <c>Window.SystemBackdrop</c> и без мигания.
+    /// </summary>
+    public static void ApplyModeFromRegistry(Window window, Grid rootGrid)
+    {
+        if (window.SystemBackdrop is GlassWindowBackdrop backdrop)
+        {
+            try { backdrop.TryApplyMode(GlassSettingsRegistry.ReadWindowBackdrop()); }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"GlassSettings backdrop: {ex}"); }
+        }
+
+        SyncRootBackground(window, rootGrid);
+    }
+
+    /// <summary>
+    /// Синхронизация подложки после смены темы (RootGrid.ActualThemeChanged): пока материал
+    /// активен — фона нет (сквозь него видно системный материал), иначе — solid текущей темы;
+    /// заодно пересчитывается FallbackColor контроллера.
+    /// </summary>
+    public static void SyncRootBackground(Window window, Grid rootGrid)
+    {
+        if (window.SystemBackdrop is GlassWindowBackdrop backdrop)
+        {
+            if (!backdrop.NeedsSolidFallback)
+            {
+                backdrop.RefreshThemeColors();
+                rootGrid.Background = null;
+                return;
+            }
+        }
+        else if (window.SystemBackdrop is not null)
+        {
+            return;
+        }
+
+        ApplySolidRootBackground(rootGrid);
+    }
+
+    private static void ApplySolidRootBackground(Grid rootGrid) =>
+        rootGrid.Background = AppThemeVisualResolver.ResolveThemeResourceBrush("SolidBackgroundFillColorBaseBrush")
+            ?? new SolidColorBrush(AppThemeVisualResolver.ResolveIsDarkMode()
+                ? Color.FromArgb(255, 0x20, 0x20, 0x20)
+                : Color.FromArgb(255, 0xF3, 0xF3, 0xF3));
 
     /// <summary>In-app acrylic для overlay UI (pane, диалоги).</summary>
     public static Brush GetAcrylicInAppChromeBrush() =>
@@ -47,75 +113,6 @@ public static class WindowBackdropService
     public static Brush GetNavigationOverlayPaneBrush() =>
         AppThemeVisualResolver.ResolveThemeResourceBrush("AcrylicInAppFillColorDefaultBrush")
         ?? GetAcrylicInAppFillBrush(AppThemeVisualResolver.ResolveIsDarkMode());
-
-    public static void ApplyMode(AppWindowBackdropMode mode, Window window, Border acrylicLayer)
-    {
-        // Без process-wide cache: режим backdrop читается из реестра при каждом Apply.
-        switch (mode)
-        {
-            case AppWindowBackdropMode.Acrylic:
-                ApplyAcrylic(window, acrylicLayer);
-                break;
-            case AppWindowBackdropMode.Mica:
-                ApplyMica(window, acrylicLayer, MicaKind.Base);
-                break;
-            case AppWindowBackdropMode.MicaAlt:
-                ApplyMica(window, acrylicLayer, MicaKind.BaseAlt);
-                break;
-            default:
-                ApplySystemDefault(window, acrylicLayer);
-                break;
-        }
-    }
-
-    private static void ApplyAcrylic(Window window, Border acrylicLayer)
-    {
-        ApplyDesktopAcrylicFallback(window);
-        HideAcrylicLayer(acrylicLayer);
-    }
-
-    private static void ApplyMica(Window window, Border acrylicLayer, MicaKind kind)
-    {
-        HideAcrylicLayer(acrylicLayer);
-
-        try
-        {
-            if (MicaController.IsSupported())
-            {
-                window.SystemBackdrop = new MicaBackdrop { Kind = kind };
-                return;
-            }
-        }
-        catch { /* ignore */ }
-
-        ApplyDesktopAcrylicFallback(window);
-    }
-
-    private static void ApplySystemDefault(Window window, Border acrylicLayer)
-    {
-        HideAcrylicLayer(acrylicLayer);
-
-        try
-        {
-            if (MicaController.IsSupported())
-            {
-                window.SystemBackdrop = new MicaBackdrop { Kind = MicaKind.Base };
-                return;
-            }
-        }
-        catch { /* ignore */ }
-
-        ApplyDesktopAcrylicFallback(window);
-    }
-
-    private static void ApplyDesktopAcrylicFallback(Window window)
-    {
-        try { window.SystemBackdrop = new DesktopAcrylicBackdrop(); }
-        catch { /* оставляем фон по умолчанию */ }
-    }
-
-    private static void HideAcrylicLayer(Border acrylicLayer) =>
-        acrylicLayer.Visibility = Visibility.Collapsed;
 
     private static Color ScaleAlpha(Color color, float scale)
     {

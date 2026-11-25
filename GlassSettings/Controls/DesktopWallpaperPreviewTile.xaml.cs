@@ -46,10 +46,10 @@ public sealed partial class DesktopWallpaperPreviewTile : UserControl
         ApplyPreviewImage(wallpaperPath, animate);
     }
 
-    public void ForceRefreshPreview(string? wallpaperPath = null)
+    public void ForceRefreshPreview(string? wallpaperPath = null, bool animate = true)
     {
         var identity = ResolveIdentity(wallpaperPath);
-        var animate = _lastIdentity is not null;
+        animate = animate && _lastIdentity is not null;
         _lastIdentity = identity;
         ApplyPreviewImage(wallpaperPath, animate);
     }
