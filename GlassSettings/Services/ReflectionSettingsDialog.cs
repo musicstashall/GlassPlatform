@@ -328,6 +328,9 @@ public static class ReflectionSettingsDialog
                     // already visible, so the swap happens inside the same layout pass.
                     body.Children.Add(replacement);
                     body.Children.Move((uint)body.Children.IndexOf(replacement), (uint)index);
+                    // Move shifts the old preview down; it must leave the tree, or the
+                    // dialog shows both the stale and the new monitor layout at once.
+                    body.Children.Remove(old);
                     preview = replacement;
                     old.Dispose();
                     previewTree = new object(); // Invalidate decodes still in flight for the old tree.

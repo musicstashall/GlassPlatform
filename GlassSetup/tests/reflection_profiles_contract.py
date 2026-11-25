@@ -76,6 +76,9 @@ assert 'args.DisplayChanged' in dialog and 'var replacement = new ReflectionDesk
 assert 'CloseDismissed()' not in dialog
 assert 'old.Dispose()' in dialog and 'preview.Dispose()' in dialog
 assert 'body.Children.Move((uint)body.Children.IndexOf(replacement), (uint)index)' in dialog
+# the displaced old preview must be removed, otherwise both layouts stay visible
+assert 'body.Children.Remove(old);' in dialog
+assert dialog.index('body.Children.Move(') < dialog.index('body.Children.Remove(old);') < dialog.index('initialProfile = replacement.ProfileKey')
 assert '!ReferenceEquals(treeAtStart, previewTree)' in dialog
 assert 'initialProfile = replacement.ProfileKey' in dialog
 assert 'ReflectionDisplayProfile.Capture().Key == initialProfile' in dialog
