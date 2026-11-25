@@ -9,6 +9,13 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def decode_rgba(path, expected_size):
+    # Preserve historical alpha/canvas goldens by synthesizing the two old paint
+    # presets from the single asset; paired resource files must no longer exist.
+    lite_preset = path.stem.endswith('_Lite')
+    for suffix in ('_Dark', '_Lite'):
+        if path.stem.endswith(suffix):
+            path = path.with_name(path.stem[:-len(suffix)] + path.suffix)
+            break
     data = path.read_bytes()
     assert data[:8] == b'\x89PNG\r\n\x1a\n'
     offset, compressed, count = 8, bytearray(), 0
@@ -49,6 +56,9 @@ def decode_rgba(path, expected_size):
             row[x] = (row[x] + predictor) & 255
         pixels.extend(row)
         previous = row
+    if lite_preset:
+        for i in range(0, len(pixels), 4):
+            pixels[i:i + 3] = bytes((160, 160, 160))
     return pixels
 
 
@@ -78,7 +88,7 @@ for name in ('FrostWeave', 'DiagonalWeave'):
     for channel in range(3):
         assert set(dark[channel::4]) == {0}
         assert set(lite[channel::4]) == {160}
-print('PASS: RGBA pairs, 02 minimal 8x8 cell and 160% canvas regression hashes')
+print('PASS: unified source/preset colors, 02 minimal 8x8 cell and 160% canvas regression hashes')
 
 paths = (ROOT / 'GlassSettings/Core/Platform/PlatformPaths.cs').read_text()
 service = (ROOT / 'GlassSettings/Services/ReflectionTextureService.cs').read_text()
@@ -87,8 +97,8 @@ assert 'SpecialFolder.CommonApplicationData' in paths
 assert '"OpenGlass", "Presets", "Textured"' in paths
 assert 'var output = Publish(target);' in service
 assert 'PlatformPaths.ReflectionAppliedDirectory' in service
-assert service.index('Inventory(directory);') < service.index('File.Delete(file)')
-assert service.index('File.Delete(file)') < service.index('File.Copy(cachedImage, temporary')
+assert 'Inventory(directory)' not in service and 'File.Delete(file)' not in service
+assert 'profile.Key + ".png"' in service
 assert service.index('File.Copy(cachedImage, temporary') < service.index('File.Move(temporary, target', service.index('private static string Publish'))
 assert 'FileAttributes.ReparsePoint' in service
 assert 'Directory.Delete(directory' not in service
@@ -97,7 +107,7 @@ for language in ('ru-RU', 'en-US'):
     tree = ET.parse(ROOT / f'GlassSettings/Strings/{language}/Resources.resw')
     for key in ('Dialog_ReflectionPrepareFailedTitle', 'Dialog_ReflectionPrepareFailedBody'):
         assert tree.find(f"data[@name='{key}']/value").text
-print('PASS: ProgramData destination, cleanup before copying, localized failure UI')
+print('PASS: ProgramData destination, profile-preserving atomic copy, localized failure UI')
 
 control = (ROOT / 'GlassSettings/Controls/ReflectionImageTile.xaml.cs').read_text()
 assert 'ReflectionTextureService.CreatePreviewAsync(FilePath)' in control
@@ -122,7 +132,7 @@ assert basket_dark[3::4] == basket_lite[3::4] == expected_alpha
 for channel in range(3):
     assert set(basket_dark[channel::4]) == {0}
     assert set(basket_lite[channel::4]) == {160}
-print('PASS: approved MicroBasket 8x8 geometry, paired alpha and Dark/Lite colors')
+print('PASS: approved MicroBasket 8x8 geometry, single alpha source and synthesized Dark/Lite presets')
 
 fine_dark = decode_rgba(assets / 'FineDiagonal_Dark.png', (3, 3))
 fine_lite = decode_rgba(assets / 'FineDiagonal_Lite.png', (3, 3))
@@ -131,7 +141,7 @@ assert fine_dark[3::4] == fine_lite[3::4] == expected_fine_alpha
 for channel in range(3):
     assert set(fine_dark[channel::4]) == {0}
     assert set(fine_lite[channel::4]) == {160}
-print('PASS: approved FineDiagonal 3x3 geometry, paired alpha and Dark/Lite colors')
+print('PASS: approved FineDiagonal 3x3 geometry, single alpha source and synthesized Dark/Lite presets')
 
 dragon_dark = decode_rgba(assets / 'DragonScale_Dark.png', (8, 8))
 dragon_lite = decode_rgba(assets / 'DragonScale_Lite.png', (8, 8))
@@ -143,7 +153,7 @@ assert dragon_dark[3::4] == dragon_lite[3::4] == expected_dragon
 for channel in range(3):
     assert set(dragon_dark[channel::4]) == {0}
     assert set(dragon_lite[channel::4]) == {160}
-print('PASS: DragonScale 8x8 geometry, paired alpha and Dark/Lite colors')
+print('PASS: DragonScale 8x8 geometry, single alpha source and synthesized Dark/Lite presets')
 
 chevron_dark = decode_rgba(assets / 'MicroChevron_Dark.png', (8, 8))
 chevron_lite = decode_rgba(assets / 'MicroChevron_Lite.png', (8, 8))
@@ -153,7 +163,7 @@ assert chevron_dark[3::4] == chevron_lite[3::4] == expected_chevron
 for channel in range(3):
     assert set(chevron_dark[channel::4]) == {0}
     assert set(chevron_lite[channel::4]) == {160}
-print('PASS: approved MicroChevron geometry and Dark/Lite pair')
+print('PASS: approved MicroChevron geometry and synthesized theme presets')
 
 maze_dark = decode_rgba(assets / 'CircuitMaze_Dark.png', (12, 12))
 maze_lite = decode_rgba(assets / 'CircuitMaze_Lite.png', (12, 12))
@@ -174,7 +184,7 @@ assert maze_dark[3::4] == maze_lite[3::4] == expected_maze
 for channel in range(3):
     assert set(maze_dark[channel::4]) == {0}
     assert set(maze_lite[channel::4]) == {160}
-print('PASS: approved CircuitMaze geometry and Dark/Lite pair')
+print('PASS: approved CircuitMaze geometry and synthesized theme presets')
 
 stitch_dark = decode_rgba(assets / 'CrossStitch_Dark.png', (8, 8))
 stitch_lite = decode_rgba(assets / 'CrossStitch_Lite.png', (8, 8))
@@ -193,7 +203,7 @@ assert stitch_dark[3::4] == stitch_lite[3::4] == expected_stitch
 for channel in range(3):
     assert set(stitch_dark[channel::4]) == {0}
     assert set(stitch_lite[channel::4]) == {160}
-print('PASS: approved dense CrossStitch geometry and Dark/Lite pair')
+print('PASS: approved dense CrossStitch geometry and synthesized theme presets')
 
 twill_dark = decode_rgba(assets / 'TwillWeave_Dark.png', (8, 8))
 twill_lite = decode_rgba(assets / 'TwillWeave_Lite.png', (8, 8))
@@ -208,8 +218,7 @@ assert twill_dark[3::4] == twill_lite[3::4] == expected_twill
 for channel in range(3):
     assert set(twill_dark[channel::4]) == {0}
     assert set(twill_lite[channel::4]) == {160}
-print('PASS: approved TwillWeave geometry and Dark/Lite pair')
+print('PASS: approved TwillWeave geometry and synthesized theme presets')
 
-assert 'appliedName = $"FrostWeave_{theme}.png"' in service
-assert 'appliedName = $"DiagonalWeave_{theme}.png"' in service
-print('PASS: named textures retain selection aliases for earlier generated filenames')
+assert not list(assets.glob('*_Dark.*')) and not list(assets.glob('*_Lite.*'))
+print('PASS: current sources have no theme suffix pairs')

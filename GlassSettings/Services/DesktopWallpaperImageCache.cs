@@ -12,6 +12,7 @@ internal static class DesktopWallpaperImageCache
     public const int DisplayDecodeWidth = 340;
 
     private static readonly object Gate = new();
+    private static readonly Dictionary<string, Task<ImageSource?>> MonitorSources = new(StringComparer.OrdinalIgnoreCase);
 
     private static string? _cachedIdentity;
     private static string? _cachedPath;
@@ -117,6 +118,7 @@ internal static class DesktopWallpaperImageCache
     {
         lock (Gate)
         {
+            MonitorSources.Clear();
             _cachedIdentity = null;
             _cachedPath = null;
             _cachedBytes = null;
@@ -207,6 +209,49 @@ internal static class DesktopWallpaperImageCache
         return ThemeImageUriHelper.TryCreateBitmap(resolved, DisplayDecodeWidth);
     }
 
+    internal sealed record MonitorDisplaySource(DesktopWallpaperCom.MonitorWallpaper Monitor, ImageSource? Source);
+
+    /// <summary>Per-monitor extension of the same observer-invalidated read/decode cache.</summary>
+    public static async Task<IReadOnlyList<MonitorDisplaySource>> GetMonitorDisplaySourcesAsync(DispatcherQueue dispatcherQueue)
+    {
+        // COM snapshot on the caller's UI apartment, image IO/decode through our common helpers.
+        var monitors = DesktopWallpaperCom.ReadMonitorWallpapers();
+        System.Diagnostics.Debug.WriteLine($"[ReflectionConfigure] wallpaper cache: snapshot ready, count={monitors.Count}");
+        var result = new List<MonitorDisplaySource>();
+        foreach (var monitor in monitors)
+        {
+            ImageSource? image = null;
+            if (!string.IsNullOrWhiteSpace(monitor.Path))
+            {
+                Task<ImageSource?> load;
+                lock (Gate)
+                {
+                    if (string.Equals(monitor.Path, _cachedPath, StringComparison.OrdinalIgnoreCase)
+                        && _sharedDisplaySource is not null)
+                        load = Task.FromResult<ImageSource?>(_sharedDisplaySource);
+                    else if (!MonitorSources.TryGetValue(monitor.Path, out load!))
+                    {
+                        load = LoadMonitorSourceAsync(dispatcherQueue, monitor.Path);
+                        MonitorSources[monitor.Path] = load;
+                    }
+                }
+                System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] wallpaper cache: await monitor bitmap");
+                image = await load;
+                System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] wallpaper cache: monitor bitmap ready");
+            }
+            result.Add(new(monitor, image));
+        }
+        return result;
+    }
+
+    private static async Task<ImageSource?> LoadMonitorSourceAsync(DispatcherQueue dispatcherQueue, string path)
+    {
+        System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] wallpaper bitmap: read file begin");
+        var bytes = await Task.Run(() => ReadWallpaperBytes(path));
+        System.Diagnostics.Debug.WriteLine($"[ReflectionConfigure] wallpaper bitmap: read file complete, bytes={bytes?.Length ?? 0}");
+        return bytes is { Length: > 0 } ? await DecodeDisplayBitmapAsync(dispatcherQueue, bytes) : null;
+    }
+
     public static byte[]? TryGetCachedBytes()
     {
         lock (Gate)
@@ -279,11 +324,14 @@ internal static class DesktopWallpaperImageCache
     {
         try
         {
+            System.Diagnostics.Debug.WriteLine($"[ReflectionConfigure] shared wallpaper decode: begin, bytes={bytes.Length}");
             var image = new BitmapImage { DecodePixelWidth = DisplayDecodeWidth };
             using var stream = new InMemoryRandomAccessStream();
             await stream.WriteAsync(bytes.AsBuffer());
             stream.Seek(0);
+            System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] shared wallpaper decode: SetSourceAsync begin");
             await image.SetSourceAsync(stream);
+            System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] shared wallpaper decode: SetSourceAsync complete");
             tcs.TrySetResult(image);
         }
         catch

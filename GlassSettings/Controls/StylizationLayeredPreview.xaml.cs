@@ -31,7 +31,6 @@ public sealed partial class StylizationLayeredPreview : UserControl
     private const double Inset = 30;
     private const int AtlasLayerIndex = 4;
     private const int WallpaperCrossfadeMs = WallpaperPreviewCrossfade.DefaultCrossfadeDurationMs;
-    private const double ReflectionBaseOpacity = 0.5;
     private const double MaterialBaseOpacity = 0.35;
 
     private readonly ImageBrush _glassBlurBrush = new() { Stretch = Stretch.UniformToFill };
@@ -258,8 +257,7 @@ public sealed partial class StylizationLayeredPreview : UserControl
             return;
         }
 
-        var percent = ReadEffectPercent(ReflectionIntensityKey);
-        ReflectionTextureFill.Opacity = ReflectionBaseOpacity * (percent / 100.0);
+        ReflectionTextureFill.Opacity = CompositionPreviewRegistryStates.RuntimeReflectionOpacity;
     }
 
     private void ApplyMaterialLayerEffects(bool gateOn, bool hasTexture)
@@ -303,17 +301,8 @@ public sealed partial class StylizationLayeredPreview : UserControl
             applyWallpaper: false);
     }
 
-    private DwmCompositionCascadePreview.PreviewState ResolveCompositionPreviewState()
-    {
-        var (vista, win7) = CompositionPreviewRegistryStates.BuildFromRuntimeEffective();
-        if (IsWin7GlassMode())
-            return win7;
-
-        return vista with { ShowInactiveSplit = false };
-    }
-
-    private static bool IsWin7GlassMode() =>
-        (DwmRegistryStore.ReadEffectiveDword("GlassType") ?? 0) == 1;
+    private DwmCompositionCascadePreview.PreviewState ResolveCompositionPreviewState() =>
+        CompositionPreviewRegistryStates.BuildRuntimeActive();
 
     private void ApplyGlassTintAndChrome(DwmCompositionCascadePreview.PreviewState state)
     {
@@ -470,14 +459,8 @@ public sealed partial class StylizationLayeredPreview : UserControl
         _hasWallpaperImage = source is not null;
     }
 
-    private static WriteableBitmap CreateWriteableBitmap(int width, int height, byte[] pixels)
-    {
-        var bitmap = new WriteableBitmap(width, height);
-        using var stream = bitmap.PixelBuffer.AsStream();
-        stream.Seek(0, SeekOrigin.Begin);
-        stream.Write(pixels, 0, pixels.Length);
-        return bitmap;
-    }
+    private static WriteableBitmap CreateWriteableBitmap(int width, int height, byte[] pixels) =>
+        CompositionWallpaperPipelineBuilder.CreateBitmap(width, height, pixels);
 
     private static WriteableBitmap CreateWriteableBitmap(CompositionWallpaperPipelineBuilder.BlurBuffer buffer) =>
         CreateWriteableBitmap(buffer.Width, buffer.Height, buffer.Pixels);

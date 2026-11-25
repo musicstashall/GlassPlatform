@@ -3,6 +3,8 @@ namespace GlassSettings.Services;
 /// <summary>Детализация изменений рабочего стола (обои / тема / акцент / системные шрифты).</summary>
 public sealed class DesktopEnvironmentChangedEventArgs : EventArgs
 {
+    public bool DisplayChanged { get; init; }
+
     public bool WallpaperChanged { get; init; }
 
     public bool ThemeChanged { get; init; }

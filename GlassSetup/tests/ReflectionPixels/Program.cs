@@ -154,3 +154,11 @@ Check(new ReflectionRenderSettings(Softness: 99).Normalize().Softness == 20, "so
 byte[] tinyBlur = [160, 160, 160, 100];
 ReflectionPixelEffects.ApplyAlpha(tinyBlur, 1, 1, new(Softness: 20), wrap: true);
 Check(tinyBlur.SequenceEqual(new byte[] { 160, 160, 160, 100 }), "20px blur safely wraps a one-pixel texture");
+
+var tinted = (byte[])original.Clone();
+ReflectionPixelEffects.Colorize(tinted, 0x123456u);
+Check(tinted[0] == 0x56 && tinted[1] == 0x34 && tinted[2] == 0x12, "tint uses selected RGB in BGRA buffer");
+Check(tinted[3] == original[3] && tinted[7] == original[7], "tint preserves pattern alpha");
+ReflectionPixelEffects.ApplyAlpha(tinted, 2, 1, new(OpacityPercent: 50), wrap: true);
+Check(tinted[3] == 100 && tinted[7] == 25, "picker opacity multiplies original alpha");
+Check(new ReflectionRenderSettings(ColorRgb: 0xFF123456).Normalize().ColorRgb == 0x123456, "stored color excludes opacity bits");

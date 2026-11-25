@@ -1144,7 +1144,7 @@
   <data name="Reflection_Configure" xml:space="preserve"><value>Configure</value></data>
   <data name="Reflection_SettingScale" xml:space="preserve"><value>Scale, %</value></data>
   <data name="Reflection_SettingOpacity" xml:space="preserve"><value>Opacity, %</value></data>
-  <data name="Reflection_SettingSoftness" xml:space="preserve"><value>Edge softness, px (0–20)</value></data>
+  <data name="Reflection_SettingSoftness" xml:space="preserve"><value>Blur, px</value></data>
   <data name="Reflection_Reset" xml:space="preserve"><value>Defaults</value></data>
   <data name="Reflection_SettingNoise" xml:space="preserve"><value>Noise, %</value></data>
   <data name="Reflection_SettingNoiseType" xml:space="preserve"><value>Grain type</value></data>
@@ -1158,4 +1158,11 @@
   <data name="Reflection_GroupNoise" xml:space="preserve"><value>Noise</value></data>
   <data name="Reflection_NoiseSand" xml:space="preserve"><value>Fine grain</value></data>
   <data name="Reflection_NoiseNone" xml:space="preserve"><value>No noise</value></data>
+  <data name="Reflection_ColorTitle" xml:space="preserve"><value>Color and opacity</value></data>
+  <data name="Reflection_PresetDark" xml:space="preserve"><value>Dark theme</value></data>
+  <data name="Reflection_PresetLight" xml:space="preserve"><value>Light theme</value></data>
+  <data name="Reflection_ColorGroup" xml:space="preserve"><value>Color</value></data>
+  <data name="Reflection_SetColor" xml:space="preserve"><value>View colors</value></data>
+  <data name="Reflection_PresetAccent" xml:space="preserve"><value>Windows accent color</value></data>
+  <data name="Reflection_PresetCustom" xml:space="preserve"><value>Choose a custom color</value></data>
 </root>

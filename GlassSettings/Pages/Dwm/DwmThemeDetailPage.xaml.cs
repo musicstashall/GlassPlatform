@@ -74,6 +74,9 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
     private DispatcherQueueTimer? _themeReloadTimer;
     private bool _reflectionUiReady;
     private int _themeReloadGeneration;
+    private int _displayReflectionRevision;
+    private string? _pendingDisplayReflectionSource;
+    private ReflectionRenderState.State? _lastAppliedReflectionRecipe;
     private string? _lastThemeFilePath;
     private DwmRegistryHive _hive = DwmRegistryHive.Hkcu;
 
@@ -419,11 +422,55 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         if (!IsLoaded)
             return;
 
+        if (e.DisplayChanged)
+            _ = RebindReflectionToDisplayAsync();
         if (e.ThemeChanged)
             ScheduleThemeChangeReload();
 
         if (e.WallpaperChanged)
             ScheduleWallpaperLayerRefresh();
+    }
+
+    private async Task RebindReflectionToDisplayAsync()
+    {
+        if (_hive != DwmRegistryHive.Hkcu) { Reload(); return; }
+        int revision = ++_displayReflectionRevision;
+        var activeAtSignal = DwmRegistryStore.ReadString(_hive, ReflectionRegistryKey);
+        if (!ReflectionRenderState.IsManagedOutput(activeAtSignal)) { Reload(); return; }
+        var previous = ReflectionRenderState.ReadForOutput(_currentReflectionPath) ?? _lastAppliedReflectionRecipe;
+        if (previous is null) { Reload(); return; }
+        string? selectedPath = _currentReflectionPath;
+        try
+        {
+            string profile = ReflectionDisplayProfile.Capture().Key;
+            var matching = ReflectionRenderState.Read();
+            var recipe = matching ?? previous;
+            _pendingDisplayReflectionSource = recipe.Source;
+            UpdateReflectionTileSelection();
+            bool StillSelected()
+            {
+                if (!IsLoaded || revision != _displayReflectionRevision || _hive != DwmRegistryHive.Hkcu) return false;
+                var active = NormalizePath(DwmRegistryStore.ReadString(_hive, ReflectionRegistryKey));
+                // Host may already have restored this profile, or selected default
+                // while GS builds the missing canvas. Never replace an external image.
+                return ReflectionRenderState.IsManagedOutput(active)
+                    && (SamePath(active, selectedPath) || (matching is not null && SamePath(active, matching.Output))
+                        || string.IsNullOrWhiteSpace(active));
+            }
+            await ApplyReflectionSourceAsync(recipe.Source, recipe.Settings, profile, StillSelected);
+        }
+        catch (Exception error)
+        {
+            System.Diagnostics.Trace.TraceWarning("Reflection display rebind failed: {0}", error);
+        }
+        finally
+        {
+            if (revision == _displayReflectionRevision)
+            {
+                _pendingDisplayReflectionSource = null;
+                if (IsLoaded) Reload();
+            }
+        }
     }
 
     private void ScheduleThemeChangeReload()
@@ -728,6 +775,8 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
     {
         _loading = true;
         _currentReflectionPath = NormalizePath(DwmRegistryStore.ReadStringForPage(_hive, ReflectionRegistryKey));
+        var appliedRecipe = ReflectionRenderState.ReadForOutput(_currentReflectionPath);
+        if (appliedRecipe is not null) _lastAppliedReflectionRecipe = appliedRecipe;
         _currentMaterialPath = NormalizePath(DwmRegistryStore.ReadStringForPage(_hive, MaterialRegistryKey));
         _currentAtlasPath = NormalizePath(DwmRegistryStore.ReadStringForPage(_hive, AtlasRegistryKey));
         if (string.IsNullOrWhiteSpace(_currentAtlasPath))
@@ -801,9 +850,10 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
 
     private void UpdateReflectionTileSelection()
     {
-        var source = _currentReflectionPath is { } path ? ReflectionTextureService.ResolveSource(path) : null;
+        var source = _pendingDisplayReflectionSource
+            ?? (_currentReflectionPath is { } path ? ReflectionTextureService.ResolveSource(path) : null);
         UpdateDefaultAwareTileSelection(_reflectionItems, source, DefaultReflectionTilePath);
-        _reflectionConfigureButton.IsEnabled = source is not null &&
+        _reflectionConfigureButton.IsEnabled = _pendingDisplayReflectionSource is null && source is not null &&
             _reflectionItems.Any(item => SamePath(item.FilePath, source)) &&
             ReflectionCategory(source) == ReflectionCategoryPivot.SelectedIndex &&
             (ReflectionTextureService.IsTexture(source) || SvgReflectionRenderer.IsPattern(source));
@@ -828,8 +878,21 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         if (_currentReflectionPath is null) return;
         var source = ReflectionTextureService.ResolveSource(_currentReflectionPath);
         if (!ReflectionTextureService.IsTexture(source) && !SvgReflectionRenderer.IsPattern(source)) return;
-        var settings = await ReflectionSettingsDialog.ShowAsync(source);
-        if (settings is not null) await ApplyReflectionSourceAsync(source, settings);
+        System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] click: opening dialog");
+        try
+        {
+            string profile = ReflectionDisplayProfile.Capture().Key;
+            var settings = await ReflectionSettingsDialog.ShowAsync(source);
+            System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] dialog: closed");
+            if (settings is not null) await ApplyReflectionSourceAsync(source, settings, profile);
+        }
+        catch (Exception error)
+        {
+            // Preserve normal unhandled-error reporting after emitting the full
+            // managed exception; never silently treat a broken dialog as Cancel.
+            System.Diagnostics.Debug.WriteLine($"[ReflectionConfigure] failed: {error}");
+            throw;
+        }
     }
 
     private void UpdateMaterialTileSelection() =>
@@ -1113,23 +1176,33 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         await ApplyReflectionSourceAsync(model.FilePath);
     }
 
-    private async Task ApplyReflectionSourceAsync(string source, ReflectionRenderSettings? settings = null)
+    private async Task ApplyReflectionSourceAsync(string source, ReflectionRenderSettings? settings = null, string? expectedProfile = null, Func<bool>? canApply = null)
     {
+        if (canApply is null)
+        {
+            ++_displayReflectionRevision;
+            _pendingDisplayReflectionSource = null;
+            _lastAppliedReflectionRecipe = null;
+        }
         Exception? preparationError = null;
         await PageShell.Operations.RunSequenceAsync(async seq =>
         {
             await seq.RegistryMutationAsync(async () =>
             {
                 // Generate successfully before changing the applied registry path.
+                if (canApply is not null && !canApply()) return;
                 string path;
-                try { path = await ReflectionTextureService.PrepareAsync(source, settings); }
+                try
+                {
+                    path = await ReflectionTextureService.PrepareAsync(source, settings, expectedProfile);
+                    TrySelectCustomImage(ReflectionRegistryKey, path, refreshNotice: false, canApply: canApply);
+                }
                 catch (Exception error)
                 {
                     System.Diagnostics.Trace.TraceError("Reflection generation failed: {0}", error);
                     preparationError = error;
                     return;
                 }
-                TrySelectCustomImage(ReflectionRegistryKey, path, refreshNotice: false);
             });
             await seq.NoticeSyncAsync(() => PageShell.RefreshSessionNoticeProgrammatic());
         });
@@ -1204,10 +1277,34 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         reloadCollection();
     }
 
-    private void TrySelectCustomImage(string registryKey, string filePath, bool refreshNotice = true)
+    private void TrySelectCustomImage(string registryKey, string filePath, bool refreshNotice = true, Func<bool>? canApply = null)
+    {
+        if (registryKey != ReflectionRegistryKey)
+        {
+            SelectCustomImageCore(registryKey, filePath, refreshNotice);
+            return;
+        }
+        using var publication = new Mutex(false, ReflectionDisplayProfile.PublicationMutex);
+        bool held;
+        try { held = publication.WaitOne(TimeSpan.FromSeconds(10)); }
+        catch (AbandonedMutexException) { held = true; }
+        if (!held) throw new IOException("Reflection profile is busy.");
+        try
+        {
+            if (canApply is not null && !canApply()) return;
+            if (SamePath(Path.GetDirectoryName(filePath), GlassSettings.Core.Platform.PlatformPaths.ReflectionAppliedDirectory)
+                && !SamePath(ReflectionRenderState.Read()?.Output, filePath))
+                throw new IOException("Display profile changed before Apply; reopen reflection settings.");
+            SelectCustomImageCore(registryKey, filePath, refreshNotice);
+        }
+        finally { publication.ReleaseMutex(); }
+    }
+
+    private void SelectCustomImageCore(string registryKey, string filePath, bool refreshNotice)
     {
         if (IsDefaultSelection(registryKey, filePath))
         {
+            if (registryKey == ReflectionRegistryKey) ReflectionRenderState.ReleaseManagement();
             SettingsSession.Current.DeleteDwmValue(_hive, registryKey, liveDwm: true);
             PageSessionNoticeState.InvalidateDismissOnMutation();
             HomeSessionNoticeState.InvalidateDismissOnMutation();
@@ -1226,6 +1323,12 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
             SettingsSession.Current.DeleteDwmValue(_hive, LegacyAtlasRegistryKey, liveDwm: false);
         }
 
+        if (registryKey == ReflectionRegistryKey)
+        {
+            if (_hive == DwmRegistryHive.Hkcu && ReflectionRenderState.Read()?.Output is { } managed && SamePath(managed, filePath))
+                ReflectionRenderState.MarkManaged(filePath);
+            else ReflectionRenderState.ReleaseManagement();
+        }
         PageSessionNoticeState.InvalidateDismissOnMutation();
         HomeSessionNoticeState.InvalidateDismissOnMutation();
         Reload();

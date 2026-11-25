@@ -20,10 +20,10 @@ assert 'RenderPng(source, 148, 92)' in renderer
 assert 'new Svg.SvgUnit(width)' in renderer and 'document.Draw(width, height)' in renderer
 assert 'bitmap.Save(output, ImageFormat.Png)' in renderer
 assert 'ReflectionRenderState.Save(source, output' in service
-assert 'Path.ChangeExtension(source, ".png")' in service
-assert 'Path.ChangeExtension(item.FilePath, ".png")' in service
-assert 'PlatformPaths.ReflectionPatternAppliedDirectory' in service
-assert '"OpenGlass", "Presets", "Pattern"' in paths
+assert 'profile.Key + ".png"' in service
+assert 'Path.GetFullPath(state.Source)' in service
+assert 'ReflectionPatternAppliedDirectory' not in service
+assert '"OpenGlass", "Presets", "Pattern"' not in paths
 assert 'var directory = Path.GetFullPath(PlatformPaths.ReflectionAppliedDirectory);' in service
 assert 'DtdProcessing.Prohibit' in renderer and 'XmlResolver = null' in renderer
 assert 'OfType<XProcessingInstruction>()' in renderer
@@ -38,34 +38,26 @@ assert not {'href', 'style', 'onload', 'onclick'} & attributes
 print('PASS: SVG catalog/preview/PNG pipeline, unified generated output, registry/source matching and restricted SVG policy wiring')
 print('NOTE: no Windows compilation, SVG.NET render, WIC or DWM runtime exercised by this test')
 
-# Accepted SVG test collection: true vectors, transparent canvas, matching pairs.
+# Unified vector sources retain the exact geometry/alpha of the former Dark asset.
 ns = '{http://www.w3.org/2000/svg}'
 assets = root / 'OpenGlass/Resources/GlassReflection/Pattern'
 assert all(path.suffix.lower() == '.svg' for path in assets.iterdir() if path.is_file())
+assert not list(assets.glob('*_Dark.*')) and not list(assets.glob('*_Lite.*'))
 for name in ('SilkWave', 'FoldedVeil', 'CornerGlow', 'PrismGlints', 'LiquidCaustics'):
-    documents = []
-    for theme, color in (('Dark', '#000000'), ('Lite', '#A0A0A0')):
-        path = assets / f'{name}_{theme}.svg'
-        assert path.stat().st_size <= 262144
-        svg = ET.parse(path).getroot()
-        assert svg.tag == ns + 'svg'
-        assert svg.get('viewBox') == '0 0 1920 1080'
-        assert svg.get('preserveAspectRatio') == 'none'
-        nodes = list(svg.iter())
-        assert len(nodes) <= 512
-        assert any(node.tag == ns + 'stop' for node in nodes)
-        for node in nodes:
-            assert node.tag.startswith(ns) and node.tag[len(ns):] in elements
-            assert set(node.attrib) <= attributes
-            for key, value in node.attrib.items():
-                if 'url' in value.lower():
-                    assert value.startswith('url(#') and value.endswith(')')
-                if key == 'stop-color':
-                    assert value == color
-        # Normalize only paint color: geometry and all opacity values must be identical.
-        for node in nodes:
-            if 'stop-color' in node.attrib:
-                node.set('stop-color', '#NORMALIZED')
-        documents.append(ET.tostring(svg))
-    assert documents[0] == documents[1]
-print('PASS: Accepted SVG pairs comply with renderer profile and preserve paired geometry/opacity')
+    path = assets / f'{name}.svg'
+    assert path.stat().st_size <= 262144
+    svg = ET.parse(path).getroot()
+    assert svg.tag == ns + 'svg'
+    assert svg.get('viewBox') == '0 0 1920 1080'
+    assert svg.get('preserveAspectRatio') == 'none'
+    nodes = list(svg.iter())
+    assert len(nodes) <= 512 and any(node.tag == ns + 'stop' for node in nodes)
+    for node in nodes:
+        assert node.tag.startswith(ns) and node.tag[len(ns):] in elements
+        assert set(node.attrib) <= attributes
+        for key, value in node.attrib.items():
+            if 'url' in value.lower():
+                assert value.startswith('url(#') and value.endswith(')')
+            if key == 'stop-color':
+                assert value == '#000000'
+print('PASS: single SVG source per composition complies with renderer profile; color is generated')

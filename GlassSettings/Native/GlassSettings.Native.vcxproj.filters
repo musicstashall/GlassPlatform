@@ -26,4 +26,5 @@
     <ClCompile Include="SecureUxThemeNative.cpp">
     </ClCompile>
   </ItemGroup>
+  <ItemGroup><ClCompile Include="ReflectionProfilesNative.cpp" /></ItemGroup>
 </Project>

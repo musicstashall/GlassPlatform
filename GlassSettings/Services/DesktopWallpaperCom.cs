@@ -870,6 +870,70 @@ internal static class DesktopWallpaperCom
         }
     }
 
+    internal sealed record MonitorWallpaper(int X, int Y, int Width, int Height,
+        string Path, uint BackgroundColorRef, int Position);
+
+    // Shared COM adapter: consumers must not instantiate their own IDesktopWallpaper.
+    public static IReadOnlyList<MonitorWallpaper> ReadMonitorWallpapers()
+    {
+        IDesktopWallpaper? wall = null;
+        try
+        {
+            System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] wallpaper COM: create");
+            wall = CreateWallpaper();
+            System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] wallpaper COM: GetBackgroundColor");
+            wall.GetBackgroundColor(out var background);
+            System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] wallpaper COM: GetPosition");
+            wall.GetPosition(out var position);
+            System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] wallpaper COM: GetMonitorDevicePathCount");
+            wall.GetMonitorDevicePathCount(out var count);
+            System.Diagnostics.Debug.WriteLine($"[ReflectionConfigure] wallpaper COM: count={count}");
+            var result = new List<MonitorWallpaper>();
+            for (uint index = 0; index < count; index++)
+            {
+                System.Diagnostics.Debug.WriteLine($"[ReflectionConfigure] wallpaper COM: GetMonitorDevicePathAt({index})");
+                wall.GetMonitorDevicePathAt(index, out var idPointer);
+                try
+                {
+                    var id = Marshal.PtrToStringUni(idPointer);
+                    if (string.IsNullOrEmpty(id)) continue;
+                    System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] wallpaper COM: GetMonitorRECT");
+                    wall.GetMonitorRECT(id, out var rect);
+                    System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] wallpaper COM: GetWallpaper");
+                    wall.GetWallpaper(id, out var pathPointer);
+                    System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] wallpaper COM: copy returned path");
+                    try
+                    {
+                        result.Add(new(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top,
+                            Marshal.PtrToStringUni(pathPointer) ?? "", background, position));
+                    }
+                    finally
+                    {
+                        System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] wallpaper COM: free wallpaper path");
+                        if (pathPointer != IntPtr.Zero) Marshal.FreeCoTaskMem(pathPointer);
+                    }
+                }
+                finally
+                {
+                    System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] wallpaper COM: free monitor ID");
+                    if (idPointer != IntPtr.Zero) Marshal.FreeCoTaskMem(idPointer);
+                }
+            }
+            return result;
+        }
+        catch (Exception error)
+        {
+            System.Diagnostics.Debug.WriteLine($"[ReflectionConfigure] wallpaper COM failed: {error}");
+            return Array.Empty<MonitorWallpaper>();
+        }
+        finally
+        {
+            System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] wallpaper COM: release object");
+            if (wall is not null) Marshal.ReleaseComObject(wall);
+            System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] wallpaper COM: complete");
+        }
+    }
+
     /// <summary>Сплошной цвет: COLORREF (0x00BBGGRR).</summary>
     public static bool TryGetBackgroundColor(out uint colorRef)
     {

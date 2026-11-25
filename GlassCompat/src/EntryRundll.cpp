@@ -1,4 +1,5 @@
 #include "CompatPch.h"
+#include "ReflectionProfileHost.h"
 #include <GlassStop.h>
 #include "GlassCompat.h"
 #include "CrashGuard.h"
@@ -84,6 +85,9 @@ namespace
     static LRESULT CALLBACK HostCloseSinkWndProc(
         HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) noexcept
     {
+        // Broadcast display/settings messages may be sent synchronously and never
+        // appear in PeekMessage. Observe them in the existing top-level sink.
+        ReflectionProfileHost::OnMessage(msg);
         switch (msg)
         {
         case WM_CLOSE:
@@ -1193,6 +1197,7 @@ void CALLBACK Main(HWND, HINSTANCE hInstance, LPSTR lpszCmdLine, int)
     // Окно должно быть на том же потоке, что и цикл сообщений ниже.
     s_stopFromCloseMessage = false;
     s_hostCloseSinkHwnd = CreateHostCloseSinkWindow(hSelf, hStopEvent);
+    ReflectionProfileHost::Start(hSelf);
 #if defined(GLASS_ENABLE_LOGGING) && !defined(GLASS_LOG_SERVER)
     if (!s_hostCloseSinkHwnd)
     {
@@ -1246,6 +1251,7 @@ void CALLBACK Main(HWND, HINSTANCE hInstance, LPSTR lpszCmdLine, int)
 #endif
         }
 
+        ReflectionProfileHost::Poll();
         const ULONGLONG now = GetTickCount64();
         if (now >= s_nextCoreWindowInjectMs)
         {
@@ -1257,6 +1263,7 @@ void CALLBACK Main(HWND, HINSTANCE hInstance, LPSTR lpszCmdLine, int)
     }
 
 done:
+    ReflectionProfileHost::Stop();
     DestroyHostCloseSinkWindow(hSelf);
 #if defined(GLASS_ENABLE_LOGGING) && !defined(GLASS_LOG_SERVER)
     Shared::Log::GlassLogClient::Instance().Stop();

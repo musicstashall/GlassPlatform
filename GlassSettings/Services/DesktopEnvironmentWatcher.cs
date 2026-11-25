@@ -56,6 +56,8 @@ public sealed class DesktopEnvironmentWatcher : IDisposable
     private bool _pendingTheme;
     private bool _pendingAccent;
     private bool _pendingFonts;
+    private bool _pendingDisplay;
+    private string? _lastDisplayKey;
     /// <summary>WM_THEMECHANGED — форс ThemeChanged даже если CurrentTheme/mode ещё не обновились.</summary>
     private bool _forceThemeChanged;
     private string? _lastWallpaperSignal;
@@ -70,6 +72,8 @@ public sealed class DesktopEnvironmentWatcher : IDisposable
     public DesktopEnvironmentWatcher(DispatcherQueue dispatcherQueue)
     {
         _dispatcherQueue = dispatcherQueue;
+        try { _lastDisplayKey = ReflectionDisplayProfile.Capture().Key; }
+        catch (Exception error) { System.Diagnostics.Trace.TraceWarning("Display profile baseline: {0}", error.Message); }
         _subclassProc = OnSubclassMessage;
         _debounceTimer = dispatcherQueue.CreateTimer();
         _debounceTimer.Interval = TimeSpan.FromMilliseconds(110);
@@ -205,6 +209,11 @@ public sealed class DesktopEnvironmentWatcher : IDisposable
         UIntPtr uIdSubclass,
         UIntPtr dwRefData)
     {
+        if (uMsg is 0x007E or 0x02E0 or 0x0219) // display, DPI, device change
+        {
+            _pendingDisplay = true;
+            SchedulePending();
+        }
         if (uMsg == WM_THEMECHANGED)
         {
             // Паритет GlassCompat host: не ждать обновления CurrentTheme / COLOR_WINDOW.
@@ -220,6 +229,7 @@ public sealed class DesktopEnvironmentWatcher : IDisposable
             // Не читаем lParam через PtrToStringUni: PostMessage с мусорным указателем → AV на x86.
             // ImmersiveColorSet / accent покрывает WM_DWMCOLORIZATIONCOLORCHANGED.
             // Шрифты: SPI_SETNONCLIENTMETRICS + SpifSendChange → перерисовка MessageFont-превью.
+            _pendingDisplay = true;
             OnFontsSignal();
         }
 
@@ -267,6 +277,18 @@ public sealed class DesktopEnvironmentWatcher : IDisposable
         if (_disposed)
             return;
 
+        bool displayChanged = false;
+        if (_pendingDisplay)
+        {
+            _pendingDisplay = false;
+            try
+            {
+                string key = ReflectionDisplayProfile.Capture().Key;
+                displayChanged = _lastDisplayKey is not null && _lastDisplayKey != key;
+                _lastDisplayKey = key;
+            }
+            catch (Exception error) { System.Diagnostics.Trace.TraceWarning("Display profile: {0}", error.Message); }
+        }
         var wallpaperChanged = false;
         var themeChanged = false;
         var accentChanged = false;
@@ -318,11 +340,12 @@ public sealed class DesktopEnvironmentWatcher : IDisposable
             fontsChanged = true;
         }
 
-        if (!wallpaperChanged && !themeChanged && !accentChanged && !fontsChanged)
+        if (!wallpaperChanged && !themeChanged && !accentChanged && !fontsChanged && !displayChanged)
             return;
 
         Changed?.Invoke(this, new DesktopEnvironmentChangedEventArgs
         {
+            DisplayChanged = displayChanged,
             WallpaperChanged = wallpaperChanged,
             ThemeChanged = themeChanged,
             AccentChanged = accentChanged,
