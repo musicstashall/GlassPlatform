@@ -2,6 +2,7 @@
 #include <ShlObj.h>
 #include <bcrypt.h>
 #include <ReflectionProfileApi.h>
+#include <DebugLog.h>
 #include <algorithm>
 #include <string>
 #include <vector>
@@ -149,6 +150,8 @@ namespace
         Snapshot current{}; current.size = sizeof(current);
         HRESULT result = CaptureSnapshot(&current);
         if (FAILED(result)) return result;
+        DebugLog(DBG_IMPORTANT, L"[GlassSettings][ReflectionProfiles] reconcile profile=%ls canvas=%ldx%ld monitors=%lu",
+            current.key, current.width, current.height, current.count);
         if (lastKey == current.key) return S_FALSE;
         HANDLE mutex = CreateMutexW(nullptr, FALSE, MutexName);
         if (!mutex) return HRESULT_FROM_WIN32(GetLastError());
@@ -159,6 +162,7 @@ namespace
             Key root, dwm;
             if (RegOpenKeyExW(HKEY_CURRENT_USER, RegistryRoot, 0, KEY_READ | KEY_WRITE | KEY_WOW64_64KEY, &root.value))
             {
+                DebugLog(DBG_NORMAL, L"[GlassSettings][ReflectionProfiles] skip: no HKCU profile state (no legacy adoption)");
                 lastKey = current.key;
                 ReleaseMutex(mutex); CloseHandle(mutex); return S_FALSE;
             }
@@ -167,7 +171,12 @@ namespace
             auto active = ReadString(dwm.value, L"CustomThemeReflection");
             DWORD managed = 0, bytes = sizeof(managed);
             RegGetValueW(root.value, nullptr, L"Managed", RRF_RT_REG_DWORD, nullptr, &managed, &bytes);
-            if (!managed || _wcsicmp(active.c_str(), owned.c_str())) { lastKey = current.key; result = S_FALSE; }
+            if (!managed || _wcsicmp(active.c_str(), owned.c_str()))
+            {
+                DebugLog(DBG_IMPORTANT, L"[GlassSettings][ReflectionProfiles] skip unmanaged: Managed=%lu active=%ls owned=%ls",
+                    managed, active.c_str(), owned.c_str());
+                lastKey = current.key; result = S_FALSE;
+            }
             else
             {
                 Key profile;
@@ -189,6 +198,8 @@ namespace
                             && name.find(current.key) != std::wstring::npos && ValidHash(candidate, ReadString(profile.value, L"OutputHash"), current.width, current.height)) output = candidate;
                     }
                 }
+                DebugLog(DBG_IMPORTANT, L"[GlassSettings][ReflectionProfiles] selection=%ls active=%ls output=%ls",
+                    output.empty() ? L"default (profile missing/not ready/invalid PNG)" : L"verified cached profile", active.c_str(), output.c_str());
                 Snapshot check{}; check.size = sizeof(check);
                 if (FAILED(CaptureSnapshot(&check)) || wcscmp(current.key, check.key)) throw static_cast<DWORD>(ERROR_RETRY);
                 if (_wcsicmp(active.c_str(), output.c_str()))
@@ -202,7 +213,10 @@ namespace
                     WriteString(root.value, L"ManagedOutput", output);
                     // Match GS reflection reload: address the Dwm window, never restart OG.
                     HWND window = FindWindowW(L"Dwm", nullptr);
-                    if (window) PostMessageW(window, WM_THEMECHANGED, 0, 0);
+                    const BOOL posted = window ? PostMessageW(window, WM_THEMECHANGED, 0, 0) : FALSE;
+                    DebugLog(posted ? DBG_IMPORTANT : DBG_WARNING,
+                        L"[GlassSettings][ReflectionProfiles] applied; Dwm=%p WM_THEMECHANGED posted=%d error=%lu",
+                        window, posted, posted ? ERROR_SUCCESS : (window ? GetLastError() : ERROR_NOT_FOUND));
                 }
                 lastKey = current.key; result = S_OK;
             }
@@ -227,6 +241,10 @@ extern "C" __declspec(dllexport) HRESULT WINAPI GlassSettings_TickReflectionProf
     if (!due || GetTickCount64() < due) return S_FALSE;
     due = 0;
     HRESULT result = Synchronize();
-    if (FAILED(result)) due = GetTickCount64() + 2000;
+    if (FAILED(result))
+    {
+        DebugLog(DBG_WARNING, L"[GlassSettings][ReflectionProfiles] reconcile failed hr=0x%08lX; retry scheduled", result);
+        due = GetTickCount64() + 2000;
+    }
     return result;
 }

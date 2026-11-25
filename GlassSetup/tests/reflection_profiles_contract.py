@@ -24,9 +24,12 @@ assert 'internal struct DisplayMonitor' in wrapper and 'new DisplayMonitor[32]' 
 assert 'Monitor[] Monitors)' not in wrapper.replace('DisplayMonitor[] Monitors)', '')
 for export in ('CaptureReflectionProfile', 'SignalReflectionDisplayChange', 'TickReflectionProfiles'):
     assert f'GlassSettings_{export}V1' in native and f'GlassSettings_{export}V1' in host
-assert 'IsWow64Process' in host and '|| wow) return' in host
+assert 'IsWow64Process' in host and '|| wow)' in host
 assert 'LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32' in host
-assert 'FILE_ATTRIBUTE_REPARSE_POINT' in host and 'if (!module) return;' in host
+assert 'FILE_ATTRIBUTE_REPARSE_POINT' in host and 'if (!module)' in host
+assert 'optional helper load failed' in host and 'helper ready:' in host
+assert 'skip unmanaged:' in native and 'selection=%ls active=%ls output=%ls' in native
+assert 'WM_THEMECHANGED posted=%d error=%lu' in native
 assert '_wcsicmp(path, target.c_str())' in host
 assert 'ReflectionProfileHost::OnMessage(msg);' in entry  # sent as well as posted messages
 assert 'ReflectionProfileHost::Start(hSelf)' in entry and 'ReflectionProfileHost::Poll()' in entry

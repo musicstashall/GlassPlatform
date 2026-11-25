@@ -506,3 +506,21 @@ COM-чтения для каждого DWM-сигнала. Intensity отраж�
 
 Layout строится из общего Native-снимка при открытии. При hot-plug/DPI-смене
 редактор закрывается без Apply; повторное открытие создаёт актуальный layout.
+
+### Диагностика hot-plug (лог пользователя 2026-11-15)
+
+Полученный фрагмент LogViewer: 1048 строк, 10:54:28.921–10:54:49.988,
+только PID 9732 (Explorer по описанию пользователя). В 10:54:41.196 и .904 —
+TaskbarCompat InvalidateSystemBrushSamples, в .237 и .944 —
+ReloadSettingsAndReapply; это не подтверждение перечитывания reflection в DWM.
+Записей выбора reflection-профиля/PNG в этом фрагменте нет. Причина наблюдаемого
+укрупнения текстуры этим логом **не установлена**; исходный лог после анализа удалён.
+
+В Debug-сборке добавлены подсистемы `GlassCompat / ReflectionProfiles` (optional
+loader, startup, входные сообщения) и `GlassSettings / ReflectionProfiles`
+(Native reconcile, ключ/размер canvas, ownership, default/cached selection,
+результат отправки WM_THEMECHANGED и ошибки). Обе выполняются в native-arch
+**host rundll32**, даже если модуль записи — GlassSettings. В LogViewer нужно
+захватывать host, а не только Explorer, с момента запуска host до подключения
+монитора и ещё несколько секунд после него. Отсутствующая Native по-прежнему
+soft-skip, новые сообщения ничего не генерируют и не меняют масштаб.
