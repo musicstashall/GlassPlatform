@@ -7,6 +7,7 @@
 #include "xaml/SearchWebViewPanelRegistry.hpp"
 #include "xaml/ShellTooltipPanelRegistry.hpp"
 #include "xaml/XamlDiagInit.hpp"
+#include "xaml/XamlComLifetime.hpp"
 
 #include <DebugLog.h>
 #include <RootBackdropPolicy.h>
@@ -252,6 +253,11 @@ namespace UICompat
             std::make_unique<SearchWebViewPanelRegistry>(
                 Registry::ReadSurface(Registry::SurfaceKind::Menu)))
     {
+        // COM-ссылка LVT на watcher обязана быть видна DllCanUnloadNow и
+        // UICompat_DebugComState: иначе ShellHost может продолжить вызывать vtable
+        // после выгрузки UICompat (тот же UAF-контракт, что у TaskbarCompat).
+        UICompatCom::g_objectCount.fetch_add(1, std::memory_order_relaxed);
+
         (void)settings; // pending Popup — surface-specific читаем выше
 
         // ShellTooltip: всегда инициализировать (как и другие registries).
@@ -298,7 +304,10 @@ namespace UICompat
     {
         const ULONG n = m_ref.fetch_sub(1, std::memory_order_acq_rel) - 1;
         if (n == 0)
+        {
+            UICompatCom::g_objectCount.fetch_sub(1, std::memory_order_relaxed);
             delete this;
+        }
         return n;
     }
 

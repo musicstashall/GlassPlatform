@@ -1259,7 +1259,8 @@ void UICompat_StopXamlDiagnostics() noexcept
     // Хук WH_GETMESSAGE Search мог остаться при закрытии окна до init — снять до FreeLibrary.
     UnhookSearchDeferIfAny();
 
-    // DllCanUnloadNow=S_OK до CoFree на STA IXDE/marshal — GlassCompat ещё держит LoadLibrary.
+    // Гейт новой работы до CoFree на STA IXDE/marshal — GlassCompat ещё держит LoadLibrary.
+    // DllCanUnloadNow учитывает честные COM-счётчики и не форсирует S_OK поверх watcher.
     UICompatCom::g_shutdownDone.store(true, std::memory_order_release);
 
     const bool diagWasRunning = g_diagRunning.load(std::memory_order_acquire);

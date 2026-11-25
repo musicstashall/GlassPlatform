@@ -177,6 +177,7 @@ INCONTEXT всё равно загружает `GlassCompat.dll` в процес
 | `g_hookInstalled=false` **до** DetachAll в WinEventHook_Shutdown | Очередной WinEvent subclass'ит новое окно после снятия snapshot → stale WndProc → `FAST_FAIL_GUARD_ICALL_CHECK_FAILURE` в CTray::_MessageLoop (Explorer.exe) |
 | UICompat: нет COM drain перед FreeLibrary | COM callback ссылается на выгруженную UICompat.dll → `c0000005` Access Violation в ShellHost.exe |
 | TaskbarCompat: VTC-watcher не учтён в `g_objectCount` + `g_shutdownDone` форсировал `DllCanUnloadNow=S_OK` | XAML LVT держит callback на watcher → после FreeLibrary/residual reclaim `AddElementToLVT` читает vtable в `<Unloaded_TaskbarCompat.dll>` → `c0000005` в explorer.exe (дамп 11524, 25.11.2026). Фикс: watcher в `g_objectCount`, честный `DllCanUnloadNow`, `anyModuleKept` при residual STILL LOADED |
+| ExplorerCompat/UICompat: VTC-watcher не учитывался в `g_objectCount`, а `g_shutdownDone` форсировал `DllCanUnloadNow=S_OK` | XAML LVT мог удержать callback на watcher после Stop → residual reclaim/внешний ForceUnload снимал образ под живым vtable. Фикс: watcher в COM-счётчике, честный `DllCanUnloadNow`, `anyModuleKept` при residual STILL LOADED |
 | FreeLibrary Toolhelp-зомби GlassCore без полного teardown (H60/H61) | Core «уходит», затем AV `<unknown>` / hang HWiNFO |
 
 ## HWiNFO (связанный баг Core, не ломать Compat)
@@ -225,7 +226,7 @@ UICompat использует COM-объекты (IXDE, TAP, visual tree watcher
 
 1. `UICompat_Shutdown()` → `UICompat_StopXamlDiagnostics()`
 2. `ShutdownActiveWatcher()` — marshal shutdown на UI-поток через `SendMessageTimeoutW`
-3. **COM drain**: ожидание `g_objectCount==0 && g_serverLocks==0` (до 5 с) — критично:
+3. **COM drain**: ожидание `g_objectCount==0 && g_serverLocks==0` (до 5 с); `g_objectCount` включает TAP и VTC-watcher — критично:
    иначе `FreeLibrary(UICompat.dll)` выгрузит DLL, пока COM callback ещё ссылается на её код
 4. `CoFreeUnusedLibraries()` — COM выгружает DLL если `DllCanUnloadNow()==S_OK`
 

@@ -20,9 +20,9 @@ namespace GlassExplorerCom
 
 STDAPI DllCanUnloadNow()
 {
-    if (GlassExplorerCom::g_shutdownDone.load(std::memory_order_acquire))
-        return S_OK;
-
+    // g_shutdownDone — только гейт новой работы после Stop. Он не отменяет живые
+    // COM-ссылки: XAML/LVT может продолжать вызывать watcher после неудачного
+    // Unadvise, поэтому выгрузка допустима только при честных server/object counts.
     if (GlassExplorerCom::g_serverLocks.load(std::memory_order_acquire) != 0)
         return S_FALSE;
     if (GlassExplorerCom::g_objectCount.load(std::memory_order_acquire) != 0)

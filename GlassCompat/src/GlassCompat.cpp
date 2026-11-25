@@ -1600,7 +1600,13 @@ namespace
                         hCheckEx2 = GetModuleHandleW(L"ExplorerCompat.dll");
                     }
                     if (hCheckEx2)
+                    {
                         forcedUnloadMask |= 0x2ULL;
+                        // COM-counted watcher (например, callback в XAML LVT) всё ещё
+                        // удерживает образ. Не публиковать CompatDone: внешний
+                        // ForceUnload не должен снять модуль под живым vtable.
+                        anyModuleKept = true;
+                    }
                     DebugLog(
                         DBG_IMPORTANT,
                         L"[GlassCompat][Core] [Shutdown] ExplorerCompat after residual reclaim: %s (dropped=%d)",
@@ -1775,6 +1781,13 @@ namespace
                         hCheckUi2 = GetModuleHandleW(L"UICompat.dll");
                     }
                     hCheckUi = hCheckUi2;
+                    if (hCheckUi2)
+                    {
+                        // COM-counted watcher (например, callback в XAML LVT) всё ещё
+                        // удерживает образ. Не публиковать CompatDone: внешний
+                        // ForceUnload не должен снять модуль под живым vtable.
+                        anyModuleKept = true;
+                    }
                 }
                 // comState: биты 0..15 objectCount, 16..31 serverLocks, 32 shutdownDone,
                 // 33 живые потоки модуля (ModuleThread) — при 33 drop не делается намеренно.
