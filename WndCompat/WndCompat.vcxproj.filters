@@ -72,6 +72,9 @@
     <ClCompile Include="Controls\ProgressBarSubclass.cpp">
       <Filter>Controls</Filter>
     </ClCompile>
+    <ClCompile Include="Controls\TCoolBarSubclass.cpp">
+      <Filter>Controls</Filter>
+    </ClCompile>
     <ClCompile Include="Controls\RebarSubclass.cpp">
       <Filter>Controls</Filter>
     </ClCompile>
@@ -150,6 +153,9 @@
       <Filter>Providers</Filter>
     </ClCompile>
     <ClCompile Include="Providers\MenuEventProvider.cpp">
+      <Filter>Providers</Filter>
+    </ClCompile>
+    <ClCompile Include="Providers\CoolBarEventProvider.cpp">
       <Filter>Providers</Filter>
     </ClCompile>
     <ClCompile Include="Providers\RebarEventProvider.cpp">
@@ -235,6 +241,9 @@
     <ClInclude Include="Controls\NetUISubclass.h">
       <Filter>Controls</Filter>
     </ClInclude>
+    <ClInclude Include="Controls\TCoolBarSubclass.h">
+      <Filter>Controls</Filter>
+    </ClInclude>
     <ClInclude Include="Controls\RebarSubclass.h">
       <Filter>Controls</Filter>
     </ClInclude>
@@ -298,6 +307,9 @@
     <ClInclude Include="Popup\Tooltip\TooltipSubclass.h">
       <Filter>Popup\Tooltip</Filter>
     </ClInclude>
+    <ClInclude Include="Popup\Tooltip\DelphiHintPaint.h">
+      <Filter>Popup\Tooltip</Filter>
+    </ClInclude>
     <ClInclude Include="Root\ExplorerRootSubclass.h">
       <Filter>Root</Filter>
     </ClInclude>
@@ -311,6 +323,12 @@
       <Filter>Root</Filter>
     </ClInclude>
     <ClInclude Include="Root\RootSubclassShared.h">
+      <Filter>Root</Filter>
+    </ClInclude>
+    <ClInclude Include="Root\DelphiPanelPaint.h">
+      <Filter>Root</Filter>
+    </ClInclude>
+    <ClInclude Include="Root\DelphiShowErase.h">
       <Filter>Root</Filter>
     </ClInclude>
     <ClInclude Include="Root\TaskbarHost.h">

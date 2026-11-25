@@ -20,7 +20,7 @@ assert 'installEngine_.Start(' in start and 'RequestCancel()' in s
 assert 'HasCommandLineSwitch(L"--demo-tour")' in s
 assert 'RemoveOrphanUninstallEntry' not in fn(s,'void StartupWorker(')
 finish=fn(s,'void FinishDebugDemo()')
-for reset in ('webInitSent_=false','certQueried_=false','certSigner_={}','selection_.trustSigner=false','finishWarnings_.clear()'):
+for reset in ('webState_.Reset()','certQueried_=false','certSigner_={}','selection_.trustSigner=false','finishWarnings_.clear()'):
  assert reset in finish,reset
 harness=r'''
 #include "GlassProducts.h"
@@ -88,7 +88,7 @@ struct Wizard {
  InstallEngine installEngine_;std::vector<InstallEngine::FinishWarning> finishWarnings_;
  int errors=0;
  std::wstring Text(unsigned id){return std::to_wstring(id);}
- bool ConfirmManagedSettingsRemoval(){return true;} bool ConfirmFullRemovalCleanup(){return true;} bool DownloadsReady(){return true;}
+ bool ConfirmFullRemovalCleanup(){return true;} bool DownloadsReady(){return true;}
  bool RunPreflightChecks(){return preflight;}bool CertificatePageApplies(){return certificate;}
  void SetPage(Page p){page_=p;}void ShowInstallError(const std::wstring&){++errors;KillTimer(window,kInstallTimer);page_=Page::Error;}
  void ShowFailurePage(bool){++errors;KillTimer(window,kInstallTimer);page_=Page::Error;}

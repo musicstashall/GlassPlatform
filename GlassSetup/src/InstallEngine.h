@@ -151,7 +151,7 @@ public:
     bool IsMarquee() const noexcept;
     void SetStatus(const std::wstring& line, int percent) noexcept;
 
-    enum class HoldKind { None, Modules, Processes, MissingHelper };
+    enum class HoldKind { None, Modules, Processes, MissingHelper, Settings };
     enum class HoldAction { None, Retry, Unlock, ContinueRisk, Cancel };
 
     HoldKind CurrentHold() const noexcept;
@@ -184,6 +184,7 @@ private:
     bool StopGlassPlatform(GlassShared::GlassPlatformTask::PlatformArch arch,
         const std::wstring& statusLabel, const wchar_t* logTag,
         const std::function<bool(const wchar_t*)>& fail) noexcept;
+    bool WaitForSelectedSettings() noexcept;
     bool StopRunningHosts() noexcept;
     bool ReleaseLockedModules() noexcept;
     bool EnsureTempWorkspace() noexcept;

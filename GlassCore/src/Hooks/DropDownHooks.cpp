@@ -17,6 +17,7 @@
 #include <DropDownContext.h>
 #include <Core/Utils.h>
 #include <MenuUtils.h>
+#include <GlassMessages.h>
 
 #include <vector>
 
@@ -371,6 +372,13 @@ namespace GlassCore::DropDown
             }
 
             GlassCore::ComboLBox::OnComboLBoxPrintClientEnd(root);
+
+            // Отложенная перерисовка клиента после того, как вся цепочка uncloak
+            // завершится (SWCA/DWM uncloak + PaintHostBorder + DwmFlush): сообщение
+            // попадает в очередь этого же потока и обрабатывается после возврата —
+            // тогда RDW_UPDATENOW действительно доходит до WM_PAINT (sync RedrawWindow
+            // внутри сессии на клиенте в «доаттачном» белом виде фактически не красил).
+            (void)::PostMessageW(root, WndCompat::WM_GLASS_FLYOUT_CLIENT_REFRESH, 0, 0);
         }
 
         void SyncViewControlClientPaint(HWND root) noexcept

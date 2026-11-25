@@ -49,11 +49,18 @@ watch = read("src/InstallSupport/GlassInstallWatch.cpp")
 ui = read("res/slideshow.html")
 theme = read("src/WizardTheme.cpp")
 assets = read("src/WizardAssets.h")
+web_host = read("src/WizardUi/WebHost.cpp")
+window_shell = read("src/WizardUi/Window.cpp")
 unins = read("GlassUnins/main.cpp")
 
+string_sources = [*root.joinpath("src").rglob("*.cpp"), *root.joinpath("src").rglob("*.h"),
+                  root / "GlassUnins/main.cpp"]
+used_strings = {name for path in string_sources
+                for name in re.findall(r"\bIDS_[A-Z0-9_]+\b", path.read_text(encoding="utf-8"))}
 for name in ids:
     if name.startswith("IDS_"):
         assert len(re.findall(r"\b" + re.escape(name) + r"\b", rc)) == 2, f"{name}: RU/EN string missing"
+        assert name in used_strings, f"{name}: unreferenced string resource"
 for path in [*root.joinpath("src").rglob("*.cpp"), root / "GlassUnins/main.cpp"]:
     text = path.read_text(encoding="utf-8")
     used = set(re.findall(r"\b(?:IDS|IDR|IDI|IDC)_[A-Z0-9_]+\b", text)) - {"IDC_ARROW"}
@@ -104,9 +111,15 @@ for token in ("data:image/jpeg;base64,", "data:image/png;base64,", "data:font/tt
     assert token not in ui, f"binary data should be streamed separately: {token}"
 assert "data:image/svg+xml;base64," in ui, "the local SVG mask is intentional"
 assert "https://glassplatform.invalid/assets/" in ui
-assert "connect-src 'none'" in setup and "connect-src 'none'" in unins
-assert "WizardAssets::Resolve(url)" in setup and "WizardAssets::Resolve(url)" in unins
-assert "allowed?200:403" in setup and "allowed?200:403" in unins
+assert "connect-src 'none'" in web_host and "WizardAssets::Resolve(" in web_host
+assert "allowed ? 200 : 403" in web_host and "self->document != source.get()" in web_host
+assert "self->document != uri.get()" in web_host and "AreDefaultContextMenusEnabled(FALSE)" in web_host
+assert "weak.lock()" in web_host and "if (controller) controller->Close();" in web_host
+for source in (setup, unins):
+    assert "web_.Start(" in source and "web_.Close();" in source and "web_.SetVisible(" in source
+    assert "AddWebResourceRequestedFilter" not in source
+assert 'id="error-copy-command"' in ui and 'role="menuitem"' in ui and 'user-select:text' in ui
+assert 'ES_READONLY' in window_shell and 'WM_COPY' in window_shell
 
 # Validate the manifests/project files as XML, including elevation and DPI.
 ns = {"asmv3": "urn:schemas-microsoft-com:asm.v3",
@@ -126,8 +139,12 @@ for project in (root / "GlassSetup.vcxproj", root / "GlassUnins/GlassUnins.vcxpr
 project = read("GlassSetup.vcxproj")
 unins_project = read("GlassUnins/GlassUnins.vcxproj")
 for text in (project, unins_project):
-    assert "WizardTheme.cpp" in text and "GdiPlusCompat.h" in text and "WebView2LoaderStatic.lib" in text
+    assert "WizardUi.props" in text and "GdiPlusCompat.h" in text and "WebView2LoaderStatic.lib" in text
+    assert "WizardTheme.cpp" not in text
     assert "Detours.4.0.1" in text
+shared_ui = read("src/WizardUi/WizardUi.props")
+ET.parse(root / "src/WizardUi/WizardUi.props")
+assert all(f"{source}.cpp" in shared_ui for source in ("WizardTheme", "WebHost", "Window"))
 assert "GdiPlusCompat.h" in read("GlassSetup.vcxproj.filters")
 assert "WizardProgress.h" in project and "WizardProgress.h" in read("GlassSetup.vcxproj.filters")
 assert "WizardUnlockState.h" in project and "WizardUnlockState.h" in read("GlassSetup.vcxproj.filters")
@@ -308,8 +325,8 @@ assert "EnsureAndDraw" in theme and "AddState(destination, width, height, normal
 assert "PrewarmButtonCache" not in setup
 
 # One-document UI, static initialization and user-driven cancel controls.
-for mode in ("welcome", "checking", "conflicts", "downgrade", "version-invalid", "license",
-             "components", "installing", "unlock-modules", "unlock-processes", "confirm-cancel",
+for mode in ("welcome", "checking", "conflicts", "license",
+             "components", "installing", "settings-close", "unlock-modules", "unlock-processes", "confirm-cancel",
              "cancelling", "cancelled", "launching", "complete", "error", "uninstall-select", "uninstalling"):
     assert mode in ui, mode
 for node in ("components-panel", "confirm-panel", "cancelling-panel", "cancelled-panel", "launch-panel", "unlock-panel"):
@@ -328,7 +345,8 @@ assert create.index("ShowWindow(window, show)") < create.index("UpdateWindow(win
 loading = section(setup, "    void InitializeLoading()", "    void InitializeControls()")
 assert "kHeroTimer" in loading and "IsProductInstalled" not in loading and "IsWebView2RuntimeInstalled" not in loading
 spinner = section(setup, "    void DrawLoadingScreen(", "    void EnsureBanner()")
-assert all(token in spinner for token in ("Scale(473)", "Scale(243)", "Scale(54)", "loadingAnimationsEnabled_"))
+assert "WizardUi::DrawLoadingSpinner(dc,dpi_,loadingAnimationsEnabled_)" in spinner
+assert all(token in window_shell for token in ("Scale(dpi, 473)", "Scale(dpi, 243)", "Scale(dpi, 27)"))
 assert "DrawLoadingScreen(dc)" in setup and "case WM_SETTINGCHANGE:" in setup
 startup_worker = section(setup, "    void StartupWorker(", "    void BeginStartup()")
 for token in ("COINIT_MULTITHREADED", "InstallLog::Initialize()", "SelfProductVersion()",
@@ -342,7 +360,8 @@ assert "std::thread" in begin_startup and "kStartupPollTimer" in begin_startup
 assert begin_startup.index("WizardTheme::InstallDetours()") < begin_startup.index("std::thread")
 assert "--debug-slow-startup" in begin_startup and "IDS_STARTUP_FAILED" in begin_startup
 complete_startup = section(setup, "    void CompleteStartupIfReady()", "    void Layout()")
-assert "startupThread_.join()" in complete_startup and "Page::RuntimeRequired" in complete_startup
+assert "startupThread_.join()" in complete_startup and "StartRuntimeInstallation()" in complete_startup
+assert "Page::RuntimeRequired" not in setup
 assert "Page::AlreadyRunning" not in setup and "PostMessageW(window,kInitWebView" in complete_startup
 assert "case kInitWebView: if (!closing_) InitializeWebView()" in setup
 assert "COINIT_APARTMENTTHREADED" in setup
@@ -359,7 +378,7 @@ assert "if (controlsReady_) { CreateFonts(); Layout(); WizardTheme::ResetButtonC
 # it with the engine target, a right-anchored fill, or a moving segment.
 progress_draw = section(setup, "case WM_DRAWITEM:", "case WM_CTLCOLORBTN:")
 assert "WizardProgress::DeterminateSpan" in progress_draw and "visibleProgress_.RecordPaint(progressValue_)" in progress_draw
-assert "progressMarquee_ && (page_==Page::RuntimeInstalling" in progress_draw  # Shared strip also handles unknown download totals.
+assert "progressMarquee_ && ((page_==Page::Components&&downloadContinuePending_) || (page_==Page::Checking&&setupDownloadActive_))" in progress_draw
 assert "(page_==Page::Components&&downloadContinuePending_)" in setup
 assert "(page_==Page::Checking&&setupDownloadActive_)" in setup
 assert "MarqueePhase" not in progress_draw and "progressValue_,progressReverse_" not in progress_draw
@@ -551,7 +570,9 @@ assert '"SecureUxTheme-x64"' not in solution and '"SecureUxThemeCa"' not in solu
 assert '"OpenGlass-x64"' not in solution
 assert "<GlassSignThisProject>true</GlassSignThisProject>" in read("msi/OpenGlassResources-x64.wixproj")
 # Actual discovered plan is built before any process shutdown or MSI mutation.
-assert worker.index("CreateRollbackSnapshot()") < worker.index("BuildExecutionPlan()") < worker.index("CloseSelectedSettingsProcesses(")
+assert worker.index("CreateRollbackSnapshot()") < worker.index("BuildExecutionPlan()") < worker.index("WaitForSelectedSettings(")
+settings_wait=section(engine, "bool InstallEngine::WaitForSelectedSettings()", "bool InstallEngine::StopRunningHosts()")
+assert "CloseSelectedSettingsProcesses(" in settings_wait and "HoldKind::Settings" in settings_wait and "ERROR_TIMEOUT" in settings_wait
 execution_plan=section(engine,"bool InstallEngine::BuildExecutionPlan()", "bool InstallEngine::RunMsiSequence()")
 for token in ("GlassProductInspect::Run", "input.inspectSources=false", "CheckProductContexts", "RecheckSnapshottedProduct", "RecheckRelatedProducts", "GlassMaintenanceCache::Identity", "P::Build(facts,request)"):
     assert token in execution_plan, token
@@ -729,7 +750,7 @@ assert "const bool showProgress = !transitioning_" in setup and "page_==Page::Ru
 # remains for installed/healthy cards).
 assert "IDS_COMP_RECOMMENDED" in setup
 assert "wcscmp(id,L\"openglass\")==0?IDS_COMP_RECOMMENDED:IDS_COMP_REQUIRED" not in setup  # defaults are recommendations, never mandatory locks
-assert "IDS_COMP_REQUIRED" in header_now and "требуется" in rc and "рекомендуется" in rc
+assert "IDS_COMP_REQUIRED" not in header_now and "рекомендуется" in rc
 assert "GlassProducts::ProductCondition::NotInstalled)" in setup
 
 # Строки действия и причин прижаты к низу карточки — один уровень Y на всех карточках.
@@ -763,7 +784,7 @@ assert 'ProductStrings.rcinc' in read("res/GlassSetup.rc") and 'ProductStrings.r
 assert "platform64==os64" in read("src/GlassProductUiPolicy.h")
 assert "PlatformDescription" in setup and "PlatformDescription" in unins
 assert "ManualOpenGlass" in read("src/GlassProductPlan.h")
-assert "Средство для использования неподписанных визуальных стилей. Установка в System32." in rc
+assert "Позволяет Windows использовать сторонние темы оформления. Устанавливается в системную папку Windows." in rc
 
 # Fixed clean build order: Release x64 -> Release x86. First-pass Unins
 # must not consume a Native DLL that is produced only by the second pass.
@@ -856,14 +877,14 @@ assert '(std::numeric_limits<ULONG>::max)()' in trust_src
 assert '#include "GlassOpenGlassTrust.h"' in provider_src
 
 # Fonts exist before first visible frame; pending WebView never exposes the
-# native wizard. Runtime bootstrap and confirmed failure keep native recovery.
+# native wizard. A missing runtime stays on the loading donut.
 loading_init = setup_main.split('void InitializeLoading() {',1)[1].split('void InitializeControls()',1)[0]
 assert 'CreateFonts();' in loading_init
 assert 'footerFont_ = create(8.5,FW_NORMAL);' in setup_main
 assert 'kContentHeight+34,450,16),footerFont_' in setup_main
 pending_ui = setup_main.split('bool WaitingForWebUi() const noexcept {',1)[1].split('void ShowContentControls()',1)[0]
 assert '!NativeDemo() && !webReady_ && SUCCEEDED(webError_)' in pending_ui
-assert 'Page::RuntimeRequired' in pending_ui and 'Page::Error' in pending_ui
+assert 'Page::RuntimeRequired' not in pending_ui and 'page_!=Page::Error' in pending_ui
 render_content = setup_main.split('void RenderContent(HDC dc) {',1)[1].split('void RenderFooterText',1)[0]
 assert render_content.index('if (WaitingForWebUi())') < render_content.index('DrawBanner')
 assert 'SetPage(page_); // Restore controls only after a confirmed WebView failure.' in setup_main

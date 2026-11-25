@@ -158,6 +158,7 @@
     <ClInclude Include="include\DefaultProcessListsSeed.h" />
     <ClInclude Include="include\UnloadResult.h" />
     <ClInclude Include="include\wil.h" />
+    <ClInclude Include="include\Providers\CoolBarEventProvider.h" />
     <ClInclude Include="include\Providers\DirectUIEventProvider.h" />
     <ClInclude Include="include\Providers\DropDownContext.h" />
     <ClInclude Include="include\Providers\DropDownEventProvider.h" />
@@ -202,6 +203,10 @@
     <ClInclude Include="include\PartRegistryQuery.h" />
     <ClInclude Include="include\RootRegistryMigration.h" />
     <ClInclude Include="include\GlassBackdropMark.h" />
+    <ClInclude Include="include\GlassDelphiInputBackground.h" />
+    <ClInclude Include="include\GlassDelphiMemoBackground.h" />
+    <ClInclude Include="include\GlassDelphiPanel.h" />
+    <ClInclude Include="include\GlassDelphiButtonGroups.h" />
     <ClInclude Include="include\GlassHostRegistry.h" />
     <ClInclude Include="SharedPch.h" />
   </ItemGroup>

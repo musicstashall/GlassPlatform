@@ -18,6 +18,15 @@
 #include <Hooks/MonthCal.h>
 #include <Hooks/DirectUI.h>
 #include <Hooks/Button.h>
+#include <Hooks/delphi/TToggleSwitchHooks.h>
+#include <Hooks/delphi/TBackgroundHooks.h>
+#include <Hooks/delphi/TInputIcons.h>
+#include <Hooks/delphi/TPanelDraw.h>
+#include <Hooks/delphi/RestoratorImages.h>
+#include <Hooks/delphi/RestoratorCheckerboard.h>
+#include <Hooks/delphi/THexDumpDraw.h>
+#include <Hooks/delphi/TResVersionEditorDraw.h>
+#include <Hooks/delphi/THintWindowDraw.h>
 #include <Hooks/UpDown.h>
 #include <Hooks/forms/FormsHooks.h>
 #include <Subsystems/CtlColorProbe.h>
@@ -26,6 +35,7 @@
 #include <Hooks/ListView.h>
 #include <Hooks/ScrollBar.h>
 #include <Hooks/Rebar.h>
+#include <Hooks/delphi/TCoolBarDraw.h>
 #include <Hooks/Tab.h>
 #include <Hooks/Header.h>
 #include <Hooks/Toolbar.h>
@@ -139,6 +149,7 @@ namespace GlassCore::Engine
         GlassCore::ListViewControl::Prepare();
         GlassCore::ScrollBar::Prepare();
         GlassCore::RebarControl::Prepare();
+        GlassCore::CoolBarControl::Prepare();
         GlassCore::TabControl::Prepare();
         GlassCore::HeaderControl::Prepare();
         GlassCore::ToolbarControl::Prepare();
@@ -161,6 +172,14 @@ namespace GlassCore::Engine
         LogInitStep(6); // до Button/Forms/Root Startup
         // Button, StaticControl и MonthCal регистрируют провайдеров до PaintDispatcher::Startup
         GlassCore::Button::Startup();
+        GlassCore::DelphiToggle::Startup();
+        GlassCore::DelphiBackground::Startup();
+        GlassCore::DelphiPanel::Startup();
+        GlassCore::RestoratorCheckerboard::Startup();
+        GlassCore::RestoratorImages::Startup();
+        GlassCore::DelphiHexDump::Startup();
+        GlassCore::DelphiResVersionEditor::Startup();
+        GlassCore::DelphiHint::Startup();
         GlassCore::UpDownControl::Startup();
         GlassCore::FormsHooks::Startup();
         GlassCore::Hooks::Immersive::Startup();
@@ -169,6 +188,7 @@ namespace GlassCore::Engine
         GlassCore::ListViewControl::Startup();
         GlassCore::ScrollBar::Startup();
         GlassCore::RebarControl::Startup();
+        GlassCore::CoolBarControl::Startup();
         GlassCore::TabControl::Startup();
         GlassCore::HeaderControl::Startup();
         GlassCore::ToolbarControl::Startup();
@@ -178,6 +198,7 @@ namespace GlassCore::Engine
         GlassCore::ListBoxControl::Startup();
         GlassCore::DateTimePickerControl::Startup();
         GlassCore::EditControl::Startup();
+        GlassCore::DelphiInputIcons::Startup();
         GlassCore::UiRibbon::Startup();
         GlassCore::Root::Startup();
         GlassCore::ExplorerFrameControl::Startup();
@@ -275,6 +296,15 @@ namespace GlassCore::Engine
         GlassCore::StatusBarControl::Shutdown();
         GlassCore::ProgressBarControl::Shutdown();
         GlassCore::DirectUI::Shutdown();
+        GlassCore::DelphiHint::Shutdown();
+        GlassCore::DelphiResVersionEditor::Shutdown();
+        GlassCore::DelphiHexDump::Shutdown();
+        GlassCore::RestoratorImages::Shutdown();
+        GlassCore::RestoratorCheckerboard::Shutdown();
+        GlassCore::DelphiPanel::Shutdown();
+        GlassCore::DelphiInputIcons::Shutdown();
+        GlassCore::DelphiBackground::Shutdown();
+        GlassCore::DelphiToggle::Shutdown();
         GlassCore::Button::Shutdown();
         GlassCore::UpDownControl::Shutdown();
         GlassCore::FormsHooks::Shutdown();
@@ -285,6 +315,7 @@ namespace GlassCore::Engine
         GlassCore::ScrollBar::Shutdown();
         GlassCore::ListViewControl::Shutdown();
         GlassCore::RebarControl::Shutdown();
+        GlassCore::CoolBarControl::Shutdown();
         GlassCore::TabControl::Shutdown();
         GlassCore::HeaderControl::Shutdown();
         GlassCore::ToolbarControl::Shutdown();

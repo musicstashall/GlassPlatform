@@ -19,5 +19,6 @@ assert complete.index('PostMessageW(window,kInitWebView')<complete.index('if (!r
 assert complete.count('PostMessageW(window,kInitWebView')==1
 assert 'if(!PostMessageW(window,kWebInit,0,0))WebFailure();' in unins
 assert 'if (!alreadyRunning_) PostMessageW(window,kWebInit' not in unins
-assert 'case Page::AlreadyRunning: case Page::RuntimeError: return L"error";' in setup
-print('PASS: startup errors/stale maintenance/duplicate launches cannot bypass WebView initialization when runtime is available; bootstrap fallback retained')
+assert 'Page::RuntimeRequired' not in setup and 'Page::RuntimeError' not in setup
+assert 'ShowRuntimeInstallError()' in setup
+print('PASS: startup errors/stale maintenance/duplicate launches cannot bypass WebView initialization when runtime is available; a missing runtime installs behind the loading screen')

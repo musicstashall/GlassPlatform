@@ -7,7 +7,7 @@ root=Path(__file__).resolve().parents[2]
 s=(root/'GlassSetup/GlassUnins/main.cpp').read_text()
 a=s.index('    int RunOfficialOpenGlassRemoval(');b=s.index('    int RunOperation(',a)
 method=s[a:b]
-operation=s[b:s.index('        // Re-read presence',b)]
+operation=s[b:s.index('        GlassInstallUtil::InstallRoots current;',b)]
 assert operation.index('RunOfficialOpenGlassRemoval(chosen)')<operation.index('if (chosen.cleanupSettings')
 for token in ['StopAllForUninstall(', 'UninstallProduct(', 'PruneEmptyDirectories(', 'RefreshManagedArp(', 'RemoveOpenGlassService']:
     assert token not in method

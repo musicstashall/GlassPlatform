@@ -28,11 +28,29 @@ namespace GlassCore::Root
         OHK_GRADIENTFILL,
         OHK_TEXTOUT,
         OHK_FILLRECT,
+        OHK_DELPHI_DRAWTHEMETEXTEX,
+        OHK_DELPHI_GRID_TEXT,
+        OHK_DELPHI_GRID_FILL,
+        OHK_DELPHI_GRID_THEME,
+        OHK_GETSYSCOLOR,
+        OHK_DELPHI_GROUP_TEXT,
+        OHK_DELPHI_GROUP_FILL,
+        OHK_DELPHI_GROUP_GRADIENT,
+        OHK_DELPHI_GROUP_GDIGRADIENT,
+        OHK_BOME_MEMO_TEXT,
+        OHK_BOME_MEMO_BRUSH,
+        OHK_BOME_MEMO_COLOR,
+        OHK_BOME_MEMO_FILL,
         OHK_COUNT
     };
 
     // Включить/выключить один IAT-хук на модуле (ref-counted).
     bool EnableRootHook(void* baseAddress, size_t index, bool enable) noexcept;
+
+    // Four dedicated EXE imports are acquired transactionally. A partial mask
+    // is diagnostic only: all refs acquired by the failed attempt are undone.
+    unsigned AcquireBomeMemoHooks() noexcept;
+    void ReleaseBomeMemoHooks() noexcept;
 
     // Предпрогрев IAT-кеша модуля (только чтение: emplace диспетчера + CacheHookData,
     // без записей и без refcount). Убирает холодный скан PE из первого paint-кадра.
@@ -40,6 +58,9 @@ namespace GlassCore::Root
 
     // Безусловно снять все root-хуки (shutdown).
     void DisableAllRootHooks() noexcept;
+
+    // Регистрация BeginPaint/EndPaint-провайдера реконструкции фона таблиц.
+    void RegisterDelphiGridPaintProvider() noexcept;
 
     // Установить флаг shutdown для тел хуков (вызывается из RootWindowHooks).
     void SetRootGdiShutdown(bool value) noexcept;

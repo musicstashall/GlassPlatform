@@ -1,6 +1,9 @@
 #include "WndPch.h"
 #include "Tracker/WindowClassifier.h"
 #include "Tracker/WindowClassUtils.h"
+#include <Controls/TCoolBarSubclass.h>
+#include <GlassDelphiPanel.h>
+#include <GlassDelphiButtonGroups.h>
 #include <ExplorerCompatHostPolicy.h>
 #include <RootBackdropPolicy.h>
 #include <SystemHelper.h>
@@ -204,6 +207,7 @@ bool WindowClassifier::IsSpecialWindow(const std::wstring& cls, ControlKind& out
         return true;
     }
 
+
     return false;
 }
 
@@ -217,6 +221,78 @@ bool WindowClassifier::IsNetUiRibbonToolWindow(HWND hwnd) noexcept
         return false;
     const std::wstring cls = WndCompat::NormalizeWindowClass(hwnd);
     return GetControlKind(cls) == ControlKind::NetUiToolWindow;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  IsCommonDialogHeaderPieWindow
+//
+//  «Пирог» шапки общего диалога: навигационные кнопки (ToolbarWindow32), крошки
+//  (Breadcrumb Parent), rebar с полосой адреса. В PopupOnly такие окна не получают
+//  стекло (был бы «патч» поверх чужого диалога), поэтому аттачить их нельзя.
+//  Применение: WinEventHandler (ToolBar/ReBar, PopupOnly) + ToolBar_Attach.
+//  Flyout-попапы (GA_ROOT == сам попап, например стопка «Настройки вида») сюда
+//  НЕ попадают — их аттачить можно.
+// ─────────────────────────────────────────────────────────────────────────────
+bool WindowClassifier::IsCommonDialogHeaderPieWindow(HWND hwnd) noexcept
+{
+    if (!hwnd || !IsWindow(hwnd))
+        return false;
+
+    // Для flyout GA_ROOT == сам flyout; диалоговый toolbar/rebar — GA_ROOT == #32770.
+    const HWND root = GetAncestor(hwnd, GA_ROOT);
+    if (root && root != hwnd)
+    {
+        if (WndCompat::IsWindowClass(root, L"#32770")
+            || WndCompat::IsWindowClass(root, L"CabinetWClass")
+            || WndCompat::IsWindowClass(root, L"ExploreWClass"))
+            return true;
+    }
+
+    // Хлебные крошки: дочерний контрол под «Breadcrumb Parent» — тот же «пирог».
+    HWND cur = hwnd;
+    for (int depth = 0; cur && depth < 16; ++depth)
+    {
+        if (!IsWindow(cur))
+            break;
+        if (WndCompat::IsWindowClass(cur, L"Breadcrumb Parent"))
+            return true;
+        HWND parent = GetParent(cur);
+        if (!parent || parent == cur)
+            break;
+        cur = parent;
+    }
+    return false;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  IsUnderDropDownAncestor
+//
+//  PopupOnly: окно лежит внутри flyout-попапа Explorer («DropDown») или внутри его
+//  списочного корпуса («ListviewPopup») — оба класса приаттачиваются всегда
+//  (см. WinEventHandler: DropDown_AttachIfNeeded / ListviewPopup_Attach).
+//  Дочерние контролы таких попапов (например, SysListView32 выпадающего списка окна
+//  вида) в PopupOnly аттачить и рендерить glass, как в Full.
+//  Каскад Limited depth, без рекурсии: окно может быть «сиротой» к моменту CREATE.
+// ─────────────────────────────────────────────────────────────────────────────
+bool WindowClassifier::IsUnderDropDownAncestor(HWND hwnd) noexcept
+{
+    if (!hwnd || !IsWindow(hwnd))
+        return false;
+
+    HWND cur = GetParent(hwnd);
+    for (int depth = 0; cur && depth < 8; ++depth)
+    {
+        if (!IsWindow(cur))
+            return false;
+        if (WndCompat::IsWindowClass(cur, L"DropDown")
+            || WndCompat::IsWindowClass(cur, L"ListviewPopup"))
+            return true;
+        HWND parent = GetParent(cur);
+        if (!parent || parent == cur)
+            break;
+        cur = parent;
+    }
+    return false;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -283,32 +359,46 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
     // ═══════════════════════════════════════════════════════════════════════
 
     // ── Button ───────────────────────────────────────────────────────────────
+    // TGroupButton is TRadioGroup's native TRadioButton descendant (VCL ExtCtrls).
     if (Equals(cls, L"Button") ||
         Equals(cls, L"TButton") ||
+        Equals(cls, L"TBitBtn") ||
         Equals(cls, L"TCheckBox") ||
-        Equals(cls, L"TRadioButton"))
+        Equals(cls, L"TRadioButton") ||
+        Equals(cls, L"TGroupButton"))
         return ControlKind::Button;
 
     // ── Static / SysLink ─────────────────────────────────────────────────────
+    // TLinkLabel идёт по пути нативного SysLink: тот же Static-путь
+    // (StaticHooks/Static_Attach) отвечает за текст ссылки.
     if (Equals(cls, L"Static") ||
         Equals(cls, L"TStatic") ||
+        Equals(cls, L"TStaticText") ||
         Equals(cls, L"SysLink") ||
+        Equals(cls, L"TLinkLabel") ||
         Equals(cls, L"Link Window"))
         return ControlKind::Static;
 
     // ── Edit ─────────────────────────────────────────────────────────────────
     if (Equals(cls, L"Edit") ||
         Equals(cls, L"TEdit") ||
+        Equals(cls, L"TLabeledEdit") ||
+        Equals(cls, L"TButtonedEdit") ||
+        Equals(cls, L"TMaskEdit") ||
+        Equals(cls, L"TSearchBox") ||
+        Equals(cls, L"TNumberBox") ||
+        Equals(cls, L"TSpinEdit") ||
+        Equals(cls, L"THotKey") ||
         Equals(cls, L"TMemo") ||
+        Equals(cls, L"TInplaceEdit") ||
         Equals(cls, L"TInplaceEditList"))
         return ControlKind::Edit;
 
     // ── RichEdit ─────────────────────────────────────────────────────────────
-    if (Equals(cls, L"RichEdit20W") ||
-        Equals(cls, L"TRichEdit"))
+    if (Equals(cls, L"RichEdit20W"))
         return ControlKind::RichEdit20W;
 
-    if (Equals(cls, L"RICHEDIT50W"))
+    if (Equals(cls, L"TRichEdit") || Equals(cls, L"RICHEDIT50W"))
         return ControlKind::RichEdit50W;
 
     // ── ComboLBox (popup — классифицируется через IsSpecialWindow; только нативный класс)
@@ -321,12 +411,21 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
 
     // ── ListBox ──────────────────────────────────────────────────────────────
     if (Equals(cls, L"ListBox") ||
-        Equals(cls, L"TListBox"))
+        Equals(cls, L"TListBox") ||
+        Equals(cls, L"TCheckListBox") ||
+        Equals(cls, L"TColorListBox") ||
+        // TFileListBox/TDirectoryListBox — тоже TCustomListBox, рисуют строку
+        // сами (owner-draw: значок + имя), поэтому идут тем же маршрутом.
+        Equals(cls, L"TFileListBox") ||
+        Equals(cls, L"TDirectoryListBox"))
         return ControlKind::ListBox;
 
     // ── ComboBox ─────────────────────────────────────────────────────────────
     if (Equals(cls, L"ComboBox") ||
-        Equals(cls, L"TComboBox"))
+        Equals(cls, L"TComboBox") ||
+        Equals(cls, L"TColorBox") ||
+        Equals(cls, L"TDriveComboBox") ||
+        Equals(cls, L"TFilterComboBox"))
         return ControlKind::ComboBox;
 
     // ── ComboBoxEx32 ────────────────────────────────────────────────────────
@@ -348,6 +447,7 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
     // ── TabControl ───────────────────────────────────────────────────────────
     if (Equals(cls, L"SysTabControl32") ||
         Equals(cls, L"TTabControl") ||
+        Equals(cls, L"TPageControl") ||
         Equals(cls, L"_wx_SysTabCtl32"))
         return ControlKind::TabControl;
 
@@ -362,7 +462,7 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
         return ControlKind::StatusBar;
 
     // ── TrackBar ─────────────────────────────────────────────────────────────
-    if (Equals(cls, L"msctls_trackbar32"))
+    if (Equals(cls, L"msctls_trackbar32") || Equals(cls, L"TTrackBar"))
         return ControlKind::TrackBar;
 
     // ── UpDown ───────────────────────────────────────────────────────────────
@@ -371,7 +471,9 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
         return ControlKind::UpDown;
 
     // ── Header ───────────────────────────────────────────────────────────────
-    if (Equals(cls, L"SysHeader32"))
+    // THeaderControl — Delphi-обёртка вокруг SysHeader32: тот же Header-путь
+    // (HeaderHooks/Header_Attach).
+    if (Equals(cls, L"SysHeader32") || Equals(cls, L"THeaderControl"))
         return ControlKind::Header;
 
     // ── Animate ──────────────────────────────────────────────────────────────
@@ -379,28 +481,39 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
         return ControlKind::Animate;
 
     // ── ScrollBar ────────────────────────────────────────────────────────────
-    if (Equals(cls, L"ScrollBar"))
+    if (Equals(cls, L"ScrollBar") || Equals(cls, L"TScrollBar"))
         return ControlKind::ScrollBar;
 
     // ── DateTimePicker ───────────────────────────────────────────────────────
-    if (Equals(cls, L"SysDateTimePick32"))
+    if (Equals(cls, L"SysDateTimePick32") || Equals(cls, L"TDateTimePicker"))
         return ControlKind::DateTimePicker;
 
     // ── MonthCal ─────────────────────────────────────────────────────────────
-    if (Equals(cls, L"SysMonthCal32"))
+    // TMonthCalendar — Delphi-обёртка вокруг SysMonthCal32: тот же MonthCal-путь
+    // (MonthCalHooks/MonthCal_Attach).
+    if (Equals(cls, L"SysMonthCal32") || Equals(cls, L"TMonthCalendar"))
         return ControlKind::MonthCal;
 
     // ── ReBar ────────────────────────────────────────────────────────────────
     if (Equals(cls, L"ReBarWindow32") || Equals(cls, L"SizeableRebar"))
         return ControlKind::ReBar;
 
+    // ── CoolBar (Delphi TCoolBar) ────────────────────────────────────────────
+    // Зонд GetClassNameW: TCoolBar; нормализатор НЕ снимает префикс T.
+    // Общий предикат с attach/catch-up/rescan; CoolBar — прежний алиас.
+    // Свой путь: TCoolBarSubclass + delphi/TCoolBarDraw, не generic rebar.
+    if (WndCompat::CoolBar_IsClassName(cls.c_str()))
+        return ControlKind::CoolBar;
+
     // ── ToolBar ──────────────────────────────────────────────────────────────
-    if (Equals(cls, L"ToolbarWindow32"))
+    if (Equals(cls, L"ToolbarWindow32") || Equals(cls, L"TToolBar"))
         return ControlKind::ToolBar;
 
     // ── Delphi-контейнеры ────────────────────────────────────────────────────
-    if (Equals(cls, L"TGroupBox") ||
-        Equals(cls, L"TTabSheet"))
+    if (Equals(cls, L"TGroupBox") || Equals(cls, L"TRadioGroup") ||
+        Equals(cls, L"TCard") || Equals(cls, L"TTabSheet") ||
+        GlassShared::IsDelphiPanelClassName(cls.c_str()) ||
+        GlassShared::IsDelphiButtonGroupsClassName(cls.c_str()))
         return ControlKind::DelphiContainer;
 
     // ── Прочие WS_CHILD контейнеры ───────────────────────────────────────────
@@ -443,6 +556,17 @@ ClassifyResult WindowClassifier::Classify(HWND hwnd)
         return {};
 
     std::wstring cls = WndCompat::NormalizeWindowClass(hwnd);
+
+    // Delphi использует TApplication как служебное окно маршрутизации VCL,
+    // а не как форму для glass-rendering. Не меняем его WndProc/subclass.
+    if (Equals(cls, L"TApplication"))
+        return {};
+
+    // RTL AllocateHWnd/DeallocateHWnd: DeallocateHWnd считывает WNDPROC
+    // до DestroyWindow и освобождает его как Delphi thunk. Comctl subclass
+    // подменяет WNDPROC, поэтому служебный TPUtilWindow нельзя subclass-ить.
+    if (Equals(cls, L"TPUtilWindow"))
+        return {};
 
     // 0. Win11 CoreWindow: SEH/ShellHost/SMEH/SearchHost — Special; иначе Ignored (никогда Root).
     //    Класс остаётся в kHardList (SWCA-exempt).

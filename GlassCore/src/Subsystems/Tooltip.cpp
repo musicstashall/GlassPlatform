@@ -5,6 +5,7 @@
 #include <Subsystems/Settings.h>
 #include <Hooks/TooltipHooks.h>
 #include <Hooks/KbxLabelHooks.h>
+#include <Hooks/delphi/THintWindowDraw.h>
 #include <RegHelper.h>
 #include <Helpers/ThemeHelper.h>
 #include <CommCtrl.h>
@@ -115,6 +116,9 @@ namespace GlassCore::Tooltip
             return;
 
         UpdateContext(hWnd, std::nullopt);
+        // Окно подсказки VCL (THintWindow) рисует код EXE, а не comctl32:
+        // его импорты берутся при первом таком окне, до показа.
+        GlassCore::DelphiHint::OnAttached(hWnd);
         SendMessageW(hWnd, WM_THEMECHANGED, 0, 0);
         SendMessageW(hWnd, TTM_UPDATE, 0, 0);
     }

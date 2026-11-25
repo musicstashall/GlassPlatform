@@ -1305,9 +1305,32 @@ namespace GlassCore::Text
         if (excludeRect)
             ExcludeClipRect(hdc, excludeRect->left, excludeRect->top, excludeRect->right, excludeRect->bottom);
 
+#if defined(_DEBUG)
+        HWND probeHwnd = WindowFromDC(hdc);
+        wchar_t probeClass[64]{};
+        bool probeMemo = probeHwnd && GetClassNameW(probeHwnd, probeClass, _countof(probeClass))
+            && _wcsicmp(probeClass, L"TMemo") == 0;
+        if (probeMemo)
+        {
+            static thread_local ULONGLONG epoch = 0;
+            static thread_local unsigned budget = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (!epoch || now - epoch >= 1000) { epoch = now; budget = 16; }
+            if (!budget) probeMemo = false;
+            else --budget;
+        }
+#endif
         HDC memoryDC = nullptr;
         HPAINTBUFFER bufferedPaint = BeginBufferedPaint(
             hdc, &paintRect, BPBF_TOPDOWNDIB, &paintParams, &memoryDC);
+#if defined(_DEBUG)
+        if (probeMemo)
+            DebugLog(DBG_NORMAL,
+                L"[GlassCore][DelphiMemo] BufferAPI api=BeginBufferedPaint hwnd=0x%p focused=%d dc=0x%p memory=0x%p buffer=0x%p rect=[%ld,%ld,%ld,%ld] flags=0x%X blend=%u update=%d",
+                probeHwnd, GetFocus() == probeHwnd ? 1 : 0, hdc, memoryDC, bufferedPaint,
+                paintRect.left, paintRect.top, paintRect.right, paintRect.bottom,
+                static_cast<unsigned>(bpFlags), static_cast<unsigned>(alpha), update ? 1 : 0);
+#endif
         if (!bufferedPaint || !memoryDC)
         {
             const int objType = GetObjectType(hdc);
@@ -1363,7 +1386,36 @@ namespace GlassCore::Text
 
         bool shouldUpdate = update;
         auto cleanup = wil::scope_exit([&] {
-            EndBufferedPaint(bufferedPaint, shouldUpdate ? TRUE : FALSE);
+#if defined(_DEBUG)
+            size_t nonzero = 0;
+            unsigned maximum = 0;
+            if (probeMemo && buffer && cxRow > 0)
+            {
+                const int w = paintRect.right - paintRect.left;
+                const int h = paintRect.bottom - paintRect.top;
+                if (w > 0 && h > 0 && w <= cxRow && static_cast<size_t>(w) * h <= 4000000)
+                {
+                    GdiFlush();
+                    for (int row = 0; row < h; ++row)
+                        for (int col = 0; col < w; ++col)
+                        {
+                            const unsigned a = buffer[static_cast<size_t>(row) * cxRow + col].rgbReserved;
+                            if (a) ++nonzero;
+                            maximum = (std::max)(maximum, a);
+                        }
+                }
+            }
+#endif
+            const HRESULT endHr = EndBufferedPaint(bufferedPaint, shouldUpdate ? TRUE : FALSE);
+#if defined(_DEBUG)
+            if (probeMemo)
+                DebugLog(DBG_NORMAL,
+                    L"[GlassCore][DelphiMemo] BufferAPI api=EndBufferedPaint hwnd=0x%p dc=0x%p memory=0x%p buffer=0x%p update=%d alphaCount=%zu alphaMax=%u hr=0x%08lX",
+                    probeHwnd, hdc, memoryDC, bufferedPaint, shouldUpdate ? 1 : 0,
+                    nonzero, maximum, static_cast<unsigned long>(endHr));
+#else
+            (void)endHr;
+#endif
             });
 
         try { callback(memoryDC, bufferedPaint, buffer, cxRow); }

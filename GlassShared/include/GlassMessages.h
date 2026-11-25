@@ -18,6 +18,10 @@ namespace WndCompat
 
     // 0x200 зарезервирован
 
+    // PostMessage → ComboLBoxSubclassProc → RedrawWindow(RDW_INVALIDATE|RDW_UPDATENOW|RDW_ALLCHILDREN)
+    // (отложенная после uncloak перерисовка клиента списка — см. ScrollbarRendering.md §14).
+    inline constexpr UINT WM_GLASS_FLYOUT_CLIENT_REFRESH = WM_APP + 0x225;
+
     // PostMessage → GetMsgHookProc (поток-владелец) → Root_Attach
     inline constexpr UINT WM_GLASS_ATTACH_ROOT      = WM_APP + 0x201;
 
@@ -43,7 +47,7 @@ namespace WndCompat
     // SendMessageTimeout → TabControlSubclassProc → RemoveWindowSubclass
     inline constexpr UINT WM_GLASS_DETACH_TABCONTROL = WM_APP + 0x209;
 
-    // Зарезервировано (ранее субкласс трекбара; сейчас TrackBarHost без WM_APP-detach).
+    // SendMessageTimeout/PostMessage → TrackBarSubclassProc → RemoveWindowSubclass
     inline constexpr UINT WM_GLASS_DETACH_TRACKBAR   = WM_APP + 0x20A;
 
     // SendMessageTimeout → DateTimePickerSubclassProc → RemoveWindowSubclass
@@ -51,6 +55,8 @@ namespace WndCompat
 
     // SendMessageTimeout → RebarSubclassProc → RemoveWindowSubclass
     inline constexpr UINT WM_GLASS_DETACH_REBAR      = WM_APP + 0x20C;
+    // Delphi TCoolBar (классы окна TCoolBar / CoolBar) — свой путь отрисовки.
+    inline constexpr UINT WM_GLASS_DETACH_COOLBAR    = WM_APP + 0x225;
 
     // 0x211–0x212 зарезервированы (ранее IE_Server APPLY/DETACH при субклассе; сессия — PaintDispatcher + GlassMark).
 
@@ -95,6 +101,10 @@ namespace WndCompat
     // PostMessage → GetMsgHookProc (поток-владелец) → WndHandler(EVENT_OBJECT_CREATE) для Control/Special/Popup.
     // Не использовать для top-level Root — только WM_GLASS_ATTACH_ROOT.
     inline constexpr UINT WM_GLASS_SYNTHETIC_CREATE = WM_APP + 0x221;
+
+    // PostMessage → GetMsgHookProc (поток-владелец) → Root_AttachDropDownNotify (узкий WM_COMMAND sink
+    // для чужого диалога, только PopupOnly: CBN_DROPDOWN → ComboLBox_Attach). Не Root_Attach.
+    inline constexpr UINT WM_GLASS_ATTACH_DROPDOWN_NOTIFY = WM_APP + 0x224;
 
     // PostMessage → ControlWndProc: один process-wide OnRootDwmColorizationChanged (coalesce wave).
     inline constexpr UINT WM_GLASS_DWMCOLORIZATION_DISPATCH = WM_APP + 0x218;

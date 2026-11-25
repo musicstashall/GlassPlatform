@@ -16,7 +16,7 @@ namespace GlassCore::Hooks::UxThemeHooks
     void EnableHooks(bool enable);
 
     // Включение/выключение UxTheme хуков (DrawThemeBackground/Text) - для NativeTheme
-    void EnableThemeHooks(bool enable);
+    bool EnableThemeHooks(bool enable);
 
     // WM_UAHDRAWMENU / WM_UAHDRAWMENUITEM на root: как BWM — флаг MenuHandler,
     // EnableThemeHooks и (для Classic) ExtTextOutW вокруг DefSubclassProc.

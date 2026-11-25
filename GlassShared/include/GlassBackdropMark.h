@@ -58,6 +58,11 @@ namespace GlassShared
         if (GlassGetWindowKind(hWnd) == GlassControlKind::ComboLBox)
             return true;
 
+        // Доаттаченные слайдеры попапов («Настройки вида»): маркер ставится при TrackBar_Attach —
+        // PaintDispatcher для них работает и без RootBackdropMode prop на GA_ROOT.
+        if (GlassGetWindowKind(hWnd) == GlassControlKind::TrackBar)
+            return true;
+
         // Toolbar внутри ViewControl popup: PaintDispatcher без RootBackdropMode prop.
         if (GlassGetWindowKind(hWnd) == GlassControlKind::Toolbar)
         {

@@ -10,10 +10,13 @@
 #include <GlassControlKind.h>
 #include <MenuUtils.h>
 #include <Tracker/WinEventHandler.h>
+#include <Helpers/ThemeHelper.h>
 
 #include <vector>
 #include <algorithm>
+#include <atomic>
 #include <windowsx.h>
+#include <Tracker/WindowClassUtils.h>
 
 namespace
 {
@@ -184,6 +187,25 @@ namespace
         HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
         UINT_PTR /*uIdSubclass*/, DWORD_PTR /*dwRefData*/)
     {
+        // Отложенная перерисовка клиента после uncloak (см. ScrollbarRendering.md §14):
+        // сообщение ставится из DropDownHooks (SyncComboLBoxClientPaint) после того, как
+        // шторка ушла с экрана — DWM обычно успевает отдать её compositor’у только к моменту
+        // вычитки очереди сообщений, поэтому синхронный RedrawWindow внутри paint-сессии
+        // может не дать WM_PAINT. Здесь — обычный асинхронный поток: принудительно красим.
+        if (uMsg == WndCompat::WM_GLASS_FLYOUT_CLIENT_REFRESH)
+        {
+            // Диагностика регрессии (Round-5): RedrawWindow должен дойти до WM_PAINT / WM_ERASEBKGND.
+            const BOOL ok = ::RedrawWindow(hWnd, nullptr, nullptr,
+                RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN | RDW_INTERNALPAINT);
+            RECT ur{};
+            const BOOL gotUpdate = ::GetUpdateRect(hWnd, &ur, FALSE);
+            const BOOL visible = ::IsWindowVisible(hWnd);
+            DebugLog(DBG_IMPORTANT,
+                L"[WndCompat][ComboLBox] WM_GLASS_FLYOUT_CLIENT_REFRESH: repaint hwnd=0x%p ok=%d updateRect=%d vis=%d",
+                hWnd, ok ? 1 : 0, gotUpdate ? 1 : 0, visible ? 1 : 0);
+            return 0;
+        }
+
         // Снятие субкласса по запросу из чужого потока (ComboLBox_DetachAll → SendMessageTimeout).
         // Обрабатываем до шлюза IsShuttingDown — это и есть цель shutdown-пути.
         // RemoveWindowSubclass здесь безопасен: мы в потоке-владельце ComboLBox-окна.
@@ -230,11 +252,21 @@ namespace
             return result;
         }
 
-        /*case WM_PAINT:
-            return DefSubclassProc(hWnd, uMsg, wParam, lParam);*/
+        case WM_PAINT:
+        {
+            // Диагностика: доходит ли реальный WM_PAINT до списка (для «Тип файлов»).
+            DebugLog(DBG_IMPORTANT,
+                L"[WndCompat][ComboLBox] WM_PAINT hwnd=0x%p", hWnd);
+            return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+        }
 
         case WM_ERASEBKGND:
         {
+            // Диагностика (Round-5): видно, срабатывает ли «чёрная заливка» клиента attached-списка.
+            static std::atomic<unsigned> s_eraseDiag{32};
+            if (s_eraseDiag.fetch_sub(1, std::memory_order_relaxed) < 32)
+                DebugLog(DBG_IMPORTANT, L"[WndCompat][ComboLBox] WM_ERASEBKGND black hwnd=0x%p", hWnd);
+
             HDC hdc = reinterpret_cast<HDC>(wParam);
             RECT clientRect{};
             GetClientRect(hWnd, &clientRect);
@@ -397,6 +429,11 @@ namespace WndCompat
 
         if (SetWindowSubclass(hWnd, ComboLBoxSubclassProc, 1, 0))
         {
+            // DWM/UXTheme: dark-mode самого списка — иначе у нативного ComboBox в диалоге
+            // («Тип файлов» в #32770) список рисуется светлой темой, и интерьер
+            // остаётся белым/нерисованным (на диалоге-владельце нет Root_Attach).
+            Shared::ThemeHelper::EnableWindowDarkModeUxTheme(
+                hWnd, Shared::ThemeHelper::ResolveEffectiveDarkMode());
             g_comboLBoxWindows.push_back(hWnd);
             GlassShared::GlassMarkWindow(hWnd, GlassShared::GlassControlKind::ComboLBox);
             WndCompat::RegisterTextGlowPopupClientWithGlassCore(hWnd, 0);

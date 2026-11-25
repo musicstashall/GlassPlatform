@@ -4,6 +4,8 @@
 #include "WndPch.h"
 #include "EditSubclass.h"
 #include <GlassControlKind.h>
+#include <GlassDelphiMemoBackground.h>
+#include <GlassDelphiInputBackground.h>
 #include <DebugLog.h>
 #include <Richedit.h>
 
@@ -67,6 +69,8 @@ namespace WndCompat
 
     void Edit_Detach(HWND hWnd)
     {
+        GlassShared::ClearDelphiMemoBackground(hWnd);
+        GlassShared::SetDelphiInputDefaultBackground(hWnd, false);
         GlassShared::GlassUnmarkWindow(hWnd);
 
         {
@@ -90,7 +94,11 @@ namespace WndCompat
         for (HWND hWnd : windows)
         {
             if (IsWindow(hWnd))
+            {
+                GlassShared::ClearDelphiMemoBackground(hWnd);
+                GlassShared::SetDelphiInputDefaultBackground(hWnd, false);
                 GlassShared::GlassUnmarkWindow(hWnd);
+            }
         }
 
         DebugLog(L"[WndCompat][Edit] Edit_DetachAll: снято %zu окон", windows.size());
@@ -122,10 +130,7 @@ namespace WndCompat
 
     void RichEdit_Detach(HWND hWnd)
     {
-        // Восстанавливаем системный цвет фона
-        if (IsWindow(hWnd))
-            SendMessageW(hWnd, EM_SETBKGNDCOLOR, 1, 0);
-
+        // Attach не меняет фон: не сбрасывать пользовательский цвет при detach.
         GlassShared::GlassUnmarkWindow(hWnd);
 
         {
@@ -150,7 +155,6 @@ namespace WndCompat
         {
             if (IsWindow(hWnd))
             {
-                SendMessageW(hWnd, EM_SETBKGNDCOLOR, 1, 0);
                 GlassShared::GlassUnmarkWindow(hWnd);
             }
         }

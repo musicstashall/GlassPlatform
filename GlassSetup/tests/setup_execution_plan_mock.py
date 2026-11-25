@@ -281,8 +281,7 @@ int main(){
  {InstallEngine e;Reset(e);e.selection_.removeMask=1;e.selection_.secureUxTheme=true;assert(!e.BuildExecutionPlan());}
  {InstallEngine e;Reset(e);e.selection_.removeMask=4;Installed(e,L"s64",L"1.0.0");Installed(e,L"p64",L"1.0.0");
   GlassProductInspect::observation.settings64.installed=true;GlassProductInspect::observation.x64.installed=true;
-  assert(!e.BuildExecutionPlan());e.selection_.confirmedSettingsRemovalRisk=2;assert(!e.BuildExecutionPlan());
-  e.selection_.confirmedSettingsRemovalRisk=1;assert(e.BuildExecutionPlan());}
+  assert(e.BuildExecutionPlan());assert(e.executionPlan_.rows[Index(Product::Settings64)].action==Action::Remove);}
  // A residual authorizes auxiliary-only Remove, never a fabricated MSI baseline.
  for(bool safe:{false,true}){InstallEngine e;Reset(e);e.selection_.removeMask=8;
   auto& og=GlassProductInspect::observation.og;og.residual=true;og.residualSafe=safe;

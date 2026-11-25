@@ -10,7 +10,7 @@ const binary=pkg.default||pkg,path=require('node:path'),assert=require('node:ass
   await page.evaluate(()=>window.receive({data:{type:'state',page:'certificate',locale:'ru'}}));
   await page.waitForTimeout(400);
   const reference=await page.locator('#certificate-title').boundingBox();
-  for(const locale of ['ru','en'])for(const [mode,id] of [['components','components-title'],['license','license-title'],['certificate','certificate-title'],['settings-removal-risk','confirm-title'],['confirm-cancel','confirm-title'],['checking','checking-title'],['conflicts','conflicts-title'],['downgrade','downgrade-title'],['version-invalid','version-invalid-title'],['error','error-title'],['complete','complete-title'],['cancelled','cancelled-title'],['launching','launch-title'],['uninstalling','unins-title'],['cancelling','cancelling-title'],['unlock-modules','unlock-title']]){
+  for(const locale of ['ru','en'])for(const [mode,id] of [['components','components-title'],['license','license-title'],['certificate','certificate-title'],['confirm-cancel','confirm-title'],['checking','checking-title'],['conflicts','conflicts-title'],['error','error-title'],['complete','complete-title'],['cancelled','cancelled-title'],['launching','launch-title'],['uninstalling','unins-title'],['cancelling','cancelling-title'],['unlock-modules','unlock-title']]){
    await page.evaluate(({mode,locale})=>window.receive({data:{type:'state',page:mode,locale,components:[],componentsLoading:false}}),{mode,locale});
    await page.waitForTimeout(950);
    const heading=await page.locator('#'+id).boundingBox();

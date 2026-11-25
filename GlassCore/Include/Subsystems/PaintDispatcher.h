@@ -65,7 +65,12 @@ namespace GlassCore::PaintDispatcher
 
     // Вершина стека BeginPaint / GetDC / CreateCompatibleDC в текущем потоке (последний «хозяин» DC).
     // У memory-DC WindowFromDC часто NULL — для классификации MMC-графика в RootGdiHooks.
+    // PopupOnly: Foreign-барьер (чужой BeginPaint/GetDC поверх стеклянной сессии) прячет хост — здесь nullptr.
     [[nodiscard]] HWND GetPaintSessionHostHwnd() noexcept;
+
+    // PopupOnly: вершина стека — чужое окно (BeginPaint/GetDC неразрешённого kind).
+    // Пока барьер активен, сессионные хуки отдают orig. В Full всегда false.
+    [[nodiscard]] bool IsForeignPaintBarrierActive() noexcept;
 
     // Только внутри onBegin у провайдеров GetDC/GetDCEx: HDC уже получен диспетчером (g_origGetDC).
     // Не вызывать повторно GetDC(hWnd) для того же окна — иначе рекурсия через HookGetDC.
@@ -78,6 +83,15 @@ namespace GlassCore::PaintDispatcher
     // Текущий стек BeginPaint/GetDC/MEMDC: запись (hWnd, hdc) добавляется при EndPaint/GetDC и CreateCompatibleDC.
     // У MEMDC WindowFromDC часто NULL — для сессионного буфера Edit сверяем hdc с этим стеком.
     [[nodiscard]] bool IsPaintStackDcForHwnd(HWND hWnd, HDC hdc) noexcept;
+
+    // Ближайшая оконная paint/GetDC-сессия без учёта вложенных memory DC.
+    [[nodiscard]] bool IsTopWindowDrawingSession(HWND hWnd) noexcept;
+
+    // Истинная BeginPaint-сессия этого HWND ещё открыта (в т.ч. под GetDC).
+    [[nodiscard]] bool HasOpenPaintSessionForHwnd(HWND hWnd) noexcept;
+
+    // Ближайшая запись именно этого HDC — BeginPaint данного окна, не вложенный GetDC.
+    [[nodiscard]] bool IsCurrentPaintDcForHwnd(HWND hWnd, HDC hdc) noexcept;
 
     // Tier-1: владелец memory-DC из стека текущего потока (обратный поиск hdc→hWnd, от свежих к старым).
     // Закрывает buffered-рисование вне активной BeginPaint-сессии без глобального мапа.

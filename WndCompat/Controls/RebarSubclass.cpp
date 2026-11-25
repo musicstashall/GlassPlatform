@@ -9,6 +9,8 @@
 #include <GlassBackdropMark.h>
 #include <RootPolicyQuery.h>
 #include <RootEventProvider.h>
+#include <string>
+#include <cwchar>
 
 #include <vector>
 #include <algorithm>
@@ -39,6 +41,20 @@ namespace
         {
             if (!GlassShared::GlassIsBackdropAllowedForHwnd(hWnd))
                 return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+
+            // След: сабкласс жив и WM_PAINT доходит (иначе в журнале вообще
+            // ничего про rebar не будет).
+            {
+                static thread_local ULONGLONG epoch = 0;
+                static thread_local unsigned budget = 0;
+                const ULONGLONG now = GetTickCount64();
+                if (!epoch || now - epoch >= 1000) { epoch = now; budget = 8; }
+                if (budget)
+                {
+                    --budget;
+                    DebugLog(DBG_NORMAL, L"[WndCompat][Rebar] WM_PAINT hwnd=0x%p", hWnd);
+                }
+            }
 
             // Включаем DrawThemeBackground хук -> DefSubclassProc -> выключаем.
             // Хук заменяет тему "Rebar" на PatBlt(BLACKNESS).
@@ -96,9 +112,15 @@ namespace WndCompat
     void Rebar_Attach(HWND hWnd)
     {
         if (WinEventHook_GetMode() != Shared::InjectionMode::Full)
+        {
+            DebugLog(DBG_NORMAL, L"[WndCompat][Rebar] Rebar_Attach: skip (mode!=Full) hwnd=0x%p", hWnd);
             return;
+        }
         if (!IsWindow(hWnd))
+        {
+            DebugLog(DBG_NORMAL, L"[WndCompat][Rebar] Rebar_Attach: skip (!IsWindow) hwnd=0x%p", hWnd);
             return;
+        }
         if (std::find(g_rebarWindows.begin(), g_rebarWindows.end(), hWnd) != g_rebarWindows.end())
             return;
         if (!SetWindowSubclass(hWnd, RebarSubclassProc, 1, 0))
@@ -111,6 +133,74 @@ namespace WndCompat
         WndCompat::TryRegisterTextGlowClientWithGlassCore(hWnd);
         g_rebarWindows.push_back(hWnd);
         DebugLog(L"[WndCompat][Rebar] Rebar_Attach: субкласс установлен hwnd=0x%p", hWnd);
+    }
+
+    namespace
+    {
+        [[nodiscard]] bool IsRebarClass(const wchar_t* cls) noexcept
+        {
+            if (!cls)
+                return false;
+            return _wcsicmp(cls, L"ReBarWindow32") == 0
+                || _wcsicmp(cls, L"SizeableRebar") == 0;
+        }
+
+        struct RebarCensus
+        {
+            unsigned  children{};
+            unsigned  rebar{};
+            unsigned  distinct{};
+            wchar_t   classes[16][64]{};
+        };
+
+        BOOL CALLBACK RebarCatchUpProc(HWND hWnd, LPARAM lParam) noexcept
+        {
+            auto* ctx = reinterpret_cast<RebarCensus*>(lParam);
+            if (!ctx)
+                return FALSE;
+            ++ctx->children;
+
+            wchar_t cls[64]{};
+            if (!GetClassNameW(hWnd, cls, _countof(cls)))
+                return TRUE;
+
+            bool known = false;
+            for (unsigned i = 0; i < ctx->distinct; ++i)
+                if (_wcsicmp(ctx->classes[i], cls) == 0) { known = true; break; }
+            if (!known && ctx->distinct < _countof(ctx->classes))
+                wcscpy_s(ctx->classes[ctx->distinct++], cls);
+
+            if (IsRebarClass(cls))
+            {
+                ++ctx->rebar;
+                WndCompat::Rebar_Attach(hWnd);
+            }
+            return TRUE;
+        }
+    }
+
+    void Rebar_CatchUp(HWND hRoot) noexcept
+    {
+        if (!hRoot || !IsWindow(hRoot) || WndCompat::IsShuttingDown())
+            return;
+        if (WinEventHook_GetMode() != Shared::InjectionMode::Full)
+            return;
+
+        RebarCensus ctx{};
+        EnumChildWindows(hRoot, RebarCatchUpProc, reinterpret_cast<LPARAM>(&ctx));
+
+        // Перепись поддерева: без неё «тишина в журнале» не отличает «нет
+        // rebar-окон» от «догоняющий проход не вызывался».
+        std::wstring names;
+        for (unsigned i = 0; i < ctx.distinct; ++i)
+        {
+            if (i)
+                names += L'|';
+            names += ctx.classes[i];
+        }
+        DebugLog(DBG_NORMAL,
+            L"[WndCompat][Rebar] Rebar_CatchUp: root=0x%p children=%u rebar=%u classes=%s",
+            hRoot, ctx.children, ctx.rebar, names.c_str());
     }
 
     void Rebar_Detach(HWND hWnd)

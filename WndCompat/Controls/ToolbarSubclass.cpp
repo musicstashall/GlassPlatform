@@ -2,12 +2,14 @@
 // Без SubclassProc — все хуки ставятся через ToolbarHooks (GlassCore).
 
 #include "WndPch.h"
-#include "ToolBarSubclass.h"
+#include "ToolbarSubclass.h"
 #include <WndCompat.h>
 #include <GlassControlKind.h>
 #include <RootPolicyQuery.h>
 #include <RootEventProvider.h>
 #include "Tracker/WinEventHandler.h"
+#include "Tracker/WindowClassifier.h"
+#include <InjectionMode.h>
 
 #include <vector>
 #include <mutex>
@@ -25,6 +27,15 @@ namespace WndCompat
     {
         if (!IsWindow(hWnd))
             return;
+
+        // PopupOnly: «пирог» шапки общего диалога (навигационные кнопки / крошки / rebar)
+        // не получает стекло — страховка на случай обхода WinEventHandler-гейта.
+        if (WndCompat::WinEventHook_GetMode() != Shared::InjectionMode::Full
+            && WindowClassifier::IsCommonDialogHeaderPieWindow(hWnd))
+        {
+            DebugLog(L"[WndCompat][ToolBar] ToolBar_Attach: skip (PopupOnly dialog-header π) hwnd=0x%p", hWnd);
+            return;
+        }
 
         if (GlassShared::GlassGetWindowKind(hWnd) == GlassShared::GlassControlKind::Toolbar)
             return;

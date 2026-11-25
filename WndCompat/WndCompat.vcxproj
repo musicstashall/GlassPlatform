@@ -185,7 +185,9 @@
     <ClCompile Include="Controls\StatusBarSubclass.cpp" />
     <ClCompile Include="Controls\ProgressBarSubclass.cpp" />
     <ClCompile Include="Controls\DateTimePickerSubclass.cpp" />
+    <ClCompile Include="Providers\CoolBarEventProvider.cpp" />
     <ClCompile Include="Providers\RebarEventProvider.cpp" />
+    <ClCompile Include="Controls\TCoolBarSubclass.cpp" />
     <ClCompile Include="Controls\RebarSubclass.cpp" />
     <ClCompile Include="Controls\StaticSubclass.cpp" />
     <ClCompile Include="Controls\MonthCalSubclass.cpp" />
@@ -246,6 +248,7 @@
     <ClInclude Include="Controls\EditSubclass.h" />
     <ClInclude Include="Controls\ListViewSubclass.h" />
     <ClInclude Include="Controls\HeaderSubclass.h" />
+    <ClInclude Include="Controls\TCoolBarSubclass.h" />
     <ClInclude Include="Controls\RebarSubclass.h" />
     <ClInclude Include="Controls\StaticSubclass.h" />
     <ClInclude Include="Controls\MonthCalSubclass.h" />
@@ -265,6 +268,7 @@
     <ClInclude Include="Popup\Menu\MenuSubclass.h" />
     <ClInclude Include="Popup\Tooltip\TooltipSubclass.h" />
     <ClInclude Include="Popup\Tooltip\KbxLabelSubclass.h" />
+    <ClInclude Include="Popup\Tooltip\DelphiHintPaint.h" />
     <ClInclude Include="Root\ExplorerRootSubclass.h" />
     <ClInclude Include="Root\RootBackdropRefreshThrottle.h" />
     <ClInclude Include="Root\Win32ChromeRestore.h" />
@@ -272,6 +276,8 @@
     <ClInclude Include="Root\TaskbarHost.h" />
     <ClInclude Include="Root\RootExplorerSubclassBridge.h" />
     <ClInclude Include="Root\RootSubclassShared.h" />
+    <ClInclude Include="Root\DelphiPanelPaint.h" />
+    <ClInclude Include="Root\DelphiShowErase.h" />
     <ClInclude Include="Explorer\ExplorerIslandContainerSubclass.h" />
     <ClInclude Include="Tracker\WindowClassifier.h" />
     <ClInclude Include="Tracker\WindowClassUtils.h" />

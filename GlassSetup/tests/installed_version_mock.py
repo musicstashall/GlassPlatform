@@ -35,12 +35,10 @@ def structure(text, token):
 
 
 preflight = function(setup, "bool RunPreflightChecks()")
-page = function(setup, "void SetPage(Page page)")
 assert 'ResolveInstallRoots(roots)' in preflight
 assert 'FindInstalledGlassVersion' not in preflight and 'CompareVersions' not in preflight
-assert 'SetPage(Page::VersionInvalid)' in preflight and 'return false;' in preflight
-assert 'page_==Page::Downgrade || page_==Page::VersionInvalid' in page
-assert 'page_==Page::VersionInvalid) return 0;' in setup
+assert 'ShowInstallError(Text(IDS_ERR_INSTALL_PATH))' in preflight and 'return false;' in preflight
+assert 'Page::VersionInvalid' not in setup and 'Page::Downgrade' not in setup
 assert 'forceCleanInstall_' not in setup and 'offerCleanInstall_' not in setup
 
 pieces = [structure(setup, "struct ParsedVersion"),
@@ -97,26 +95,26 @@ std::wstring ReadProductVersionString(const std::wstring& path,ULONGLONG& key){k
 '''
 
 wizard = r'''
-enum class Page { Welcome, Conflicts, VersionInvalid, Downgrade };
-constexpr int IDS_VERSION_INVALID_BODY=1,IDS_ERR_INSTALL_PATH=2,IDS_VERSION_INVALID_NOTE=3,
- IDS_SETUP_VERSION_INVALID_BODY=4,IDS_SETUP_VERSION_INVALID_NOTE=5,IDS_DOWNGRADE_BODY=6;
+enum class Page { Welcome, Conflicts, Error };
+constexpr int IDS_ERR_INSTALL_PATH=2;
 std::wstring Text(int id){return std::to_wstring(id);}
 std::wstring SelfProductVersion(){return fake.self;}
 std::vector<std::wstring> DetectConflictingApps(){return {};}
 std::wstring FormatVersionPairText(int,const std::wstring& a,const std::wstring& b){return a+L" / "+b;}
 struct Wizard {Page page_=Page::Welcome;std::vector<std::wstring> conflicts_;
- std::wstring installedGlassVersion_,setupProductVersion_,preflightX64Root_,preflightX86Root_,preflightOpenGlassRoot_,blockReason_,versionInvalidNote_,downgradeBody_;
+ std::wstring preflightX64Root_,preflightX86Root_,preflightOpenGlassRoot_,errorReason_;
  void SetPage(Page p){page_=p;}
+ void ShowInstallError(const std::wstring& reason){errorReason_=reason;SetPage(Page::Error);}
 '''+preflight+r'''
 };
 void addCore(const std::wstring& root,const std::wstring& version){auto p=root+L"\\GlassCore.dll";fake.files[p]=0;fake.versions[p]=version;}
 int main(){
  reset();addCore(fake.x64,L"99.0.0.50");Wizard normal;assert(normal.RunPreflightChecks());
- assert(normal.installedGlassVersion_.empty()&&normal.preflightX64Root_==fake.x64);
+ assert(normal.preflightX64Root_==fake.x64&&normal.page_==Page::Welcome);
  reset();fake.reg86=true;fake.x86=L"D:\\Programs\\GlassPlatform";addCore(fake.x86,L"99.0.0.51");
  Wizard custom;assert(custom.RunPreflightChecks()&&custom.preflightX86Root_==fake.x86);
  reset();fake.roots=false;Wizard noRoots;assert(!noRoots.RunPreflightChecks());
- assert(noRoots.page_==Page::VersionInvalid&&noRoots.blockReason_==Text(IDS_ERR_INSTALL_PATH));
+ assert(noRoots.page_==Page::Error&&noRoots.errorReason_==Text(IDS_ERR_INSTALL_PATH));
  // Missing/damaged/unreadable PE files and a different Setup version cannot
  // hide cards or authorize a downgrade of any product's MSI.
  for(int n=0;n<5;++n){reset();
