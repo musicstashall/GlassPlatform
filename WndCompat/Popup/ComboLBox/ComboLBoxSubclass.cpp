@@ -15,11 +15,109 @@
 #include <vector>
 #include <algorithm>
 #include <atomic>
+#include <mutex>
+#include <unordered_map>
 #include <windowsx.h>
 #include <Tracker/WindowClassUtils.h>
 
 namespace
 {
+    struct TPopupListboxNormState
+    {
+        bool normalized = false;
+        LONG_PTR savedStyle = 0;
+        HWND savedOwner = nullptr;
+    };
+
+    std::mutex g_tpopupNormMutex;
+    std::unordered_map<HWND, TPopupListboxNormState> g_tpopupNorm;
+
+    bool IsTPopupListbox(HWND hWnd) noexcept
+    {
+        return hWnd && WndCompat::IsWindowClass(hWnd, L"TPopupListbox");
+    }
+
+    void NormalizeTPopupListboxForGlass(HWND hWnd) noexcept
+    {
+        if (!IsTPopupListbox(hWnd) || !::IsWindow(hWnd))
+            return;
+
+        const LONG_PTR style = ::GetWindowLongPtrW(hWnd, GWL_STYLE);
+        if ((style & WS_CHILD) == 0)
+            return;
+        if (::GetParent(hWnd) != nullptr)
+            return; // VCL ещё не перевёл в floating-состояние
+
+        RECT rc{};
+        if (!::GetWindowRect(hWnd, &rc))
+            return;
+
+        HWND owner = ::GetWindow(hWnd, GW_OWNER);
+        if (!owner || !::IsWindow(owner))
+            owner = ::GetAncestor(hWnd, GA_ROOT);
+
+        {
+            std::lock_guard<std::mutex> lock(g_tpopupNormMutex);
+            auto& st = g_tpopupNorm[hWnd];
+            if (st.normalized)
+                return;
+            st.normalized = true;
+            st.savedStyle = style;
+            st.savedOwner = owner;
+        }
+
+        const LONG_PTR newStyle = (style & ~static_cast<LONG_PTR>(WS_CHILD)) | WS_POPUP;
+        ::SetWindowLongPtrW(hWnd, GWL_STYLE, newStyle);
+        // Окно уже parentless (VCL SetParent(NULL)); SetParent(NULL) безопасен.
+        ::SetParent(hWnd, nullptr);
+        if (owner && ::IsWindow(owner))
+            ::SetWindowLongPtrW(hWnd, GWLP_HWNDPARENT, reinterpret_cast<LONG_PTR>(owner));
+
+        const int w = rc.right - rc.left;
+        const int h = rc.bottom - rc.top;
+        const UINT swp = SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_NOZORDER
+            | (::IsWindowVisible(hWnd) ? SWP_SHOWWINDOW : 0);
+        ::SetWindowPos(hWnd, HWND_TOPMOST, rc.left, rc.top, w, h, swp);
+
+        DebugLog(L"[WndCompat][ComboLBox] TPopupListbox normalized WS_CHILD->WS_POPUP hwnd=0x%p owner=0x%p rc=[%d,%d,%d,%d]",
+            hWnd, owner, rc.left, rc.top, rc.right, rc.bottom);
+    }
+
+    void RestoreTPopupListboxAfterGlass(HWND hWnd) noexcept
+    {
+        if (!IsTPopupListbox(hWnd) || !::IsWindow(hWnd))
+            return;
+
+        TPopupListboxNormState st{};
+        {
+            std::lock_guard<std::mutex> lock(g_tpopupNormMutex);
+            auto it = g_tpopupNorm.find(hWnd);
+            if (it == g_tpopupNorm.end() || !it->second.normalized)
+                return;
+            st = it->second;
+            it->second.normalized = false;
+        }
+
+        const LONG_PTR curStyle = ::GetWindowLongPtrW(hWnd, GWL_STYLE);
+        LONG_PTR restoreStyle = st.savedStyle ? st.savedStyle : curStyle;
+        restoreStyle = (restoreStyle & ~static_cast<LONG_PTR>(WS_POPUP)) | WS_CHILD;
+        if ((restoreStyle & WS_VISIBLE) == 0)
+            restoreStyle &= ~static_cast<LONG_PTR>(WS_VISIBLE);
+        ::SetWindowLongPtrW(hWnd, GWL_STYLE, restoreStyle);
+        ::SetParent(hWnd, nullptr);
+        ::SetWindowLongPtrW(hWnd, GWLP_HWNDPARENT, 0);
+        ::SetWindowPos(hWnd, nullptr, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_HIDEWINDOW);
+
+        DebugLog(L"[WndCompat][ComboLBox] TPopupListbox restored WS_POPUP->WS_CHILD hwnd=0x%p", hWnd);
+    }
+
+    void ClearTPopupListboxNormState(HWND hWnd) noexcept
+    {
+        std::lock_guard<std::mutex> lock(g_tpopupNormMutex);
+        g_tpopupNorm.erase(hWnd);
+    }
+
     // Отдельная SEH-обёртка: в ComboLBoxSubclassProc есть C++ объекты (C2712).
     LRESULT SafeDefSubclassProcNc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) noexcept
     {
@@ -233,9 +331,15 @@ namespace
                 auto* p = WndCompat::DropDown::GetDropDownEventProvider();
                 if (p && p->OnComboLBoxDetach)
                     p->OnComboLBoxDetach(hWnd);
+                // VCL TPopupListbox: возвращаем WS_CHILD/no-parent состояние, которое VCL ожидает.
+                RestoreTPopupListboxAfterGlass(hWnd);
                 return DefSubclassProc(hWnd, uMsg, wParam, lParam);
             }
             DebugLog(L"[WndCompat][ComboLBox] ComboLBox: WM_SHOWWINDOW (show) hwnd=0x%p", hWnd);
+
+            // VCL TPopupListbox создаётся как WS_CHILD и затем делает SetParent(NULL),
+            // оставаясь с битом WS_CHILD. Для DWM backdrop/corner нужен настоящий top-level popup.
+            NormalizeTPopupListboxForGlass(hWnd);
 
             // Системная настройка анимации ComboBox (BWM pattern)
             BOOL sysAnimation = FALSE;
@@ -397,6 +501,7 @@ namespace
                 p->OnComboLBoxDetach(hWnd);
 
             WndCompat::ComboLBox_Detach(hWnd);
+            ClearTPopupListboxNormState(hWnd);
             break;
         }
         }
@@ -455,6 +560,7 @@ namespace WndCompat
         auto it = std::find(g_comboLBoxWindows.begin(), g_comboLBoxWindows.end(), hWnd);
         if (it != g_comboLBoxWindows.end())
             g_comboLBoxWindows.erase(it);
+        ClearTPopupListboxNormState(hWnd);
 
         DebugLog(L"[WndCompat][ComboLBox] ComboLBox_Detach: 0x%p", hWnd);
     }
@@ -463,6 +569,10 @@ namespace WndCompat
     {
         auto windows = g_comboLBoxWindows;
         g_comboLBoxWindows.clear();
+        {
+            std::lock_guard<std::mutex> lock(g_tpopupNormMutex);
+            g_tpopupNorm.clear();
+        }
 
         const DWORD curTid = GetCurrentThreadId();
 
