@@ -8,6 +8,7 @@ using GlassSettings.Core.Placement;
 using GlassSettings.Core.Platform;
 using GlassSettings.Core.Registry;
 using GlassSettings.Core.Snapshot;
+using GlassSettings.Core.Text;
 using GlassSettings.Navigation;
 using GlassSettings.Pages;
 using GlassSettings.Pages.Dwm;
@@ -44,15 +45,6 @@ public sealed partial class MainWindow : Window
     private bool _suppressNav;
     private bool _initialNavDone;
     private bool _contentReady;
-    /// <summary>После MarkReady: shell принимает клики (до этого недоигравшие клики не должны доезжать как навигация).</summary>
-    private bool _shellInputArmed;
-    /// <summary>Home Build/Refresh/Presence/Ensure под индикатором завершены — можно его снимать.</summary>
-    private bool _shellInteractiveReady;
-    private bool _postDismissHooksDone;
-    private bool _navigationReady;
-    /// <summary>Момент арминга заставки (`Activate()`): длительность панели печатается в метке снятия.</summary>
-    private DateTimeOffset _loadingShownAt = DateTimeOffset.UtcNow;
-    private Task? _attachIconPreload;
     private SettingsLayoutMode _layoutMode = SettingsLayoutMode.Medium;
     private DesktopEnvironmentWatcher? _desktopEnvironmentWatcher;
     private DispatcherQueueTimer? _themeBaselineReloadTimer;
@@ -86,261 +78,170 @@ public sealed partial class MainWindow : Window
     private ScrollViewer? _hostedDialogScrollViewer;
     private bool _hostedDialogBoundsUpdatePending;
     private bool _pendingUiLanguagePageReload;
-    private bool _deferredInitDone;
-    /// <summary>AppWindow.TitleBar.* — только после Activate(); присваивание один раз.</summary>
-    private bool _deferredWindowChromeApplied;
-    private bool _coldStartBootstrapScheduled;
-    private bool _glassRuntimeEnsured;
-    private bool _bootstrapCoreDone;
-    private bool _deferredStartupTasksDone;
     private bool _startupActivated;
-    private bool _firstPresentSeen;
-    private bool _firstPresentWatchArmed;
-    private readonly System.Collections.Generic.List<Action> _afterFirstPresent = new();
-    private bool _loadingIconFallbackApplied;
-    /// <summary>Fade-out заставки при снятии: анимация контента, окна не касается.</summary>
-    private const int LoadingIndicatorFadeOutMs = 220;
-    /// <summary>
-    /// Аварийный потолок жизни заставки (Э8). Панель видима с ПЕРВОГО кадра (в XAML Visible) и
-    /// снимается готовностью Home; таймер от Activate нужен только чтобы «Home не построилась»
-    /// не превратилось в вечную шторку.
-    ///
-    /// Задержку показа (150 мс в Э7.2) пришлось убрать: DispatcherQueueTimer обрабатывает Tick
-    /// только когда UI-поток свободен, т.е. уже ПОСЛЕ построения контента — в замерах панель
-    /// появлялась на +2327 мс при первом кадре +1395 мс, ровно «поверх готового контента».
-    /// </summary>
-    private const int LoadingIndicatorMaxMs = 2500;
-    private bool _indicatorArmed;
-    /// <summary>Фейд заставки ждёт следующий кадр после готовности Home (страховка — 400 мс).</summary>
-    private bool _indicatorFadeScheduled;
-    /// <summary>Поле держит страховочный таймер фейда: DispatcherQueueTimer не должен стать мусором до Tick.</summary>
-    private DispatcherQueueTimer? _indicatorFadeFallbackTimer;
-    private DispatcherQueueTimer? _indicatorCapTimer;
-    /// <summary>Стартовая навигация на Home планируется ровно один раз (после первого кадра).</summary>
-    private bool _homeNavScheduled;
+    private bool _startupPostNavScheduled;
 
-    /// <summary>Планирует cold start на следующий проход dispatcher (не внутри Activate/reentrancy).</summary>
-    internal void TryCompleteColdStartBootstrap()
+    internal void ActivateAtStartup()
     {
-        if (_bootstrapCoreDone || _coldStartBootstrapScheduled)
+        if (_startupActivated)
             return;
 
-        _coldStartBootstrapScheduled = true;
-        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Normal, RunColdStartBootstrapCore);
-    }
-
-    /// <summary>
-    /// Отложить работу до первого present окна. Кадр к этому моменту уже настоящий
-    /// (shell + живой backdrop), поэтому UI-поток можно занимать без «серых» кадров.
-    ///
-    /// Критично: CompositionTarget.Rendering поднимается на UI-потоке, поэтому ЛЮБАЯ тяжёлая
-    /// работа до первого кадра сдвигает и сам кадр, и material, и индикатор — всё разом
-    /// (в замерах 2026-11-25 один лишь PostNav+EnsureGlassRuntime дал +1030 мс к first-present).
-    /// Работа, зарегистрированная после первого present, выполняется сразу.
-    /// </summary>
-    internal void RunAfterFirstPresent(Action work)
-    {
-        if (work is null)
-            return;
-
-        if (_firstPresentSeen)
-        {
-            work();
-            return;
-        }
-
-        _afterFirstPresent.Add(work);
-        if (_firstPresentWatchArmed)
-            return;
-
-        _firstPresentWatchArmed = true;
-        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += OnFirstPresentRendering;
-        _ = FirstPresentFallbackAsync();
-    }
-
-    private void OnFirstPresentRendering(object? sender, object e)
-    {
-        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnFirstPresentRendering;
-        CompleteFirstPresent("first-present");
-    }
-
-    private async Task FirstPresentFallbackAsync()
-    {
+        _startupActivated = true;
         try
         {
-            await Task.Delay(1500).ConfigureAwait(true);
+            // UIPI: medium-IL Explorer иначе не может передать запрос активации в elevated GS.
+            AllowActivateMessageFromLowerIl(WindowNative.GetWindowHandle(this));
         }
-        catch
+        catch { /* ignore */ }
+
+        try
+        {
+            CompositionTarget.Rendered += OnStartupSplashRendered;
+            StartupPhaseTrace.MarkWindow("activate:begin", this);
+            Activate();
+            StartupPhaseTrace.MarkWindow("activate:end", this);
+        }
+        catch (Exception ex)
+        {
+            CompositionTarget.Rendered -= OnStartupSplashRendered;
+            FailStartup(ex);
+        }
+    }
+
+    private void OnStartupSplashRendered(object? sender, RenderedEventArgs args)
+    {
+        if (_closeInProgress || !StartupSplash.IsLoaded || StartupSplash.ActualWidth <= 0 ||
+            StartupSplash.ActualHeight <= 0 || StartupSplash.XamlRoot?.IsHostVisible != true)
         {
             return;
         }
 
-        CompleteFirstPresent("first-present:fallback-1500ms");
+        // Rendered — после отрисовки XAML. Возвращаемся в диспетчер, чтобы не начинать
+        // предзагрузку внутри кадра. Свернутое окно дождётся кадра при восстановлении.
+        CompositionTarget.Rendered -= OnStartupSplashRendered;
+        StartupPhaseTrace.MarkWindow("splash:frame-rendered", this);
+        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => _ = PrepareShellUnderSplashAsync());
     }
 
-    private void CompleteFirstPresent(string phase)
+    private async Task PrepareShellUnderSplashAsync()
     {
-        if (_firstPresentSeen)
+        if (_closeInProgress)
             return;
 
-        _firstPresentSeen = true;
-        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnFirstPresentRendering;
-        StartupPhaseTrace.MarkWindow(phase, this);
-
-        var pending = _afterFirstPresent.ToArray();
-        _afterFirstPresent.Clear();
-        foreach (var work in pending)
+        try
         {
-            try
-            {
-                work();
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"GlassSettings after-first-present: {ex}");
-            }
-        }
-    }
+            StartupPhaseTrace.Mark("preload:begin");
+            DesktopWallpaperImageCache.BeginLoad(DispatcherQueue);
+            await Task.Run(LoadStartupSettings).ConfigureAwait(true);
+            if (_closeInProgress)
+                return;
 
-    private void RunColdStartBootstrapCore()
-    {
-        if (_bootstrapCoreDone)
-            return;
-
-        _bootstrapCoreDone = true;
-
-        DesktopWallpaperImageCache.BeginLoad(DispatcherQueue);
-        // Recent thumbs для страницы «Фон» — до drill-навигации.
-        RecentWallpaperThumbCache.BeginLoad(DispatcherQueue);
-
-        // AppWindow.TitleBar chrome — после Activate (0x8007139F на PreferredHeightOption до показа).
-        // SystemBackdrop не трогаем: он присвоен один раз в ctor (WindowBackdropService).
-        ApplyDeferredWindowChrome();
-
-        StartupPhaseTrace.MarkWindow("cold-start-core", this);
-    }
-
-    /// <summary>
-    /// До Activate строится ЛЁГКИЙ shell: PreNav (nav-элементы, breadcrumb-хост, search, layout) +
-    /// заставка в области страницы. Сама HomePage — после первого present
-    /// (<see cref="NavigateHomeAfterFirstFrame"/>).
-    ///
-    /// Почему так (замер 2026-11-25): при «NavigateToRoot до Activate» между activate:end и
-    /// first-present было 985 мс — BuildCards/Refresh/measure дерева Home случаются в первом же
-    /// layout-проходе, и вместе с ними уезжал и acrylic material («секунда пустого окна без акрила»).
-    /// Кадр с pane + caption + заставкой дешёвый, поэтому material и значок видны сразу;
-    /// «пустой рамки» нет — заставка и есть содержимое первого кадра.
-    ///
-    /// x86-контракт сохранён: PreNav → Navigate (пост-кадр) → PostNav из HomePage.OnLoaded.
-    /// </summary>
-    internal void PrepareShellForStartup()
-    {
-        if (_initialNavDone)
-            return;
-
-        _initialNavDone = true;
-
-        if (!_deferredInitDone)
+            // x86: PreNav → Navigate → отдельный проход DispatcherQueue после Home.Loaded для PostNav.
             FinishDeferredInitializationPreNav();
+            _nav.CurrentSidebarTag = "home";
+            SelectNavItem("home");
+            ApplyLayoutMode(GetLayoutWidth());
+            // Разрешаем layout и Loaded, но не показываем даже частично собранный интерфейс (Opacity=0).
+            WindowBlurSourceHost.Visibility = Visibility.Visible;
+            _initialNavDone = true;
 
-        _currentTag = "home";
-        _nav.CurrentSidebarTag = "home";
-        SelectNavItem("home");
-
-        // Layout-режим и поиск в title bar — до первого кадра: иначе окно «дёрнется» после снятия индикатора.
-        ApplyLayoutMode(GetLayoutWidth());
-        ApplySearchPlacement();
-        // Drag-регионы считаются по layout: до Activate ActualWidth=0, поэтому пересчитаем один
-        // раз на первом Loaded (иначе caption не таскает окно до первого изменения размера).
-        void OnRootLoadedForDragRegions(object sender, RoutedEventArgs e)
-        {
-            RootGrid.Loaded -= OnRootLoadedForDragRegions;
-            RefreshTitleBarDragRegions();
+            StartupPhaseTrace.MarkWindow("home-nav:begin", this);
+            _nav.NavigateToRoot(typeof(HomePage), "home", GlassSettingsResources.Get("NavHome"));
+            if (_home is null)
+                throw new InvalidOperationException("Не удалось открыть страницу «Обзор» при запуске.");
+            StartupPhaseTrace.MarkWindow("home-nav:end", this);
         }
-
-        RootGrid.Loaded += OnRootLoadedForDragRegions;
-
-        // Fallback: если pipeline завис — снять индикатор через несколько секунд.
-        _ = LoadingOverlayFallbackAsync();
-        StartupPhaseTrace.Mark("shell-ready-for-first-frame");
+        catch (Exception ex)
+        {
+            FailStartup(ex);
+        }
     }
 
-    /// <summary>
-    /// После HomePage.OnLoaded (окно уже показано и отрисовано): Presence/Ensure, затем
-    /// снятие индикатора. Subclass/InjectRuntimeMonitor — только после него.
-    /// Повторный заход на Home: без cold-idle wipe — сразу AttachColdStartRuntimeHooks.
-    /// </summary>
+    private static void LoadStartupSettings()
+    {
+        SystemFontsSpiCache.LoadAtStartup();
+        SettingsBackupAssociation.EnsureIfMissing();
+        try
+        {
+            if (GlassSettingsRegistry.ReadValidateSettingsOnStartup())
+                _ = NativeHostInterop.ValidateRegistryState(applyFixes: true);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"GlassSettings startup validation: {ex}");
+        }
+    }
+
     internal void ScheduleColdStartPostNavAfterHomeLoaded(HomePage home)
     {
-        // Первый кадр важнее данных: Presence/watchers/EnsureGlassRuntime — после first present,
-        // иначе native init встаёт между ShowWindow и композицией и «серый» кадр длится секунду.
-        RunAfterFirstPresent(() => DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Normal, () =>
-        {
-            // После первого снятия индикатора: новая HomePage иначе остаётся без InjectRuntimeMonitor
-            // (OnNavigatedTo при !_built пропускает StartRuntimeMonitor; cold-idle затирает Latest).
-            if (_postDismissHooksDone || _contentReady)
-            {
-                home.AttachColdStartRuntimeHooks();
-                return;
-            }
+        if (_closeInProgress)
+            return;
 
-            CompleteColdStartPostNavIfNeeded();
-            // Ensure на этом же Normal-pump сразу после PostNav. Low после pump_normal_after
-            // на x86 не доживает: между ними успевает чужой Normal (icon preload → UI marshal).
-            InjectRuntimeMonitor.Instance.PublishColdStartIdleSnapshot();
-            CompleteColdStartEnsure();
-            MarkShellInteractiveReady();
-        }));
-    }
-
-    private void CompleteColdStartEnsure()
-    {
-        if (_glassRuntimeEnsured)
+        if (_contentReady)
         {
+            // Повторный заход на Home: не затираем текущий снимок монитора стартовым Idle.
+            DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Normal, home.AttachColdStartRuntimeHooks);
             return;
         }
 
-        _glassRuntimeEnsured = true;
+        if (_startupPostNavScheduled)
+            return;
+
+        _startupPostNavScheduled = true;
+        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Normal, () => _ = FinishStartupUnderSplashAsync(home));
+    }
+
+    private async Task FinishStartupUnderSplashAsync(HomePage home)
+    {
+        if (_closeInProgress)
+            return;
+
         try
         {
-            _ = NativeHostInterop.EnsureGlassRuntime();
+            FinishDeferredInitializationPostNav();
+            // x86: Ensure на том же проходе dispatcher, что и PostNav, до UI marshal фоновых задач.
+            InjectRuntimeMonitor.Instance.PublishColdStartIdleSnapshot();
+            try { _ = NativeHostInterop.EnsureGlassRuntime(); }
+            catch (Exception) { /* best-effort */ }
+            PlatformPresenceService.Instance.StartPresenceWatchAfterShellReady();
+
+            RunDeferredStartupTasks();
+            // Только имена из реестра, без native I/O иконок. На WOW64 этот вызов ещё и
+            // отключает их нативную догрузку до того, как можно открыть «Процессы».
+            var processNames = Task.Run(ProcessIconResolver.PreloadAttachListNamesOnlyAsync);
+
+            // Пока читаются имена, завершить превью, видимое на «Обзоре». Для недоступных
+            // обоев остаётся штатная подложка; прогрев остальных страниц не задерживает показ.
+            if (DesktopWallpaperImageCache.LoadTask is { IsCompleted: false } wallpaperLoad)
+                await Task.WhenAny(wallpaperLoad, Task.Delay(250)).ConfigureAwait(true);
+            try { await processNames.ConfigureAwait(true); }
+            catch (Exception ex) { Debug.WriteLine($"GlassSettings startup process names: {ex}"); }
+            if (_closeInProgress)
+                return;
+
+            if (DesktopWallpaperImageCache.IsReady)
+                home.RefreshWallpaperPreviewUnderSplash();
+            RevealStartupShell();
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // Ensure best-effort под индикатором; сбой не блокирует UI.
+            FailStartup(ex);
         }
     }
 
-    private void MarkShellInteractiveReady()
+    private void FailStartup(Exception error)
     {
-        if (_shellInteractiveReady)
-            return;
-
-        _shellInteractiveReady = true;
-        PlatformPresenceService.Instance.StartPresenceWatchAfterShellReady();
-        ScheduleDismissLoadingOverlay(fallback: false);
-    }
-
-    /// <summary>Presence/watchers после первого pump вне HomePage.OnLoaded.</summary>
-    internal void CompleteColdStartPostNavIfNeeded()
-    {
-        if (_deferredInitDone)
-            return;
-
-        FinishDeferredInitializationPostNav();
-        _deferredInitDone = true;
+        StartupPhaseTrace.Mark($"startup:failed {error.GetType().Name}");
+        Debug.WriteLine($"GlassSettings startup: {error}");
+        BeginAppCloseSequence();
     }
 
     /// <summary>
-    /// Baseline сессии + RegWatch в момент dismiss, до MarkReady (startup green/yellow).
+    /// Baseline сессии + RegWatch до открытия shell и показа стартовых уведомлений.
     /// Порядок: стартовые записи → Capture → Watch (не наоборот — иначе ложный dirty).
     /// </summary>
     private void RunDeferredStartupTasks()
     {
-        if (_deferredStartupTasksDone)
-            return;
-
-        _deferredStartupTasksDone = true;
         try
         {
             Core.Platform.OpenGlassBorderPolicyCoordinator.ApplyStartupPolicy();
@@ -360,68 +261,35 @@ public sealed partial class MainWindow : Window
         _home?.Refresh(refreshNotices: false);
     }
 
-    /// <summary>
-    /// Штатный показ окна: тема, chrome, backdrop и shell готовы в конструкторе —
-    /// Activate() ровно один раз. Никаких cloak / IsShownInSwitchers / solid-bootstrap / opacity-fade /
-    /// ожидания кадров: механика первого кадра и причина отказа от них —
-    /// docs/GlassSettings-startup-window-plan.md.
-    /// </summary>
-    internal void ActivateAtStartup()
+    private void RevealStartupShell()
     {
-        if (_startupActivated)
-            return;
+        NavView.IsEnabled = true;
+        AppTitleBar.IsEnabled = true;
+        ApplyDeferredWindowChrome();
+        ApplyLayoutMode(GetLayoutWidth());
+        SyncNavigationUserCardLayout();
+        RootGrid.UpdateLayout();
+        RefreshTitleBarDragRegions();
 
-        _startupActivated = true;
-        PrepareShellForStartup();
-
-        try
-        {
-            // UIPI: medium-IL explorer (ShellExt) иначе не может PostMessage WM_APP в elevated GS.
-            AllowActivateMessageFromLowerIl(WindowNative.GetWindowHandle(this));
-        }
-        catch { /* ignore */ }
-
-        ArmStartupLoadingIndicator();
-        StartupPhaseTrace.MarkWindow("activate:begin", this);
-
-        try
-        {
-            Activate();
-        }
-        catch (Exception ex)
-        {
-            StartupPhaseTrace.Mark($"activate:failed {ex.GetType().Name}");
-        }
-
-        StartupPhaseTrace.MarkWindow("activate:end", this);
-
-        // Тяжёлый cold start — после первого present (кадр уже живой).
-        RunAfterFirstPresent(TryCompleteColdStartBootstrap);
-        RunAfterFirstPresent(NavigateHomeAfterFirstFrame);
+        // Дерево уже собрано и прошло layout. Backdrop и два слоя XAML меняются
+        // в одном проходе UI, без пустого кадра или наложения заставки на контент.
+        WindowBackdropService.ApplyModeFromRegistry(this, RootGrid);
+        CompositionTarget.Rendered += OnStartupShellRendered;
+        WindowBlurSourceHost.Opacity = 1;
+        StartupSplash.Visibility = Visibility.Collapsed;
+        WindowBlurSourceHost.IsHitTestVisible = true;
+        _contentReady = true;
+        StartupPhaseTrace.MarkWindow("shell:ready", this);
     }
 
-    /// <summary>
-    /// Э8: навигация на Home — только после первого кадра. Пока дерево страницы строится,
-    /// в области страницы стоит заставка со значком, поэтому ~1 с построения пользователь видит
-    /// «заставку», а не пустое окно без акрила. Очередь первого present обрабатывается и на
-    /// fallback-таймере, так что страница не останется пустой, даже если `Rendering` не наступил.
-    /// </summary>
-    internal void NavigateHomeAfterFirstFrame()
+    private void OnStartupShellRendered(object? sender, RenderedEventArgs args)
     {
-        if (_homeNavScheduled)
+        if (_closeInProgress || !_contentReady || RootGrid.XamlRoot?.IsHostVisible != true)
             return;
 
-        _homeNavScheduled = true;
-        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Normal, () =>
-        {
-            StartupPhaseTrace.MarkWindow("home-nav:begin", this);
-            _nav.NavigateToRoot(
-                typeof(HomePage),
-                "home",
-                GlassSettingsResources.Get("NavHome"));
-            SelectNavItem("home");
-            StartupPhaseTrace.MarkWindow("home-nav:end", this);
-        });
+        CompositionTarget.Rendered -= OnStartupShellRendered;
+        StartupPhaseTrace.MarkWindow("shell:frame-rendered", this);
+        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, StartPostRevealShellHooks);
     }
 
     /// <summary>XamlRoot окна — для ContentDialog и полноэкранной шторы.</summary>
@@ -433,26 +301,8 @@ public sealed partial class MainWindow : Window
     {
         StartupPhaseTrace.Begin();
         InitializeComponent();
-        SearchBox.Loaded += (_, _) => ApplyTitleBarSearchCaret();
-        SearchBox.AddHandler(UIElement.PointerEnteredEvent, new PointerEventHandler(SearchBox_OnPointerMoved), true);
-        SearchBox.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(SearchBox_OnPointerMoved), true);
-        _searchDebounceTimer = DispatcherQueue.CreateTimer();
-        _searchDebounceTimer.Interval = TimeSpan.FromMilliseconds(1000);
-        _searchDebounceTimer.IsRepeating = false;
-        _searchDebounceTimer.Tick += SearchDebounceTimer_OnTick;
-        NavFrame.Navigated += NavFrame_OnNavigated;
-        _nav.Attach(NavFrame);
-        Activated += OnWindowActivated;
-        SettingsSession.Current.DirtyChanged += (_, _) =>
-        {
-            _home?.SyncSummaryFooterFromSession();
-            SettingsUnsavedIndicatorCoordinator.RefreshAll(this, _home);
-        };
-        HomeSessionNoticeState.SummaryFooterRevealedChanged += (_, _) => RefreshDisplayedHomeFooter();
-
-        // Порядок WinUI Gallery: всё, что обязано быть в первом кадре, готово ДО Activate().
-        // Shell (PreNav + NavigateToRoot) достраивает App.OnLaunched сразу после присваивания
-        // App.ShellWindow — HomePage и NoticeViewportMirrorService читают его во время навигации.
+        // Окно можно закрыть с заставки; HWND-subclass ставится только после старта.
+        AppWindow.Closing += OnAppWindowClosing;
         ApplyStartupChrome();
         ApplyEarlyWindowPlacement();
         StartupPhaseTrace.MarkWindow("ctor:exit", this);
@@ -475,30 +325,26 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void ApplyStartupChrome()
     {
-        try
-        {
-            ExtendsContentIntoTitleBar = true;
-            SetTitleBar(AppTitleBar);
-        }
+        // Стартовый слой занимает в том числе область заголовка. До показа AppTitleBar
+        // используем стандартные drag-зону и системные кнопки расширенного заголовка.
+        try { ExtendsContentIntoTitleBar = true; }
         catch { /* TitleBar API может быть недоступен */ }
-
         Title = SingleInstance.WindowTitle;
 
         // Тема — до backdrop: FallbackColor контроллера берёт тон из неё.
         AppThemeService.ApplyFromRegistry(RootGrid);
         WindowBackdropService.AttachStartupBackdrop(this, RootGrid);
         TitleBarThemeHelper.ApplyDwmDarkMode(this);
-        ApplyAppBranding();
-        SetShellInputEnabled(false);
-        StartupPhaseTrace.Mark("chrome+backdrop");
+        TrySetWindowIcon();
+        var icon = AppIconSourceFactory.CreateSplashImageSource();
+        StartupSplashIcon.Source = icon;
+        if (icon is null)
+            StartupSplashIconFallback.Visibility = Visibility.Visible;
+        StartupPhaseTrace.Mark(icon is not null ? "splash:prepared" : "splash:prepared fallback-icon");
     }
 
     private void ApplyDeferredWindowChrome()
     {
-        if (_deferredWindowChromeApplied)
-            return;
-
-        _deferredWindowChromeApplied = true;
         try
         {
             ExtendsContentIntoTitleBar = true;
@@ -506,19 +352,32 @@ public sealed partial class MainWindow : Window
         }
         catch { /* TitleBar API может быть недоступен */ }
 
+        // PreferredHeightOption доступен только после показа окна с расширенным заголовком.
+        ApplyTitleBarPlacementOptions();
         TitleBarThemeHelper.ApplyTitleBarColors(this, extendsContentIntoTitleBar: true);
         StartupPhaseTrace.MarkWindow("titlebar-chrome", this);
-    }
-
-    private void FinishDeferredInitialization()
-    {
-        FinishDeferredInitializationPreNav();
-        FinishDeferredInitializationPostNav();
     }
 
     /// <summary>Shell/nav до первого Frame.Navigate (без Presence — на x86 Presence до Navigate роняет следующий pump).</summary>
     private void FinishDeferredInitializationPreNav()
     {
+        SearchBox.Loaded += (_, _) => ApplyTitleBarSearchCaret();
+        SearchBox.AddHandler(UIElement.PointerEnteredEvent, new PointerEventHandler(SearchBox_OnPointerMoved), true);
+        SearchBox.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(SearchBox_OnPointerMoved), true);
+        _searchDebounceTimer = DispatcherQueue.CreateTimer();
+        _searchDebounceTimer.Interval = TimeSpan.FromMilliseconds(1000);
+        _searchDebounceTimer.IsRepeating = false;
+        _searchDebounceTimer.Tick += SearchDebounceTimer_OnTick;
+        NavFrame.Navigated += NavFrame_OnNavigated;
+        _nav.Attach(NavFrame);
+        Activated += OnWindowActivated;
+        SettingsSession.Current.DirtyChanged += (_, _) =>
+        {
+            _home?.SyncSummaryFooterFromSession();
+            SettingsUnsavedIndicatorCoordinator.RefreshAll(this, _home);
+        };
+        HomeSessionNoticeState.SummaryFooterRevealedChanged += (_, _) => RefreshDisplayedHomeFooter();
+
         ApplyWindowBusyOverlayFill();
         ThemeShadowHost.Attach(DialogShadowRect, DialogShadowCastGrid, DialogShadow);
         HostedDialogHost.AddHandler(
@@ -546,7 +405,7 @@ public sealed partial class MainWindow : Window
         SyncBreadcrumb();
     }
 
-    /// <summary>Presence/политики до снятия индикатора (без HWND-subclass и без InjectRuntimeMonitor).</summary>
+    /// <summary>Presence/политики до показа shell (без HWND-subclass и без подписки на InjectRuntimeMonitor).</summary>
     private void FinishDeferredInitializationPostNav()
     {
         StartGlassSettingsPreferencesWatcher();
@@ -560,11 +419,7 @@ public sealed partial class MainWindow : Window
         OpenGlassUiPolicy.Changed += OnOpenGlassUiPolicyChanged;
         CompositionWallpaperLayersCache.AttachPolicyListener(DispatcherQueue);
         HookWindowChrome();
-        // Closing без SetWindowSubclass — subclass ставится после dismiss (нет гонки с cold-start).
-        AppWindow.Closing += OnAppWindowClosing;
-        // PreloadAttachListAsync — после dismiss: Task.Run→UI marshal на Normal успевал
-        // убить x86 между pump_normal_after и Low Ensure.
-        ApplyPlacement();
+        EnforceMinWindowSize();
         RootGrid.ActualThemeChanged += (_, _) =>
         {
             ApplyWindowBusyOverlayFill();
@@ -576,35 +431,31 @@ public sealed partial class MainWindow : Window
         HookNavigationUserCardLayout();
     }
 
-    /// <summary>После снятия индикатора: DesktopEnvironmentWatcher, Close-subclass, runtime monitor.</summary>
-    private void StartPostDismissShellHooks()
+    /// <summary>Запустить наблюдение и передать запрос открытия копии после кадра с готовым shell.</summary>
+    private void StartPostRevealShellHooks()
     {
-        if (_postDismissHooksDone)
+        if (_closeInProgress)
             return;
 
-        _postDismissHooksDone = true;
         StartDesktopEnvironmentWatcher();
         InstallCloseSubclassWhenReady();
         if (NavFrame.Content is HomePage home)
             home.AttachColdStartRuntimeHooks();
-        // Names-only preload уже выполнен до снятия индикатора (см. DismissLoadingOverlayWhenReadyAsync).
-        _shellReadyWorkRequested = true;
-        RunDeferredShellReadyWorkAfterFirstProbe();
-    }
 
-    private bool _shellReadyWorkRequested;
-    private bool _shellReadyWorkDone;
+        if (SettingsBackupOpenRequest.TryPeek(out var backupPath))
+            OpenSettingsBackup(backupPath);
 
-    /// <summary>
-    /// Маркер после первой CaptureSnapshot: WarmAttach/composition — до снятия индикатора.
-    /// </summary>
-    internal void RunDeferredShellReadyWorkAfterFirstProbe()
-    {
-        if (_shellReadyWorkDone || !_shellReadyWorkRequested)
-            return;
+        // Если открываем копию, NavigateToRoot уже поставил переход в «Систему» в ту же очередь Low.
+        // Уведомление «Обзора» не должно успеть открыться перед этой навигацией.
+        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        {
+            if (_closeInProgress)
+                return;
 
-        // WarmAttach / composition prewarm — строго до MarkReady (Dismiss/TryDismiss).
-        _shellReadyWorkDone = true;
+            ShellContentReadyGate.MarkReady();
+            RecentWallpaperThumbCache.BeginLoad(DispatcherQueue);
+            CompositionWallpaperLayersCache.BeginPrewarm(DispatcherQueue);
+        });
     }
 
     private void HookNavigationUserCardLayout()
@@ -640,7 +491,6 @@ public sealed partial class MainWindow : Window
                 SyncNavigationUserCardLayout();
                 ApplySearchPlacement();
             });
-        RootGrid.Loaded += (_, _) => Sync();
     }
 
     private void SyncNavigationUserCardLayout()
@@ -659,7 +509,8 @@ public sealed partial class MainWindow : Window
         NavigationPaneChromeService.Apply(NavView, _layoutMode);
         ApplyWindowBusyOverlayFill();
         // Режим материала меняется внутри подключённого backdrop — без переприсваивания SystemBackdrop.
-        WindowBackdropService.ApplyModeFromRegistry(this, RootGrid);
+        if (_contentReady)
+            WindowBackdropService.ApplyModeFromRegistry(this, RootGrid);
         TitleBarThemeHelper.Apply(this, extendsContentIntoTitleBar: true);
         ApplyHostedDialogTheme();
         ApplyWindowTopNoticeChrome();
@@ -921,50 +772,6 @@ public sealed partial class MainWindow : Window
     private void ApplyWindowBusyOverlayFill() =>
         WindowBusyOverlayService.ApplyFill(WindowBusyOverlayFill, RootGrid);
 
-    private void ApplyAppBranding()
-    {
-        TrySetWindowIcon();
-
-        // Иконка индикатора: XAML уже даёт ms-appx:///Assets/app.ico, decode стартует на
-        // InitializeComponent — это самый ранний возможный кадр. Переприсваивание Source
-        // (файловый BitmapImage) перезапускает decode и дарит кадр без иконки, поэтому
-        // трогаем источник только если XAML-источник не поднялся (ImageFailed).
-        if (LoadingIcon.Source is not null)
-        {
-            LoadingIcon.ImageFailed -= LoadingIcon_OnImageFailed;
-            LoadingIcon.ImageFailed += LoadingIcon_OnImageFailed;
-            LoadingIcon.Opacity = 1;
-            LoadingIcon.Visibility = Visibility.Visible;
-            return;
-        }
-
-        ApplyLoadingIconFallbackSource();
-    }
-
-    private void LoadingIcon_OnImageFailed(object sender, ExceptionRoutedEventArgs e)
-    {
-        LoadingIcon.ImageFailed -= LoadingIcon_OnImageFailed;
-        ApplyLoadingIconFallbackSource();
-    }
-
-    private void ApplyLoadingIconFallbackSource()
-    {
-        if (_loadingIconFallbackApplied)
-            return;
-
-        _loadingIconFallbackApplied = true;
-        var iconSource = AppIconSourceFactory.CreateImageSource();
-        if (iconSource is null)
-        {
-            LoadingIcon.Visibility = Visibility.Collapsed;
-            return;
-        }
-
-        LoadingIcon.Opacity = 1;
-        LoadingIcon.Visibility = Visibility.Visible;
-        LoadingIcon.Source = iconSource;
-    }
-
     private void TrySetWindowIcon()
     {
         try
@@ -974,229 +781,6 @@ public sealed partial class MainWindow : Window
                 AppWindow.SetIcon(iconPath);
         }
         catch { /* ignore */ }
-    }
-
-    /// <summary>
-    /// Заставка видима с первого кадра (XAML `Visibility="Visible"`), поэтому из кода нужен только
-    /// аварийный потолок: `LoadingIndicatorMaxMs` от `Activate()` снимает панель, если конвейер Home
-    /// завис. Никакого «показать через N мс»: Tick диспетчера не успевает сработать до построения
-    /// контента и превращает заставку в оверлей над уже готовой страницей.
-    /// </summary>
-    private void ArmStartupLoadingIndicator()
-    {
-        if (_indicatorArmed)
-            return;
-
-        _indicatorArmed = true;
-        _loadingShownAt = DateTimeOffset.UtcNow;
-
-        var cap = DispatcherQueue.CreateTimer();
-        cap.Interval = TimeSpan.FromMilliseconds(LoadingIndicatorMaxMs);
-        cap.IsRepeating = false;
-        cap.Tick += (_, _) =>
-        {
-            if (_contentReady)
-                return;
-
-            StartupPhaseTrace.MarkWindow("indicator-cap", this);
-            TryDismissLoadingOverlay();
-        };
-        cap.Start();
-        _indicatorCapTimer = cap;
-    }
-
-    private void StopLoadingIndicatorTimers()
-    {
-        try
-        {
-            _indicatorCapTimer?.Stop();
-        }
-        catch
-        {
-            /* таймер best-effort: окно может закрываться */
-        }
-
-        _indicatorCapTimer = null;
-    }
-
-    private void TryDismissLoadingOverlay()
-    {
-        if (_contentReady)
-            return;
-
-        _contentReady = true;
-        StopLoadingIndicatorTimers();
-        NavView.Visibility = Visibility.Visible;
-        if (NavFrame.Content is not Page)
-            NavigateTo(_currentTag, force: true);
-
-        ApplyLayoutMode(GetLayoutWidth());
-        SyncNavigationUserCardLayout();
-        // Prep до снятия индикатора: baseline сессии и RegWatch, пока hit-test ещё off.
-        RunDeferredStartupTasks();
-        // Keep master’s startup backup-open handoff. ProcessesPage is no longer
-        // pre-warmed here; its staged loading belongs to the search navigation flow.
-        if (SettingsBackupOpenRequest.TryPeek(out var backupPath))
-            OpenSettingsBackup(backupPath);
-
-        // Заставка снимается как обычная анимация контента: видимость/позиция/клоак
-        // окна не трогаются. Hit-test subtree остаётся off до MarkReady — иначе клики,
-        // полученные во время достройки Home, доезжают как навигация с Главной.
-        FadeOutIndicatorOnNextFrame();
-
-        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, StartPostDismissShellHooks);
-        StartupPhaseTrace.MarkWindow(
-            $"indicator-dismiss (veil {(int)(DateTimeOffset.UtcNow - _loadingShownAt).TotalMilliseconds}ms)",
-            this);
-    }
-
-    /// <summary>Панель снята: hit-test shell включаем только здесь.</summary>
-    private void FinishIndicatorDismiss()
-    {
-        if (LoadingOverlay.Visibility == Visibility.Visible)
-        {
-            LoadingOverlay.Visibility = Visibility.Collapsed;
-            LoadingOverlay.Opacity = 1;
-        }
-
-        LoadingRing.IsActive = false;
-        ArmShellInputAfterLoading();
-        ShellContentReadyGate.MarkReady();
-    }
-
-    /// <summary>
-    /// Фейд заставки — на следующем кадре: без этого панель начинает гаснуть в том же pump, где
-    /// построенная Home ещё не ушла на композицию, и виден промежуточный кадр «пустая область
-    /// страницы под полупрозрачным acrylic». `CompositionTarget.Rendering` может и не прийти
-    /// (окно свернули/потеряло активость ровно в момент снятия), поэтому есть страховка на 400 мс.
-    /// </summary>
-    private void FadeOutIndicatorOnNextFrame()
-    {
-        if (LoadingOverlay.Visibility != Visibility.Visible)
-        {
-            FinishIndicatorDismiss();
-            return;
-        }
-
-        if (_indicatorFadeScheduled)
-            return;
-
-        _indicatorFadeScheduled = true;
-        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += OnIndicatorFadeRendering;
-
-        var fallback = DispatcherQueue.CreateTimer();
-        fallback.Interval = TimeSpan.FromMilliseconds(400);
-        fallback.IsRepeating = false;
-        fallback.Tick += (_, _) => FadeOutIndicatorNow();
-        fallback.Start();
-        _indicatorFadeFallbackTimer = fallback;
-    }
-
-    private void OnIndicatorFadeRendering(object? sender, object e) => FadeOutIndicatorNow();
-
-    private void FadeOutIndicatorNow()
-    {
-        if (!_indicatorFadeScheduled)
-            return;
-
-        _indicatorFadeScheduled = false;
-        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnIndicatorFadeRendering;
-        try
-        {
-            _indicatorFadeFallbackTimer?.Stop();
-        }
-        catch
-        {
-            /* страховка best-effort */
-        }
-
-        _indicatorFadeFallbackTimer = null;
-        try
-        {
-            BeginIndicatorFadeOut(LoadingIndicatorFadeOutMs, FinishIndicatorDismiss);
-        }
-        catch
-        {
-            FinishIndicatorDismiss();
-        }
-    }
-
-    /// <summary>Включить hit-test shell только после fade-out индикатора.</summary>
-    private void ArmShellInputAfterLoading()
-    {
-        if (_shellInputArmed)
-            return;
-
-        SetShellInputEnabled(true);
-        _shellInputArmed = true;
-    }
-
-    private void BeginIndicatorFadeOut(int durationMs, Action onCompleted)
-    {
-        if (LoadingOverlay.Visibility != Visibility.Visible)
-        {
-            onCompleted();
-            return;
-        }
-
-        try
-        {
-            var anim = new DoubleAnimation
-            {
-                From = LoadingOverlay.Opacity,
-                To = 0,
-                Duration = new Duration(TimeSpan.FromMilliseconds(durationMs)),
-                EnableDependentAnimation = true
-            };
-            Storyboard.SetTarget(anim, LoadingOverlay);
-            Storyboard.SetTargetProperty(anim, "Opacity");
-            var sb = new Storyboard();
-            sb.Children.Add(anim);
-            sb.Completed += (_, _) =>
-            {
-                LoadingOverlay.Visibility = Visibility.Collapsed;
-                LoadingOverlay.Opacity = 1;
-                LoadingRing.IsActive = false;
-                onCompleted();
-            };
-            sb.Begin();
-        }
-        catch
-        {
-            LoadingOverlay.Visibility = Visibility.Collapsed;
-            LoadingOverlay.Opacity = 1;
-            LoadingRing.IsActive = false;
-            onCompleted();
-        }
-    }
-
-    /// <summary>
-    /// Ввод shell: off, пока под заставкой строится Home.
-    /// Видимость shell этим методом НЕ управляется: он виден с первого кадра
-    /// (caption и pane не перекрываются — заставка лежит в области страницы).
-    /// </summary>
-    private void SetShellInputEnabled(bool enabled)
-    {
-        NavView.IsHitTestVisible = enabled;
-        PageContentHost.IsHitTestVisible = enabled;
-        NavFrame.IsHitTestVisible = enabled;
-        SearchBox.IsHitTestVisible = enabled;
-    }
-
-    /// <summary>Клики по индикатору не должны доходить до shell / тумблеров Главной.</summary>
-    private void LoadingOverlay_OnPointerInput(object sender, PointerRoutedEventArgs e)
-    {
-        e.Handled = true;
-    }
-
-    private void LoadingOverlay_OnTappedInput(object sender, TappedRoutedEventArgs e)
-    {
-        e.Handled = true;
-    }
-
-    private void LoadingOverlay_OnDoubleTappedInput(object sender, DoubleTappedRoutedEventArgs e)
-    {
-        e.Handled = true;
     }
 
     private void TitleBarBackButton_OnClick(object sender, RoutedEventArgs e)
@@ -1880,7 +1464,7 @@ public sealed partial class MainWindow : Window
 
     private void TryInstallCloseSubclass()
     {
-        if (_closeSubclassInstalled)
+        if (_closeInProgress || _closeSubclassInstalled)
             return;
 
         var hwnd = WindowNative.GetWindowHandle(this);
@@ -2046,8 +1630,11 @@ public sealed partial class MainWindow : Window
             }
         }
 
-        WindowBusyOverlayService.Push(showProgress: true);
-        ShutdownPhaseTrace.Mark("curtain");
+        if (_contentReady)
+        {
+            WindowBusyOverlayService.Push(showProgress: true);
+            ShutdownPhaseTrace.Mark("curtain");
+        }
 
         try
         {
@@ -2130,18 +1717,20 @@ public sealed partial class MainWindow : Window
     private void UnhookWindowCloseInterception()
     {
         AppWindow.Closing -= OnAppWindowClosing;
+        Activated -= OnInstallCloseSubclassOnce;
         RemoveCloseSubclass();
     }
 
     /// <summary>Отпускает тяжёлое XAML-дерево до teardown процесса.</summary>
     private void PrepareForProcessExit()
     {
+        CompositionTarget.Rendered -= OnStartupSplashRendered;
+        CompositionTarget.Rendered -= OnStartupShellRendered;
         if (_hostedDialogTcs is not null)
             CloseHostedDialog(HostedDialogResult.Dismissed);
 
         _pages.Clear();
         _home = null;
-        _attachIconPreload = null;
         NavFrame.Content = null;
     }
 
@@ -2213,7 +1802,10 @@ public sealed partial class MainWindow : Window
         // narrower clip after the panel grows in place (display topology change).
         HostedDialogSurface.SizeChanged += (_, _) => UpdateHostedDialogSurfaceClip();
         RootGrid.SizeChanged += (_, _) => ApplyLayoutMode(GetLayoutWidth());
-        RootGrid.Loaded += RootGrid_OnLoaded;
+        // PostNav после Home.Loaded: корень окна уже загружен, повторного Loaded не ждём.
+        if (RootGrid.XamlRoot is { } xamlRoot)
+            xamlRoot.Changed += (_, _) => ApplyLayoutMode(GetLayoutWidth());
+        UpdateHostedDialogVerticalInset();
     }
 
     /// <summary>Верхняя граница зоны hosted-диалога — нижняя кромка TitleBar.</summary>
@@ -2224,14 +1816,6 @@ public sealed partial class MainWindow : Window
 
         if (HostedDialogHost.Visibility == Visibility.Visible && _hostedDialogRequestedSpec is not null)
             ApplyHostedDialogBounds(liveResize: true);
-    }
-
-    private void RootGrid_OnLoaded(object sender, RoutedEventArgs e)
-    {
-        if (RootGrid.XamlRoot != null)
-            RootGrid.XamlRoot.Changed += (_, _) => ApplyLayoutMode(GetLayoutWidth());
-        UpdateHostedDialogVerticalInset();
-        ApplyLayoutMode(GetLayoutWidth());
     }
 
     private double GetLayoutWidth()
@@ -2499,7 +2083,7 @@ public sealed partial class MainWindow : Window
         if (args.InvokedItemContainer is not NavigationViewItem { Tag: string tag })
             return;
 
-        if (!_shellInputArmed)
+        if (!_contentReady)
             return;
 
         NavigateTo(tag, force: true);
@@ -2562,96 +2146,6 @@ public sealed partial class MainWindow : Window
         SettingsPageShell.NotifyPageNavigatedTo(page);
         _pages[tag] = page;
         SyncBreadcrumb();
-        _navigationReady = true;
-        // Снятие индикатора — только после MarkShellInteractiveReady (Home Refresh/Presence/Ensure ниже по очереди).
-    }
-
-    private void ScheduleDismissLoadingOverlay(bool fallback)
-    {
-        if (_contentReady)
-            return;
-
-        _ = DismissLoadingOverlayWhenReadyAsync(fallback);
-    }
-
-    private async Task DismissLoadingOverlayWhenReadyAsync(bool fallback)
-    {
-        try
-        {
-            if (_contentReady)
-                return;
-
-            // Ожидание readiness — с дедлайном: индикатор не должен превращаться в «заставку
-            // поверх готового контента» из-за того, что данные (wallpaper/composition) не отдались.
-            var deadline = DateTimeOffset.UtcNow.AddMilliseconds(LoadingIndicatorMaxMs);
-            if (!fallback)
-            {
-                while (!_shellInteractiveReady && DateTimeOffset.UtcNow < deadline)
-                {
-                    await Task.Delay(50);
-                    if (_contentReady)
-                        return;
-                }
-            }
-            else
-            {
-                while (!_navigationReady && DateTimeOffset.UtcNow < deadline)
-                {
-                    await Task.Delay(50);
-                    if (_contentReady)
-                        return;
-                }
-            }
-
-            // Names-only (без native SHGetFileInfo) + обои + composition blur — под индикатором.
-            // Раньше wait на icon-preload (~600 ms) маскировал готовность DesktopWallpaperImageCache;
-            // после names-only dismiss шёл сразу → пустой слот превью на Главной.
-            _attachIconPreload ??= ProcessIconResolver.PreloadAttachListNamesOnlyAsync();
-            if (CompositionWallpaperLayersCache.ShouldPrewarm())
-                CompositionWallpaperLayersCache.BeginPrewarm(DispatcherQueue);
-
-            // 250 мс вместо прежних 800: превью успевает стартовать под заставкой, но панель
-            // не переживает готовность контента (верхняя граница — LoadingIndicatorMaxMs).
-            const int maxPreviewWaitMs = 250;
-            var wallpaperTask = DesktopWallpaperImageCache.LoadTask ?? Task.CompletedTask;
-            var wallpaperOrTimeout = Task.WhenAny(wallpaperTask, Task.Delay(maxPreviewWaitMs));
-            var compositionTask = CompositionWallpaperLayersCache.PrewarmTask ?? Task.CompletedTask;
-            var compositionOrTimeout = Task.WhenAny(compositionTask, Task.Delay(maxPreviewWaitMs));
-
-            await Task.WhenAll(
-                    wallpaperOrTimeout,
-                    compositionOrTimeout,
-                    _attachIconPreload)
-                .ConfigureAwait(true);
-
-            if (_contentReady)
-                return;
-
-            // Не вызывать TryDismiss из continuation Delay(0) внутри OnNavigated — иначе нет заставки.
-            DispatcherQueue.TryEnqueue(() =>
-            {
-                if (_contentReady)
-                    return;
-                if (NavFrame.Content is HomePage home)
-                    home.RefreshWallpaperPreviewUnderSplash();
-                TryDismissLoadingOverlay();
-            });
-        }
-        catch
-        {
-            /* dismiss best-effort */
-        }
-    }
-
-    private async Task LoadingOverlayFallbackAsync()
-    {
-        await Task.Delay(8000);
-        if (_contentReady)
-            return;
-
-        _navigationReady = true;
-        _shellInteractiveReady = true;
-        await DismissLoadingOverlayWhenReadyAsync(fallback: true);
     }
 
     private void OnTrailChanged(object? sender, EventArgs e)
@@ -2711,7 +2205,7 @@ public sealed partial class MainWindow : Window
 
     private void Home_OnNavigateRequested(object? sender, HomeNavTarget target)
     {
-        if (!_shellInputArmed)
+        if (!_contentReady)
             return;
 
         NavigateFromHome(target);
@@ -2909,7 +2403,7 @@ public sealed partial class MainWindow : Window
     /// <summary>Открыть страницу «Система» на вкладке восстановления выбранной копии.</summary>
     internal void OpenSettingsBackup(string path)
     {
-        if (string.IsNullOrWhiteSpace(path))
+        if (_closeInProgress || string.IsNullOrWhiteSpace(path))
             return;
 
         if (!_contentReady)
@@ -3527,17 +3021,6 @@ public sealed partial class MainWindow : Window
         {
             System.Diagnostics.Debug.WriteLine($"GlassSettings ApplyTitleBarPlacementOptions: {ex.Message}");
         }
-    }
-
-    /// <summary>
-    /// После показа: только title-bar опции и layout-режим. Геометрия уже применена в ctor
-    /// (ApplyEarlyWindowPlacement) — второй Resize/Move давал видимый скачок окна.
-    /// </summary>
-    private void ApplyPlacement()
-    {
-        ApplyTitleBarPlacementOptions();
-        EnforceMinWindowSize();
-        ApplyLayoutMode(GetLayoutWidth());
     }
 
     private void SavePlacement()

@@ -38,22 +38,15 @@ public sealed class GlassWindowBackdrop : SystemBackdrop
 
     public AppWindowBackdropMode Mode => _mode;
 
+    // До подключения цели фон не нужен: контроллер создаст OnTargetConnected.
+    internal bool NeedsSolidFallback => _target is not null && _mica is null && _acrylic is null;
+
     /// <summary>Есть ли на этой ОС системный материал вообще (Mica или Desktop Acrylic).</summary>
     /// <remarks>
     /// На Win10 10.0.17763 нет ни того, ни другого: там окно сознательно получает непрозрачный
     /// solid-фон (см. <see cref="WindowBackdropService"/>), а не «дырку» в desktop.
     /// </remarks>
-    public static bool IsAnyMaterialSupported()
-    {
-        try
-        {
-            return MicaController.IsSupported() || DesktopAcrylicController.IsSupported();
-        }
-        catch
-        {
-            return false;
-        }
-    }
+    public static bool IsAnyMaterialSupported() => SafeMicaSupported() || SafeAcrylicSupported();
 
     protected override void OnTargetConnected(ICompositionSupportsSystemBackdrop connectedTarget, XamlRoot xamlRoot)
     {
@@ -121,23 +114,32 @@ public sealed class GlassWindowBackdrop : SystemBackdrop
         if (_target is null || _configuration is null)
             return;
 
-        // System → Mica, если доступен, иначе Desktop Acrylic (паритет прежнего WindowBackdropService).
-        if (_mode is not AppWindowBackdropMode.Acrylic && SafeMicaSupported())
+        // System → Mica, если доступен, иначе Desktop Acrylic. Для явно выбранного
+        // Acrylic не подменяем материал на Mica: при отсутствии акрила фон даст RootGrid.
+        try
         {
-            var mica = new MicaController
+            if (_mode is not AppWindowBackdropMode.Acrylic && SafeMicaSupported())
             {
-                Kind = _mode == AppWindowBackdropMode.MicaAlt ? MicaKind.BaseAlt : MicaKind.Base
-            };
-            mica.AddSystemBackdropTarget(_target);
-            mica.SetSystemBackdropConfiguration(_configuration);
-            _mica = mica;
+                _mica = new MicaController();
+                _mica.Kind = _mode == AppWindowBackdropMode.MicaAlt ? MicaKind.BaseAlt : MicaKind.Base;
+                if (_mica.AddSystemBackdropTarget(_target))
+                    _mica.SetSystemBackdropConfiguration(_configuration);
+                else
+                    ReleaseController();
+            }
+            else if (SafeAcrylicSupported())
+            {
+                _acrylic = new DesktopAcrylicController();
+                if (_acrylic.AddSystemBackdropTarget(_target))
+                    _acrylic.SetSystemBackdropConfiguration(_configuration);
+                else
+                    ReleaseController();
+            }
         }
-        else if (SafeAcrylicSupported())
+        catch
         {
-            var acrylic = new DesktopAcrylicController();
-            acrylic.AddSystemBackdropTarget(_target);
-            acrylic.SetSystemBackdropConfiguration(_configuration);
-            _acrylic = acrylic;
+            ReleaseController();
+            throw;
         }
 
         ApplyThemeColors();

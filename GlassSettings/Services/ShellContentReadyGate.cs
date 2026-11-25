@@ -1,8 +1,7 @@
 namespace GlassSettings.Services;
 
 /// <summary>
-/// Fade-in контента главной после снятия заставки завершён — можно анимировать стартовое notice
-/// (штатный slide-in, не в первом кадре fade).
+/// Экран старта сменился готовым интерфейсом — можно показать стартовое уведомление.
 /// </summary>
 internal static class ShellContentReadyGate
 {

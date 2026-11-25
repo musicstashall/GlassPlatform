@@ -335,8 +335,7 @@ public sealed partial class HomePage : Page
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
-        // Э8-диагностика: этот блок (BuildCards + Refresh) и есть цена первого кадра, если Home
-        // навигируется до Activate. Метки нужны, чтобы видеть, сколько он занимает пост-кадром.
+        // На старте эти фазы выполняются после кадра заставки, пока shell ещё не показан.
         StartupPhaseTrace.Mark("home:onloaded:begin");
         if (!_built)
         {
@@ -366,16 +365,20 @@ public sealed partial class HomePage : Page
         App.ShellWindow?.ScheduleColdStartPostNavAfterHomeLoaded(this);
     }
 
-    /// <summary>После PostNav Attach — подписка RuntimeMonitor.</summary>
+    /// <summary>Подписки страницы после инициализации наблюдателей окна.</summary>
     internal void AttachColdStartRuntimeHooks()
     {
+        if (!IsLoaded)
+            return;
+
+        HookEnvironmentWatcher();
         StartRuntimeMonitor();
     }
 
     /// <summary>После готовности DesktopWallpaperImageCache — до снятия заставки (иначе пустой слот).</summary>
     internal void RefreshWallpaperPreviewUnderSplash()
     {
-        _platformWallpaperTile?.ForceRefreshPreview();
+        _platformWallpaperTile?.ForceRefreshPreview(animate: false);
     }
 
     private void HookEnvironmentWatcher()
@@ -849,7 +852,7 @@ public sealed partial class HomePage : Page
 
         PlatformSummaryCard.CardDescription = HomeStatusSummary.DeviceHeaderBody();
         _platformWallpaperTile?.RefreshPreview();
-        // После Capture на dismiss notices покажет MarkReady/ShowStartupNotice — не дублировать present.
+        // После стартового Capture уведомления покажет MarkReady/ShowStartupNotice — не дублировать present.
         if (refreshNotices)
             _ = RefreshNoticesAsync();
         RefreshPlatformSummary();

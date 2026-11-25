@@ -13,10 +13,8 @@ namespace GlassSettings.Services;
 public static class WindowBackdropService
 {
     /// <summary>
-    /// Присвоить backdrop окна — ровно один раз и до <c>Activate()</c>. WinUI подключает
-    /// цель при готовке острова (SystemBackdrop.OnTargetConnected) и включает прозрачность
-    /// острова, поэтому живой материал попадает в первый же кадр; повторное
-    /// присваивание только рвет связь с целью (opaque-кадр) — его не делаем.
+    /// Подключить полнооконный Desktop Acrylic до <c>Activate()</c>. Сохранённый режим
+    /// возвращается при показе shell, без повторного присваивания <c>SystemBackdrop</c>.
     /// </summary>
     public static void AttachStartupBackdrop(Window window, Grid rootGrid)
     {
@@ -27,14 +25,16 @@ public static class WindowBackdropService
         {
             try
             {
-                window.SystemBackdrop = new GlassWindowBackdrop(GlassSettingsRegistry.ReadWindowBackdrop());
-                return;
+                var backdrop = new GlassWindowBackdrop(AppWindowBackdropMode.Acrylic);
+                window.SystemBackdrop = backdrop;
+                if (!backdrop.NeedsSolidFallback)
+                    return;
             }
             catch { /* ниже — solid-подложка */ }
         }
 
-        // Win10 17763 / отказ API: материала нет, остров остаётся непрозрачным. Фон корня
-        // выставляется сразу (до первого кадра), чтобы не было «дырки» в desktop.
+        // Акрил недоступен или контроллер не подключился: фон корня выставляется
+        // до первого кадра, чтобы даже прозрачный остров не оставил «дырку» в desktop.
         ApplySolidRootBackground(rootGrid);
     }
 
@@ -47,11 +47,11 @@ public static class WindowBackdropService
     {
         if (window.SystemBackdrop is GlassWindowBackdrop backdrop)
         {
-            backdrop.TryApplyMode(GlassSettingsRegistry.ReadWindowBackdrop());
-            return;
+            try { backdrop.TryApplyMode(GlassSettingsRegistry.ReadWindowBackdrop()); }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"GlassSettings backdrop: {ex}"); }
         }
 
-        AttachStartupBackdrop(window, rootGrid);
+        SyncRootBackground(window, rootGrid);
     }
 
     /// <summary>
@@ -63,20 +63,26 @@ public static class WindowBackdropService
     {
         if (window.SystemBackdrop is GlassWindowBackdrop backdrop)
         {
-            backdrop.RefreshThemeColors();
-            rootGrid.Background = null;
+            if (!backdrop.NeedsSolidFallback)
+            {
+                backdrop.RefreshThemeColors();
+                rootGrid.Background = null;
+                return;
+            }
+        }
+        else if (window.SystemBackdrop is not null)
+        {
             return;
         }
-
-        if (window.SystemBackdrop is not null)
-            return;
 
         ApplySolidRootBackground(rootGrid);
     }
 
     private static void ApplySolidRootBackground(Grid rootGrid) =>
         rootGrid.Background = AppThemeVisualResolver.ResolveThemeResourceBrush("SolidBackgroundFillColorBaseBrush")
-            ?? new SolidColorBrush(Color.FromArgb(255, 0x20, 0x20, 0x20));
+            ?? new SolidColorBrush(AppThemeVisualResolver.ResolveIsDarkMode()
+                ? Color.FromArgb(255, 0x20, 0x20, 0x20)
+                : Color.FromArgb(255, 0xF3, 0xF3, 0xF3));
 
     /// <summary>In-app acrylic для overlay UI (pane, диалоги).</summary>
     public static Brush GetAcrylicInAppChromeBrush() =>
