@@ -202,12 +202,13 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 .error-reason-label{color:#ffb6c1;font-size:9px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase}
 .error-detail{flex:1 1 auto;min-height:0;margin:7px 0 0;padding-right:6px;max-height:168px;overflow:auto;color:#f3e6e9;font-size:12px;line-height:1.52;white-space:pre-wrap;overflow-wrap:anywhere;scrollbar-color:#8d6472 #2d1e32;scrollbar-width:thin}
 .error-reason[hidden],#error-copy-menu[hidden]{display:none}
-.error-detail,.complete-warn-list{-webkit-user-select:text;user-select:text;cursor:text}
+.error-detail,.complete-warn-list,.complete-warn-list *{-webkit-user-select:text;user-select:text;cursor:text}
 .error-detail:focus-visible{outline:1px solid #f8b9cb;outline-offset:2px}
 .complete-warn-list:focus-visible{outline:1px solid #f0c27a;outline-offset:2px}
 #error-copy-menu{position:fixed;z-index:1000;padding:4px;border:1px solid #8d6472;border-radius:6px;background:#291f35;color:#fff;box-shadow:0 3px 12px #0009}
 #error-copy-command{display:block;padding:6px 16px;border:0;border-radius:3px;background:transparent;color:inherit;font:inherit;cursor:pointer}
-#error-copy-command:hover,#error-copy-command:focus-visible{background:#694457}
+#error-copy-command:not([aria-disabled="true"]):is(:hover,:focus-visible){background:#694457}
+#error-copy-command[aria-disabled="true"]{opacity:.5;cursor:default}
 .error-detail::-webkit-scrollbar{width:9px}.error-detail::-webkit-scrollbar-track{background:#2d1e32;border-radius:8px}.error-detail::-webkit-scrollbar-thumb{background:#8d6472;border:2px solid #2d1e32;border-radius:8px}
 .error-note{flex-shrink:0;max-height:52px;overflow:auto;overflow-wrap:anywhere;pointer-events:auto;margin:12px 0 0;max-width:420px;color:#aaa6b6;font-size:11px;line-height:1.55;white-space:pre-wrap}
 .error-visual{position:absolute;right:52px;top:64px;width:435px;height:435px;z-index:4;display:grid;place-items:center;opacity:0;transform:scale(.92);animation:complete-pop .92s .13s cubic-bezier(.18,.8,.25,1) forwards;pointer-events:none}
@@ -1836,7 +1837,7 @@ function openDetailCopyMenu(source,x,y){
  if(!detailCopyCommand.textContent)return;
  copyMenuSource=source;
  detailCopyMenu.hidden=false;
- detailCopyCommand.disabled=!hasSelectionIn(source);
+ detailCopyCommand.setAttribute('aria-disabled',String(!hasSelectionIn(source)));
  detailCopyMenu.style.left=Math.max(0,Math.min(x,window.innerWidth-detailCopyMenu.offsetWidth))+'px';
  detailCopyMenu.style.top=Math.max(0,Math.min(y,window.innerHeight-detailCopyMenu.offsetHeight))+'px';
 }
@@ -1849,21 +1850,39 @@ document.addEventListener('contextmenu',e=>{
 // Не переносим фокус мышью: иначе Chromium может снять выделение до Copy.
 detailCopyCommand.addEventListener('mousedown',e=>e.preventDefault());
 detailCopyCommand.addEventListener('click',()=>{
- if(copyMenuSource===activeCopySource()&&hasSelectionIn(copyMenuSource))document.execCommand('copy');
+ const source=copyMenuSource;
  closeDetailCopyMenu();
+ if(source===activeCopySource()&&hasSelectionIn(source))document.execCommand('copy');
+});
+for(const source of [errorDetail,warnList])source.addEventListener('pointerdown',e=>{
+ if(e.button===0&&source===activeCopySource())source.focus({preventScroll:true});
 });
 document.addEventListener('pointerdown',e=>{if(!detailCopyMenu.contains(e.target))closeDetailCopyMenu();});
 window.addEventListener('blur',closeDetailCopyMenu);
 document.addEventListener('keydown',e=>{
  const source=activeCopySource();
- if(source&&e.target===source&&(e.key==='ContextMenu'||(e.shiftKey&&e.key==='F10'))){
+ if(!detailCopyMenu.hidden&&(e.key==='Escape'||e.key==='Enter'||e.key===' ')){
+  e.preventDefault();e.stopImmediatePropagation();
+  if(e.key==='Escape')closeDetailCopyMenu();
+  else detailCopyCommand.click();
+  return;
+ }
+ if(!source?.contains(e.target))return;
+ if(e.key==='ContextMenu'||(e.shiftKey&&e.key==='F10')){
   e.preventDefault();
   const bounds=source.getBoundingClientRect();
   openDetailCopyMenu(source,bounds.left,bounds.bottom);
- }else if(!detailCopyMenu.hidden&&(e.key==='Escape'||e.key==='Enter'||e.key===' ')){
-  e.preventDefault();e.stopImmediatePropagation();
-  if(e.key==='Escape')closeDetailCopyMenu();
-  else if(!detailCopyCommand.disabled)detailCopyCommand.click();
+ }else if(e.ctrlKey&&!e.altKey&&!e.shiftKey&&!e.metaKey){
+  const key=e.key.toLowerCase();
+  if(key==='a'||e.code==='KeyA'){
+   e.preventDefault();
+   closeDetailCopyMenu();
+   window.getSelection().selectAllChildren(source);
+  }else if(key==='c'||e.code==='KeyC'){
+   e.preventDefault();
+   closeDetailCopyMenu();
+   if(hasSelectionIn(source))document.execCommand('copy');
+  }
  }
 },true);
 function syncModeText(){const x=uiResources[locale],hostUi=hostState.ui||{},done=completionText||hostUi||x,failed=errorText||hostUi||x;
