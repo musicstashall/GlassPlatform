@@ -5,6 +5,7 @@
 #include <Hooks/RootGdiHooks.h>
 #include <Subsystems/RootSwcaGradient.h>
 #include <Subsystems/Settings.h>
+#include <Subsystems/PaintDispatcher.h>
 #include <RootBackdropPolicy.h>
 #include <RootPolicyQuery.h>
 #include <SystemHelper.h>
@@ -262,6 +263,34 @@ namespace GlassCore::ExplorerFrameControl
             swprintf_s(buf, bufChars, L"hdcWin=%p cls=\"%s\"", w, cls);
         }
 
+        // IAT shlwapi висит на весь срок жизни модуля, поэтому caller-фильтр сам по себе
+        // не отделяет фон Проводника от оболочки. Иконки рабочего стола и панели задач
+        // рисуются в DC Progman/WorkerW, Shell_TrayWnd и их потомков (или в memory-DC):
+        // PatBlt(BLACKNESS) по такому DC даёт чёрную маску вместо иконки. Чёрный фон
+        // применяем только к DC корня File Explorer; остальные DC идут в orig без изменений.
+        [[nodiscard]] static bool IsExplorerShellChromeDc(HDC hdc) noexcept
+        {
+            if (!hdc)
+                return false;
+
+            HWND hWnd = WindowFromDC(hdc);
+            if (!hWnd)
+                hWnd = GlassCore::PaintDispatcher::GetStackOwnerForDc(hdc);
+            if (!hWnd)
+                hWnd = GlassCore::PaintDispatcher::GetPaintSessionHostHwnd();
+            if (!hWnd || !IsWindow(hWnd))
+                return false;
+
+            const HWND hRoot = GetAncestor(hWnd, GA_ROOT);
+            if (!hRoot || !IsWindow(hRoot))
+                return false;
+            if (Shared::RootBackdropPolicy::IsFileExplorerShellRootHwnd(hRoot))
+                return true;
+
+            auto lock = g_overallLock.lock_shared();
+            return g_trackedExplorerRoots.contains(hRoot);
+        }
+
         [[nodiscard]] static bool ShouldEnableExplorerBgHooks() noexcept
         {
             if (!GlassCore::Root::IsFullInjectionMode())
@@ -412,13 +441,21 @@ namespace GlassCore::ExplorerFrameControl
             if (callerMod != GetModuleHandleW(L"shlwapi.dll"))
                 return orig(hdc, x, y, options, lprect, lpString, c, lpDx);
 
+            // Только хром Проводника. DC панели/рабочего стола и memory-DC иконок
+            // должны дойти до orig без BLACKNESS — иначе чёрная маска поверх иконки.
+            if (!IsExplorerShellChromeDc(hdc))
+                return orig(hdc, x, y, options, lprect, lpString, c, lpDx);
+
             if (options == ETO_OPAQUE && lprect != nullptr && c == 0)
             {
                 if (ShouldLogExplorerFrameHotPath())
                 {
+                    wchar_t hdcWindow[192]{};
+                    FormatHdcWindowSuffix(hdc, hdcWindow, std::size(hdcWindow));
                     DebugLog(DBG_IMPORTANT,
-                        L"[GlassCore][ExplorerFrame] ExtTextOutW BLACKNESS: left=%d top=%d right=%d bottom=%d",
-                        lprect->left, lprect->top, lprect->right, lprect->bottom);
+                        L"[GlassCore][ExplorerFrame] ExtTextOutW BLACKNESS: "
+                        L"left=%d top=%d right=%d bottom=%d %s",
+                        lprect->left, lprect->top, lprect->right, lprect->bottom, hdcWindow);
                 }
                 PatBlt(hdc, lprect->left, lprect->top,
                     lprect->right - lprect->left, lprect->bottom - lprect->top, BLACKNESS);
@@ -580,9 +617,18 @@ namespace GlassCore::ExplorerFrameControl
             auto orig = GetOverallOrigSafe<OHK_SET_BK_COLOR, decltype(&SetBkColor)>(callerMod);
             if (!orig)
             {
-                DebugLog(DBG_WARNING,
-                    L"[GlassCore][ExplorerFrame] SetBkColor: нет orig (IAT не найден для caller) hdc=0x%p color=0x%08X caller=0x%p",
-                    hdc, color, callerMod);
+                // Чужой caller (в логе Taskbar.dll / windows.storage.dll) не должен
+                // разлетаться warning-ом на каждый paint — passthrough оставляем как есть.
+                static std::atomic<unsigned> s_noOrigLogCount{ 0 };
+                if (s_noOrigLogCount.fetch_add(1, std::memory_order_relaxed) < 8)
+                {
+                    wchar_t callerName[64]{};
+                    GetModuleFileBaseName(callerMod, callerName, std::size(callerName));
+                    DebugLog(DBG_WARNING,
+                        L"[GlassCore][ExplorerFrame] SetBkColor: нет orig (IAT не найден для caller) "
+                        L"hdc=0x%p color=0x%08X caller=%s (0x%p)",
+                        hdc, color, callerName, callerMod);
+                }
                 return SetBkColor(hdc, color);
             }
 
@@ -591,7 +637,13 @@ namespace GlassCore::ExplorerFrameControl
             if (!g_bgHooksEnabled.load(std::memory_order_acquire))
                 return orig(hdc, color);
 
-            // IAT SetBk на shlwapi: перехват на весь срок жизни модуля; подмена только при включённом фоне проводника.
+            // IAT SetBk на shlwapi висит на весь срок жизни модуля. Чёрный фон — только
+            // для хрома Проводника: подмена цвета в DC оболочки закрашивает маску иконок.
+            if (callerMod != GetModuleHandleW(L"shlwapi.dll"))
+                return orig(hdc, color);
+            if (!IsExplorerShellChromeDc(hdc))
+                return orig(hdc, color);
+
             return orig(hdc, RGB(0, 0, 0));
         }
 
