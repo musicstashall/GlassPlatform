@@ -60,6 +60,24 @@ const assert=require('node:assert/strict');
   await page.locator('#scenario').selectOption('removed');await ui.locator('#stage[data-mode="complete"]').waitFor();
   assert.equal(await ui.locator('#complete-title').innerText(),'Removal complete');
   assert.equal(await ui.locator('#complete-panel.has-warnings').count(),0);
+  const stringsResponse=await page.request.get(new URL('runtime/wizard-strings.json',page.url()).href);
+  assert.ok(stringsResponse.ok());
+  const strings=await stringsResponse.json();
+  const detail=ui.locator('#error-detail');
+  for(const [appMode,locale] of [['unins','en'],['setup','ru']]){
+   await page.locator('#app-mode').selectOption(appMode);
+   await page.locator('#locale').selectOption(locale);
+   await page.locator('#scenario').selectOption('error');
+   await ui.locator('#error-reason-label').filter({hasText:strings[locale].IDS_ERROR_DETAILS}).waitFor();
+   assert.equal(await ui.locator('#error-tag').textContent(),strings[locale].IDS_ERROR_TAG);
+   await detail.evaluate(node=>{
+    const range=document.createRange();range.selectNodeContents(node);
+    const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);
+    node.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:150,clientY:120}));
+   });
+   const copy=ui.locator('#error-copy-command');await copy.waitFor();
+   assert.equal(await copy.textContent(),strings[locale].IDS_COPY);
+  }
   await page.locator('#reference-tab').click();await page.locator('#reference').waitFor({state:'visible'});
   assert.ok(await page.locator('#reference img').evaluate(img=>img.complete&&img.naturalWidth>0));
   await page.locator('#runtime-tab').click();await page.locator('#locale').selectOption('ru');

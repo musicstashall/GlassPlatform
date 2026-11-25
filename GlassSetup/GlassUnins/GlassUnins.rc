@@ -13,4 +13,5 @@ IDR_SLIDE_NOTIFICATION RCDATA "..\\res\\assets\\slide_notification.png"
 IDR_SLIDE_CONTEXT_MENU RCDATA "..\\res\\assets\\slide_context_menu.jpg"
 IDR_SLIDE_EXPLORER RCDATA "..\\res\\assets\\slide_explorer.jpg"
 
-#include "../res/ProductStrings.rcinc"
+#include "../res/strings/Common.rcinc"
+#include "../res/strings/Unins.rcinc"

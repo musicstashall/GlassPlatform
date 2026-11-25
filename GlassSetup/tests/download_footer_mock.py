@@ -1,8 +1,13 @@
 """Actual native footer summary: concise retry/cancel copy, no reselection advice."""
 from pathlib import Path
-import subprocess,tempfile
+import re, subprocess,tempfile
 root=Path(__file__).resolve().parents[2]
-s=(root/'GlassSetup/src/main.cpp').read_text()
+s=(root/'GlassSetup/src/main.cpp').read_text(encoding='utf-8')
+ru,en=(root/'GlassSetup/res/strings/Setup.rcinc').read_text(encoding='utf-8').split('LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US')
+keys=('IDS_DOWNLOAD_PREPARE_FAILED','IDS_DOWNLOAD_PACKAGES_READY','IDS_DOWNLOAD_PROGRESS_PREFIX')
+def literal(table,key):
+ return re.search(r'^\s*'+key+r' (".*")$',table,re.MULTILINE)[1]
+strings='\n'.join(f' case {key}:return gLanguage==25?L{literal(ru,key)}:L{literal(en,key)};' for key in keys)
 a=s.index('    std::wstring NativeDownloadSummary() const {')
 fn=s[a:s.index('    std::wstring DownloadsJson() const {',a)]
 h=r'''
@@ -13,8 +18,12 @@ h=r'''
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
-#define PRIMARYLANGID(x) (x)
-constexpr unsigned LANG_RUSSIAN=25;unsigned gLanguage=25;
+#include "resource.h"
+unsigned gLanguage=25;
+std::wstring Text(unsigned id){switch(id){
+ // STRINGS
+ default:assert(false);return {};
+}}
 struct Job{std::atomic<bool> cancel{false},done{false};bool ok=false;std::atomic<std::uint64_t> total{100},bytes{0};};
 struct UI{struct {std::array<std::shared_ptr<Job>,7> jobs;} downloads_;bool SimulationBuild()const{return false;}
 // FN
@@ -28,9 +37,9 @@ int main(){UI ui;assert(ui.NativeDownloadSummary().empty());auto j=std::make_sha
  j->ok=true;assert(ui.NativeDownloadSummary()==L"Selected packages are verified and ready.");
  j->cancel=true;assert(ui.NativeDownloadSummary().empty());
 }
-'''.replace('// FN',fn)
+'''.replace('// FN',fn).replace('// STRINGS',strings)
 with tempfile.TemporaryDirectory() as d:
- p=Path(d)/'test.cpp';exe=Path(d)/'test';p.write_text(h)
- subprocess.run(['g++','-std=c++17','-Wall','-Wextra','-Werror',str(p),'-o',str(exe)],check=True)
+ p=Path(d)/'test.cpp';exe=Path(d)/'test';p.write_text(h,encoding='utf-8')
+ subprocess.run(['g++','-std=c++17','-Wall','-Wextra','-Werror','-I'+str(root/'GlassSetup/res'),str(p),'-o',str(exe)],check=True)
  subprocess.run([str(exe)],check=True)
 print('PASS: actual RU/EN footer: concise failure/retry/cancel, ready, cancelled/empty states')

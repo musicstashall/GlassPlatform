@@ -20,7 +20,7 @@ nav,.controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:18p
  <div class="controls">
   <label>Режим <select id="app-mode"><option value="setup">Setup</option><option value="unins">Unins</option></select></label>
   <label>Язык <select id="locale"><option value="ru">Русский</option><option value="en">English</option></select></label>
-  <label>Сценарий <select id="scenario"><option value="updates">Установлены · доступны обновления</option><option value="damaged">Повреждение и обновление</option><option value="fresh">Первая установка</option><option value="removed">Завершено полное удаление</option><option value="empty">Пустые панели</option><option value="checking">Проверка версии Setup</option><option value="sut-local">SecureUxTheme · локальный MSI (демо)</option><option value="sut-release">SecureUxTheme · релиз (демо)</option><option value="sut-active">SUT: активен, удаление заблокировано</option><option value="sut-pending">SUT: ещё не загружен, удаление доступно</option><option value="sut-unloading">SUT: загружен, регистрация отключена</option></select></label>
+  <label>Сценарий <select id="scenario"><option value="updates">Установлены · доступны обновления</option><option value="damaged">Повреждение и обновление</option><option value="fresh">Первая установка</option><option value="removed">Завершено полное удаление</option><option value="empty">Пустые панели</option><option value="checking">Проверка версии Setup</option><option value="error">Детали ошибки</option><option value="sut-local">SecureUxTheme · локальный MSI (демо)</option><option value="sut-release">SecureUxTheme · релиз (демо)</option><option value="sut-active">SUT: активен, удаление заблокировано</option><option value="sut-pending">SUT: ещё не загружен, удаление доступно</option><option value="sut-unloading">SUT: загружен, регистрация отключена</option></select></label>
   <button id="reset" type="button">Сбросить план</button>
   <button id="available" type="button">Закрепить / скрыть «Доступно»</button>
   <button id="plan" type="button">Закрепить / скрыть план</button>
@@ -37,11 +37,11 @@ const $=id=>document.getElementById(id);let source='',generation=0;
 const params=new URLSearchParams(location.search);
 for(const id of ['app-mode','locale','scenario'])if([...$(id).options].some(x=>x.value===params.get(id)))$(id).value=params.get(id);
 function mockHostBridge(initial){
- let receive;const state=initial;
+ let receive;const {ui,locale,appMode,...state}=initial;
  const send=()=>{if(receive)receive({data:JSON.parse(JSON.stringify(state))});};
  const messageLog=message=>{const log=parent.document.getElementById('messages');log.textContent=(log.textContent+'\n'+message).split('\n').slice(-30).join('\n');};
  window.chrome={webview:{addEventListener(type,callback){if(type==='message')receive=callback;},postMessage(message){
-  if(message==='ready'){queueMicrotask(send);return;}
+  if(message==='ready'){queueMicrotask(()=>{receive({data:{type:'init',locale,appMode,ui}});send();});return;}
   messageLog(message);
   if(message==='components:select-all')for(const item of state.components){if(item.disabled||item.locked)continue;if(state.appMode==='unins'||item.applySupported!==false){item.checked=true;item.operation=state.appMode==='unins'?'remove':item.baseOperation;}}
   const match=/^component:([^:]+):(0|1|remove)$/.exec(message);
@@ -52,29 +52,36 @@ function mockHostBridge(initial){
   queueMicrotask(send);
  }}};
 }
-function fixtureState(){
- const ru=$('locale').value==='ru',mode=$('app-mode').value,scenario=$('scenario').value;
- const names=[['x64','GlassPlatform x64'],['x86','GlassPlatform x86'],['settings64','GlassSettings x64'],['settings32','GlassSettings x86'],['openglass','OpenGlass']];
+function fixtureState(catalogue){
+ const locale=$('locale').value,ru=locale==='ru',mode=$('app-mode').value,scenario=$('scenario').value;
+ const strings=catalogue[locale];
+ const names=[['x64',strings.IDS_COMP_P64_TITLE],['x86',strings.IDS_COMP_P32_TITLE],['settings64',strings.IDS_COMP_GS64_TITLE],['settings32',strings.IDS_COMP_GS32_TITLE],['openglass',strings.IDS_COMP_OG_TITLE]];
  const components=names.map(([id,title],i)=>{const installed=scenario!=='fresh';return {id,title,installed,checked:false,installedPackageVersion:installed?'1.4.0':'',installedVersion:installed?'1.4.0':'',targetVersion:'1.5.0',localPackageVersion:'1.4.0',releasePackageVersion:'1.5.0',baseOperation:installed?'update':'install',operation:installed?'update':'install',packageSize:(i<2?12:6)*1048576,removeSupported:installed,applySupported:true,broken:scenario==='damaged'&&id==='settings64',description:ru?'Демонстрационный продукт; системных изменений нет.':'Demonstration product; no system changes.',warning:id==='settings64'?(ru?'Демонстрационное предупреждение: проверяйте совместимость Settings и платформы. Выбор действий остаётся за вами.':'Demonstration warning: check Settings/platform compatibility. Actions remain your choice.'):'',reasons:[]};});
  if(scenario==='sut-local'||scenario==='sut-release'){
-  const local=scenario==='sut-local';components.splice(0,components.length,{id:'secureUxTheme',title:'SecureUxTheme',installed:false,checked:false,operation:'install',baseOperation:'install',applySupported:true,installedPackageVersion:'',targetVersion:local?'4.0.0':'4.1.0',targetVersionKind:local?'msi':'release',localPackageVersion:local?'4.0.0':'',remoteVersion:'4.1.0',releaseTag:'v4.1.0',packageSize:499712,description:ru?'Демонстрационные версии, не данные текущего релиза.':'Demonstration versions, not current release data.'});
+  const local=scenario==='sut-local';components.splice(0,components.length,{id:'secureUxTheme',title:strings.IDS_COMP_SUT_TITLE,installed:false,checked:false,operation:'install',baseOperation:'install',applySupported:true,installedPackageVersion:'',targetVersion:local?'4.0.0':'4.1.0',targetVersionKind:local?'msi':'release',localPackageVersion:local?'4.0.0':'',remoteVersion:'4.1.0',releaseTag:'v4.1.0',packageSize:499712,description:ru?'Демонстрационные версии, не данные текущего релиза.':'Demonstration versions, not current release data.'});
  }
  if(['sut-active','sut-pending','sut-unloading'].includes(scenario)){
-  const pending=scenario==='sut-pending';components.splice(0,components.length,{id:'secureUxTheme',title:'SecureUxTheme',installed:true,checked:false,installedPackageVersion:'4.0.0',installedVersion:'4.0.0',operation:'repair',baseOperation:'repair',applySupported:false,removeSupported:pending,description:ru?'Демонстрационное состояние SecureUxTheme; системных изменений нет.':'Demonstration SecureUxTheme state; no system changes.',state:pending?(ru?'Состояние изменится после перезапуска':'State change pending restart'):(ru?'Активен':'Active'),removeBlockedReason:pending?'':scenario==='sut-unloading'?(ru?'Изменение состояния SecureUxTheme ожидает перезагрузки. После перезагрузки требуется повторная проверка.':'A SecureUxTheme state change is pending restart. Inspection must run again after restarting.'):(ru?'SecureUxTheme активен. Безопасное удаление активного компонента в Setup пока не реализовано; изменений не выполнено.':'SecureUxTheme is active. Safe removal of the active component is not yet implemented in Setup; no changes were made.')});
+  const pending=scenario==='sut-pending';components.splice(0,components.length,{id:'secureUxTheme',title:strings.IDS_COMP_SUT_TITLE,installed:true,checked:false,installedPackageVersion:'4.0.0',installedVersion:'4.0.0',operation:'repair',baseOperation:'repair',applySupported:false,removeSupported:pending,description:ru?'Демонстрационное состояние SecureUxTheme; системных изменений нет.':'Demonstration SecureUxTheme state; no system changes.',state:pending?(ru?'Состояние изменится после перезапуска':'State change pending restart'):(ru?'Активен':'Active'),removeBlockedReason:pending?'':scenario==='sut-unloading'?(ru?'Изменение состояния SecureUxTheme ожидает перезагрузки. После перезагрузки требуется повторная проверка.':'A SecureUxTheme state change is pending restart. Inspection must run again after restarting.'):(ru?'SecureUxTheme активен. Безопасное удаление активного компонента в Setup пока не реализовано; изменений не выполнено.':'SecureUxTheme is active. Safe removal of the active component is not yet implemented in Setup; no changes were made.')});
  }
- return {type:'state',locale:ru?'ru':'en',appMode:mode,page:scenario==='removed'?'complete':scenario==='checking'?'checking':mode==='unins'?'uninstall-select':'components',maintenance:scenario!=='fresh',components:['removed','empty','checking'].includes(scenario)?[]:components,componentsLoading:false,finishWarnings:[],ui:scenario==='removed'?{doneTitle:ru?'Удаление завершено':'Removal complete',doneBody:ru?'Все выбранные продукты удалены.':'All selected products were removed.',doneReady:ru?'Операция завершена':'Operation complete',doneNote:ru?'Пользовательские данные сохранены.':'User data was retained.'}:{}};
+ const ui={brand:strings.IDS_BRAND,errorTag:strings.IDS_ERROR_TAG,errorDetails:strings.IDS_ERROR_DETAILS,errorCopy:strings.IDS_COPY};
+ if(scenario==='removed')Object.assign(ui,{doneTitle:ru?'Удаление завершено':'Removal complete',doneBody:ru?'Все выбранные продукты удалены.':'All selected products were removed.',doneReady:ru?'Операция завершена':'Operation complete',doneNote:ru?'Пользовательские данные сохранены.':'User data was retained.'});
+ const errorReason=scenario==='error'?(ru?'Демонстрационная ошибка; системных изменений нет.':'Demonstration error; no system changes.') : '';
+ return {type:'state',locale,appMode:mode,page:scenario==='error'?'error':scenario==='removed'?'complete':scenario==='checking'?'checking':mode==='unins'?'uninstall-select':'components',maintenance:scenario!=='fresh',components:['error','removed','empty','checking'].includes(scenario)?[]:components,componentsLoading:false,finishWarnings:[],errorReason,ui};
 }
 async function render(){
  const version=++generation;$('messages').textContent='';$('error').hidden=true;
  try{
   if(!source){const response=await fetch('runtime/slideshow.html');if(!response.ok)throw new Error('HTML: '+response.status);source=await response.text();}
+  const catalogueResponse=await fetch('runtime/wizard-strings.json');
+  if(!catalogueResponse.ok)throw new Error('RU/EN: '+catalogueResponse.status);
+  const catalogue=await catalogueResponse.json();
   if(version!==generation)return;
   const runtime=new URL('runtime/',location.href).href;
   // Only this preview copy is adapted. Production CSP and virtual URLs stay unchanged.
   let html=source.replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/i,'').replaceAll('https://glassplatform.invalid/',runtime);
-  const bridge='<script>('+mockHostBridge.toString()+')('+JSON.stringify(fixtureState())+');</'+'script>';
-  html=html.replace('<head>','<head>'+bridge);$('preview').srcdoc=html;
- }catch(error){$('error').textContent='Не удалось открыть макет: '+error.message+'. Запустите python GlassSetup/tools/preview_mockups.py из корня solution.';$('error').hidden=false;}
+  const bridge='<script>('+mockHostBridge.toString()+')('+JSON.stringify(fixtureState(catalogue)).replaceAll('<','\\u003c')+');</'+'script>';
+  html=html.replace('<head>',()=>'<head>'+bridge);$('preview').srcdoc=html;
+ }catch(error){if(version!==generation)return;$('error').textContent='Не удалось открыть макет: '+error.message+'. Запустите python GlassSetup/tools/preview_mockups.py из корня solution.';$('error').hidden=false;}
 }
 for(const id of ['app-mode','locale','scenario'])$(id).onchange=render;
 $('reset').onclick=render;

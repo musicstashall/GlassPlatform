@@ -29,7 +29,8 @@ struct Catalog {int marker;std::array<std::optional<Asset>,kCount> products{};Ca
 namespace GlassReleaseClient {std::wstring Wide(const char* text){return std::wstring(text,text+std::char_traits<char>::length(text));}}
 namespace InstallLog{void Line(const wchar_t*){}template<class... T>void LineFormat(const wchar_t*,T...){} }
 bool IsControllerChild(){return false;}
-constexpr int LANG_RUSSIAN=1;int gLanguage=0;int PRIMARYLANGID(int value){return value;}
+#include "resource.h"
+std::wstring Text(unsigned){return L"Setup diagnostic";}
 enum class Page{Checking,Components};
 struct VersionCheckResult{bool completed=false,fetched=false,newer=false,setupDownloadFailed=false;GlassPackageCatalog::Catalog catalog=7;
  std::wstring self=L"2.0.0.90",latest=L"2.0.0.70",preparedSetup;};
@@ -65,5 +66,5 @@ int main(){
 with tempfile.TemporaryDirectory(prefix='CheckingGate-') as d:
     path=Path(d)/'test.cpp';exe=Path(d)/'test'
     path.write_text(prefix+function+main)
-    subprocess.run(['g++','-std=c++17','-Wall','-Wextra','-Werror',str(path),'-o',str(exe)],check=True)
+    subprocess.run(['g++','-std=c++17','-Wall','-Wextra','-Werror','-I'+str(root/'GlassSetup/res'),str(path),'-o',str(exe)],check=True)
     subprocess.run([str(exe)],check=True)

@@ -26,11 +26,31 @@ assert read("res/resource.h.txt") == header, "resource.h.txt is out of sync"
 ids = dict(re.findall(r"#define\s+(\w+)\s+(\d+)", header))
 assert len(ids.values()) == len(set(ids.values())), "duplicate resource/control IDs"
 setup_rc = read("res/GlassSetup.rc")
-shared_strings = read("res/ProductStrings.rcinc")
-rc = setup_rc + "\n" + shared_strings
 unins_rc = read("GlassUnins/GlassUnins.rc")
-assert '#include "ProductStrings.rcinc"' in setup_rc
-assert '#include "../res/ProductStrings.rcinc"' in unins_rc
+shared_strings = read("res/strings/Common.rcinc")
+setup_strings = read("res/strings/Setup.rcinc")
+unins_strings = read("res/strings/Unins.rcinc")
+rc = "\n".join((setup_rc, shared_strings, setup_strings))
+assert '#include "strings/Common.rcinc"' in setup_rc
+assert '#include "strings/Setup.rcinc"' in setup_rc and 'strings/Unins.rcinc' not in setup_rc
+assert '#include "../res/strings/Common.rcinc"' in unins_rc
+assert '#include "../res/strings/Unins.rcinc"' in unins_rc and 'strings/Setup.rcinc' not in unins_rc
+assert "STRINGTABLE" not in setup_rc and "STRINGTABLE" not in unins_rc
+assert 'IDR_EULA RCDATA "Eula.ru.txt"' in setup_rc and 'IDR_EULA RCDATA "Eula.en.txt"' in setup_rc
+
+
+def catalogue_ids(table):
+    ru, en = re.split(r'^LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US$', table, flags=re.MULTILINE)
+    assert 'LANGUAGE LANG_RUSSIAN, SUBLANG_DEFAULT' in ru
+    ru_ids, en_ids = (re.findall(r'^\s*(IDS_\w+)\s+"', part, re.MULTILINE) for part in (ru, en))
+    assert ru_ids and set(ru_ids) == set(en_ids)
+    assert len(ru_ids) == len(en_ids) == len(set(ru_ids)), "duplicate or missing translation"
+    return set(ru_ids)
+
+
+shared_ids, setup_ids, unins_ids = map(catalogue_ids, (shared_strings, setup_strings, unins_strings))
+assert shared_ids.isdisjoint(setup_ids | unins_ids) and setup_ids.isdisjoint(unins_ids)
+assert shared_ids | setup_ids | unins_ids == {name for name in ids if name.startswith("IDS_")}
 setup = read("src/main.cpp")
 # Project items do not import C++ declarations. Each UI translation unit must
 # include the policy headers itself, before using their namespaces.
@@ -63,8 +83,9 @@ used_strings = {name for path in string_sources
                 for name in re.findall(r"\bIDS_[A-Z0-9_]+\b", path.read_text(encoding="utf-8"))}
 for name in ids:
     if name.startswith("IDS_"):
-        assert len(re.findall(r"\b" + re.escape(name) + r"\b", rc)) == 2, f"{name}: RU/EN string missing"
         assert name in used_strings, f"{name}: unreferenced string resource"
+assert unins_ids.isdisjoint(re.findall(r'\bIDS_\w+\b', setup))
+assert setup_ids.isdisjoint(re.findall(r'\bIDS_\w+\b', unins))
 for path in [*root.joinpath("src").rglob("*.cpp"), root / "GlassUnins/main.cpp"]:
     text = path.read_text(encoding="utf-8")
     used = set(re.findall(r"\b(?:IDS|IDR|IDI|IDC)_[A-Z0-9_]+\b", text)) - {"IDC_ARROW"}
@@ -133,6 +154,11 @@ for name in ('IDS_COPY', 'IDS_ERROR_TAG', 'IDS_ERROR_DETAILS', 'IDS_NATIVE_RISK_
     assert len(re.findall(r'^\s*' + name + r'\s+"', shared_strings, re.MULTILINE)) == 2, name
     assert f'Text({name})' in unins, name
 assert 'hostUi.errorCopy' in ui
+assert 'hostUi.errorTag' in ui and 'hostUi.errorDetails' in ui
+assert 'Копировать' not in ui and "'Copy'" not in ui, 'common copy caption must come from the host'
+plan_ui = read('src/GlassProductUiPolicy.h')
+plan_warning_ids = set(re.findall(r'\bIDS_PLAN_WARN_\w+\b', plan_ui))
+assert plan_warning_ids and plan_warning_ids <= shared_ids
 
 # Validate the manifests/project files as XML, including elevation and DPI.
 ns = {"asmv3": "urn:schemas-microsoft-com:asm.v3",
@@ -276,7 +302,8 @@ assert "DeleteTree(" not in purge and "RemoveDirectoryTree(" not in purge
 warnings = section(setup, "    std::wstring ComponentWarnings()", "    std::wstring ComponentsJson()")
 assert "SelectionPreview()" in warnings and "GlassProductUiPolicy::WarningText" in warnings
 assert "ComponentStateId" in setup and "installedSelection_.platform32" in setup and "IDS_COMP_STATE_KEEP" in rc
-assert "IDS_COMP_STATE_REMOVE" not in rc and "IDS_COMP_BADGE_REMOVE" not in rc and "IDS_STATUS_REMOVE " not in rc
+assert "IDS_COMP_STATE_REMOVE" in setup_ids and "IDS_COMP_STATE_REMOVE" in setup
+assert "IDS_COMP_BADGE_REMOVE" not in rc and "IDS_STATUS_REMOVE " not in rc
 assert "ActionForInstall" in policy and "ComponentBadgeId" in setup and "ComponentBadgeTone" in setup
 # Warnings about a missing product apply only when it is neither selected nor installed.
 assert "X86WarningApplies()" in setup and "SettingsWarningApplies()" in setup and "!installedSelection_.glassSettings" in setup
@@ -607,7 +634,7 @@ assert "MSIINSTALLCONTEXT_MACHINE" in sut_package and "Vendor cached PackageCode
 assert "before==removal.digest && now==removal.digest" in sut_package
 assert "if(!vendorOnly)ok = self->RegisterSelectedProducts()" in worker
 assert "if(!vendorOnly && !self->auxiliaryOnly_ && !self->mixedOpenGlass_)self->LaunchSelectedProducts()" in worker
-assert "IDS_APPLY" in setup and 'IDS_APPLY "Применить"' in read("res/ProductStrings.rcinc")
+assert "IDS_APPLY" in setup and 'IDS_APPLY "Применить"' in setup_strings
 
 assert "if(in.inspectSources)GlassPackageAcquisition::FetchCatalog" in sut_inspect
 assert worker.index("InstallGlassSettingsEarly()") < worker.index("RunMsiSequence()")
@@ -715,7 +742,7 @@ assert 'L",\\\"locked\\\":false,\\\"hidden\\\":false}"' in unins
 assert "GlassProductUiPolicy::WarningText" in unins and "componentsWarning" in unins
 assert "Clean all user profiles, HKLM and saved Glass themes" in ui and "Unchecked products and settings are retained" in ui
 assert "IDC_UNINS_SETTINGS_CLEANUP" in header_now and "cleanupSettings" in unins
-assert "Удалить настройки" in unins and "RegDeleteTreeW" in reg_sanity
+assert "IDS_UNINS_CLEANUP_CHECK" in unins and "RegDeleteTreeW" in reg_sanity
 
 # 2026-11-03 follow-up 5: «Установить» disabled with no product selected; the reasons
 # subline stays on every card with neutral grey «не требуется» when there are no reasons.
@@ -743,8 +770,8 @@ assert "const bool progressPage=page_==Page::Stopping || page_==Page::Removing" 
 assert "const int footerTop=progressPage?kContentHeight:kHtmlHeight" in unins
 assert "text.find(part)!=std::wstring::npos" in setup  # error detail is not appended twice
 assert "GlassSettings" in unins and "secureUxTheme" in unins and "IDC_UNINS_SECUREUXTHEME" in unins
-assert "SecureUxTheme retained" in unins and "SecureUxThemeState::External" in unins
-assert "slim" in unins and "cleanup" in unins and "Будет удалено" in unins and "PreflightCleanup" in unins
+assert "IDS_UNINS_ERR_SUT_PROFILE_STATE_CHANGED" in unins and "SecureUxThemeState::External" in unins
+assert "slim" in unins and "cleanup" in unins and "IDS_UNINS_COMP_STATE_REMOVE" in unins and "PreflightCleanup" in unins
 
 # 2026-11-03 follow-up 6: integrity analysis runs in the background during the first
 # pages; the products page shows the startup-style loading donut until it completes;
@@ -791,9 +818,8 @@ assert "MsiSourceListAddSourceExW" in cache and "INSTALLPROPERTY_PACKAGENAME" in
 assert "ModifyPath" in msi and "quietCommand.c_str()" in msi and "CurrentFile" in msi
 
 # 2026-11-04 UI review: native-OS shell suffix is shared between both masters.
-assert 'IDS_COMP_SHELL_SUFFIX " и оболочки Windows"' in read("res/ProductStrings.rcinc")
-assert 'IDS_COMP_SHELL_SUFFIX " and the Windows shell"' in read("res/ProductStrings.rcinc")
-assert 'ProductStrings.rcinc' in read("res/GlassSetup.rc") and 'ProductStrings.rcinc' in unins_rc
+assert 'IDS_COMP_SHELL_SUFFIX " и оболочки Windows"' in shared_strings
+assert 'IDS_COMP_SHELL_SUFFIX " and the Windows shell"' in shared_strings
 assert "platform64==os64" in read("src/GlassProductUiPolicy.h")
 assert "PlatformDescription" in setup and "PlatformDescription" in unins
 assert "ManualOpenGlass" in read("src/GlassProductPlan.h")

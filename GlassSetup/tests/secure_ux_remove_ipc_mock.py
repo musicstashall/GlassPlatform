@@ -2,7 +2,7 @@
 from pathlib import Path
 import subprocess, shutil, tempfile
 root=Path(__file__).resolve().parents[2]
-source=(root/'GlassSetup/src/main.cpp').read_text()
+source=(root/'GlassSetup/src/main.cpp').read_text(encoding='utf-8')
 # Healthy/active SUT must not receive a generic warning merely because removal
 # prepares stock selectors. Runtime/reboot labels and worker behavior stay intact.
 start=source.index('        const bool sutRequiresSettings=false;')
@@ -10,7 +10,7 @@ end=source.index('    std::wstring LaunchCardsJson()',start)
 card=source[start:end]
 assert 'JsStringLiteral(L"")' in card and 'sutRemovalNotice' not in card
 assert 'Перед удалением загруженного SecureUxTheme' not in source
-assert 'Text(sutStateId)' in card
+assert 'Text(selection_.secureUxThemeRemove?IDS_COMP_SUT_STATE_REMOVE:sutStateId)' in card
 
 def function(token):
     a=source.index(token);b=source.index('{',a);depth=0
@@ -20,7 +20,7 @@ def function(token):
             depth-=1
             if not depth:return source[a:i+1]
     raise ValueError(token)
-reason=function('[[nodiscard]] const wchar_t* SecureUxThemeRemovalBlockReasonLocked()')
+reason=function('[[nodiscard]] UINT SecureUxThemeRemovalBlockReasonIdLocked()')
 capability=function('[[nodiscard]] bool SecureUxThemeRemovalSupportedLocked()')
 blocked=function('[[nodiscard]] bool SecureUxThemeSelectionBlocked()')
 dependency='\n'.join(function(token) for token in ['bool NoSettingsInstalledLocked()', 'bool SecureUxRemovalNeedsSettingsUpdateLocked()', 'bool SecureUxRemovalDependencySatisfiedLocked()'])
@@ -37,9 +37,8 @@ harness=r'''
 #include <iostream>
 #include <mutex>
 #include <string>
-constexpr int LANG_RUSSIAN=25;int gLanguage=0;
-#define PRIMARYLANGID(x) (x)
-using UINT=unsigned;constexpr UINT IDS_APPLY=1909,IDS_INSTALL=103;
+#include "../res/resource.h"
+using UINT=unsigned;
 bool VersionOlder(const std::wstring& a,const std::wstring& b){return !a.empty()&&a<b;}
 namespace InstallLog {template<class... T>void LineFormat(const wchar_t*,T...) {}}
 namespace GlassInstallUtil {bool os64=true;bool IsOs64Bit(){return os64;}enum class SecureUxThemeState {Unavailable,Inactive,Active,ActivationPending,DeactivationPending,External,Conflict};}
@@ -88,15 +87,14 @@ int main(){
   GlassInstallUtil::os64=false;assert(w.SecureUxRemovalNeedsSettingsUpdateLocked());GlassInstallUtil::os64=true;
  }
 
- for(int language:{0,LANG_RUSSIAN}){gLanguage=language;
+ {constexpr UINT reasons[]={IDS_SUT_REMOVE_STATE_UNVERIFIED,0,0,0,0,IDS_SUT_REMOVE_EXTERNAL,IDS_SUT_REMOVE_STATE_CONFLICT};
   for(int state=0;state<=6;++state){Wizard w;w.secureUxThemeState_=static_cast<GlassInstallUtil::SecureUxThemeState>(state);
    assert(w.SecureUxThemeRemovalSupportedLocked()==(state>=1&&state<=4));
-   const auto* reason=w.SecureUxThemeRemovalBlockReasonLocked();assert((reason==nullptr)==(state>=1&&state<=4));
-   if(reason)assert(std::wstring(reason).size()>15);
+   assert(w.SecureUxThemeRemovalBlockReasonIdLocked()==reasons[state]);
   }
-  Wizard w;w.inspectReady_=false;assert(w.SecureUxThemeRemovalBlockReasonLocked());
-  w.inspectReady_=true;w.inspect_.secureUxTheme.installed=false;assert(w.SecureUxThemeRemovalBlockReasonLocked());
-  w.inspect_.secureUxTheme.installed=true;w.inspect_.officialSecureUxThemeCode.clear();assert(w.SecureUxThemeRemovalBlockReasonLocked());
+  Wizard w;w.inspectReady_=false;assert(w.SecureUxThemeRemovalBlockReasonIdLocked()==IDS_SUT_REMOVE_INSPECTION_PENDING);
+  w.inspectReady_=true;w.inspect_.secureUxTheme.installed=false;assert(w.SecureUxThemeRemovalBlockReasonIdLocked()==IDS_SUT_REMOVE_NOT_INSTALLED);
+  w.inspect_.secureUxTheme.installed=true;w.inspect_.officialSecureUxThemeCode.clear();assert(w.SecureUxThemeRemovalBlockReasonIdLocked()==IDS_SUT_REMOVE_ID_UNVERIFIED);
  }
 
  {Wizard w;assert(w.ProductApplyTextId()==IDS_INSTALL);w.maintenanceMode_=true;assert(w.ProductApplyTextId()==IDS_APPLY);}

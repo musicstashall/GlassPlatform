@@ -12,7 +12,9 @@ h=r'''
 #include <mutex>
 #include <string>
 #include <cassert>
+#include "resource.h"
 using UINT=unsigned;
+std::wstring Text(UINT){return L"Setup diagnostic";}
 constexpr UINT kVendorMetadataReady=10;
 int window=1;unsigned posted=0;bool requestOk=false;int calls=0;unsigned result=0;int product=0;
 void PostMessageW(int,UINT,unsigned w,int l){++posted;result=w;product=l;}
@@ -57,6 +59,6 @@ int main(){
 '''.replace('// WORKER',s[a:b]).replace('// COMPLETE',s[a2:b2])
 with tempfile.TemporaryDirectory() as d:
  p=Path(d)/'test.cpp';p.write_text(h);exe=Path(d)/'test'
- subprocess.run(['g++','-std=c++17','-Wall','-Wextra','-Werror','-pthread',str(p),'-o',str(exe)],check=True)
+ subprocess.run(['g++','-std=c++17','-Wall','-Wextra','-Werror','-pthread','-I'+str(root/'GlassSetup/res'),str(p),'-o',str(exe)],check=True)
  subprocess.run([str(exe)],check=True)
 print('PASS: actual vendor retry worker: scoped request, duplicate suppression, failed retry stays blocked, success updates only its vendor and unlocks')
