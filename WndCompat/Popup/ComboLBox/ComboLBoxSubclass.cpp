@@ -356,39 +356,6 @@ namespace
             return result;
         }
 
-        case WM_WINDOWPOSCHANGED:
-        {
-            if (IsTPopupListbox(hWnd))
-            {
-                const auto* wp = reinterpret_cast<const WINDOWPOS*>(lParam);
-                const bool showing = (wp && (wp->flags & SWP_SHOWWINDOW)) || ::IsWindowVisible(hWnd);
-                const bool hiding  = (wp && (wp->flags & SWP_HIDEWINDOW)) || !::IsWindowVisible(hWnd);
-
-                if (showing)
-                {
-                    const LONG_PTR style = ::GetWindowLongPtrW(hWnd, GWL_STYLE);
-                    if ((style & WS_CHILD) != 0 && ::GetParent(hWnd) == nullptr)
-                    {
-                        NormalizeTPopupListboxForGlass(hWnd);
-                        BOOL sysAnimation = FALSE;
-                        SystemParametersInfoW(SPI_GETCOMBOBOXANIMATION, 0, &sysAnimation, 0);
-                        auto* p = WndCompat::DropDown::GetDropDownEventProvider();
-                        if (p && p->OnComboLBoxShow)
-                            p->OnComboLBoxShow(hWnd, sysAnimation != FALSE);
-                    }
-                }
-                else if (hiding)
-                {
-                    // На случай, если WM_SHOWWINDOW(false) не пришёл в подкласс.
-                    auto* p = WndCompat::DropDown::GetDropDownEventProvider();
-                    if (p && p->OnComboLBoxDetach)
-                        p->OnComboLBoxDetach(hWnd);
-                    RestoreTPopupListboxAfterGlass(hWnd);
-                }
-            }
-            break;
-        }
-
         case WM_PAINT:
         {
             // Диагностика: доходит ли реальный WM_PAINT до списка (для «Тип файлов»).
