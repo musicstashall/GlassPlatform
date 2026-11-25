@@ -30,14 +30,20 @@ assert 'FILE_ATTRIBUTE_REPARSE_POINT' in host and 'if (!module)' in host
 assert 'optional helper load failed' in host and 'helper ready:' in host
 assert 'host loop alive; optional helper=' in host
 assert 'nextStatus = now + 30000' in host
-# Flat Native build payload is allowed only in Debug, only when installed path is absent.
-flat_start = host.index('// VC build output is flat')
+# Debug prefers authoritative flat VC output over potentially stale Settings copy.
+flat_start = host.index("// Native.vcxproj's authoritative Debug output")
 assert host.rfind('#ifdef _DEBUG', 0, flat_start) > host.index('std::wstring target')
 flat_end = host.index('#endif', flat_start)
 flat = host[flat_start:flat_end]
-assert 'ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND' in flat
-assert 'target = directory + L"\\\\GlassSettings.Native.dll"' in flat
+assert 'buildAttributes != INVALID_FILE_ATTRIBUTES' in flat and 'target = buildTarget' in flat
+assert 'error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND' in flat
 assert flat_end < host.index('std::wstring probe = target') < host.index('LoadLibraryExW')
+assert 'missing V1 exports path=%ls capture=%d signal=%d tick=%d' in host
+assert 'RebindReflectionToDisplayAsync' in page and 'var recipe = matching ?? previous;' in page
+assert '_pendingDisplayReflectionSource' in page and 'canApply: canApply' in page
+assert 'ReflectionRenderState.IsManagedOutput(active)' in page
+assert 'ReadForOutput(_currentReflectionPath)' in page
+assert 'state.Output, output, StringComparison.OrdinalIgnoreCase' in state
 assert 'skip unmanaged:' in native and 'selection=%ls active=%ls output=%ls' in native
 assert 'WM_THEMECHANGED posted=%d error=%lu' in native
 assert '_wcsicmp(path, target.c_str())' in host

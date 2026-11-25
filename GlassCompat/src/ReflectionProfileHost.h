@@ -43,14 +43,17 @@ namespace ReflectionProfileHost
             // No registry/CWD/PATH fallback and no installer policy change.
             std::wstring target = directory + L"\\GlassSettings\\GlassSettings.Native.dll";
 #ifdef _DEBUG
-            // VC build output is flat (Native.vcxproj OutDir), unlike MSI layout.
-            // Only an absent installed-layout file permits this Debug-only sibling.
-            // Never fall back on load/ABI failure or an unsafe existing payload.
-            if (GetFileAttributesW(target.c_str()) == INVALID_FILE_ATTRIBUTES)
+            // Native.vcxproj's authoritative Debug output is flat. Prefer it
+            // over a potentially stale copy beside the Settings executable.
+            const std::wstring buildTarget = directory + L"\\GlassSettings.Native.dll";
+            const DWORD buildAttributes = GetFileAttributesW(buildTarget.c_str());
+            if (buildAttributes != INVALID_FILE_ATTRIBUTES)
+                target = buildTarget;
+            else
             {
                 const DWORD error = GetLastError();
-                if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND)
-                    target = directory + L"\\GlassSettings.Native.dll";
+                if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND)
+                    return; // Don't bypass access errors with another payload.
             }
 #endif
             std::wstring probe = target;
@@ -85,7 +88,8 @@ namespace ReflectionProfileHost
 #endif
             if (!capture || !signal || !tick)
             {
-                DebugLog(DBG_WARNING, L"[GlassCompat][ReflectionProfiles] optional helper rejected: missing V1 exports");
+                DebugLog(DBG_WARNING, L"[GlassCompat][ReflectionProfiles] optional helper rejected: missing V1 exports path=%ls capture=%d signal=%d tick=%d",
+                    target.c_str(), capture != nullptr, signal != nullptr, tick != nullptr);
                 Stop(); return;
             }
             Shared::ReflectionProfiles::Snapshot snapshot{}; snapshot.size = sizeof(snapshot);

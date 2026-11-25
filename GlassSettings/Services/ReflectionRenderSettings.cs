@@ -39,6 +39,31 @@ public static class ReflectionRenderState
         catch { return null; }
     }
 
+    // Resolve only explicit saved records, never infer recipes from a PNG name.
+    // Used after topology changed, when Read() already refers to the new profile.
+    public static State? ReadForOutput(string? output)
+    {
+        if (string.IsNullOrWhiteSpace(output)) return null;
+        try
+        {
+            using var root = OpenRoot();
+            using var profiles = root.OpenSubKey(RegistryPath + @"\Profiles");
+            if (profiles is null) return null;
+            foreach (string profile in profiles.GetSubKeyNames())
+            {
+                using var key = profiles.OpenSubKey(profile);
+                if (key?.GetValue("Ready") is not int ready || ready != 1) continue;
+                var state = key.GetValue("State") is string text ? JsonSerializer.Deserialize<State>(text) : null;
+                if (state is not { Version: 2, Ready: true } || state.Profile != profile || state.Settings is null
+                    || !string.Equals(state.Output, output, StringComparison.OrdinalIgnoreCase) || !File.Exists(state.Source)) continue;
+                using var image = File.OpenRead(state.Output);
+                if (Convert.ToHexString(SHA256.HashData(image)) == state.OutputHash) return state;
+            }
+        }
+        catch { }
+        return null;
+    }
+
     public static ReflectionRenderSettings Settings => (Read()?.Settings ?? new()).Normalize();
 
     public static void Invalidate(string? profile = null) => Write(new(2, false, "", "", 0, 0, "", "", new(),
@@ -48,6 +73,18 @@ public static class ReflectionRenderState
         string outputHash, ReflectionRenderSettings settings, string? profile = null) =>
         Write(new(2, true, source, output, width, height, sourceHash, outputHash, settings.Normalize(),
             profile ?? ReflectionDisplayProfile.Capture().Key));
+
+    public static bool IsManagedOutput(string? output)
+    {
+        try
+        {
+            using var root = OpenRoot();
+            using var key = root.OpenSubKey(RegistryPath);
+            return key?.GetValue("Managed") is int managed && managed == 1
+                && string.Equals(key.GetValue("ManagedOutput") as string ?? "", output ?? "", StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
+    }
 
     public static void MarkManaged(string output)
     {
