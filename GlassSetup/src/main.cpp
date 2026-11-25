@@ -1861,7 +1861,7 @@ private:
         case Page::Cancelled: return L"cancelled";
         case Page::Launching: return L"launching";
         case Page::Installing: return WizardUnlock::InstallingPage(unlock);
-        case Page::SettingsBusy: return L"settings-close";
+        case Page::SettingsBusy: return L"unlock-processes";
         case Page::ModulesBusy: return L"unlock-modules";
         case Page::ProcessesStuck: return L"unlock-processes";
         case Page::Complete: return L"complete";
@@ -2492,6 +2492,8 @@ private:
                 L",\"errorBody\":"+JsStringLiteral(Text(IDS_ERROR_BODY))+
                 L",\"errorDetails\":"+JsStringLiteral(Text(IDS_ERROR_DETAILS))+
                 L",\"errorCopy\":"+JsStringLiteral(Text(IDS_COPY))+
+                L",\"closeApplicationsTitle\":"+JsStringLiteral(Text(IDS_CLOSE_APPLICATIONS_TITLE))+
+                L",\"settingsCloseBody\":"+JsStringLiteral(Text(IDS_HOLD_SETTINGS_BODY))+
                 L",\"errorNote\":"+JsStringLiteral(Text(IDS_ERROR_LOG_HINT))+
                 L",\"compTag\":"+JsStringLiteral(Text(IDS_COMP_TAG))+
                 L",\"compTitle\":"+JsStringLiteral(Text(IDS_COMP_TITLE))+
@@ -2541,6 +2543,7 @@ private:
             L",\"percent\":"+std::to_wstring(percent_)+
             L",\"progress\":"+std::to_wstring(WizardProgress::ClampUnits(progressValue_))+
             L",\"marquee\":"+(progressMarquee_?L"true":L"false")+
+            L",\"settingsClose\":"+(page_==Page::SettingsBusy?L"true":L"false")+
             L",\"unlockActive\":"+((page_==Page::Installing && unlock!=WizardUnlock::Phase::None)?L"true":L"false")+
             L",\"monitorRisk\":"+(installEngine_.CurrentHold()==InstallEngine::HoldKind::MissingHelper?L"true":L"false")+
             L",\"monitorRiskTitle\":"+JsStringLiteral(Text(IDS_NATIVE_RISK_TITLE))+
@@ -4115,7 +4118,7 @@ private:
             const bool settings=page_==Page::SettingsBusy;
             const bool kill=page_==Page::ProcessesStuck;
             const bool missingHelper=!settings&&installEngine_.CurrentHold()==InstallEngine::HoldKind::MissingHelper;
-            const UINT titleId=settings?IDS_HOLD_SETTINGS_TITLE:missingHelper?IDS_NATIVE_RISK_TITLE:kill?IDS_KILL_TITLE:IDS_HOLD_TITLE;
+            const UINT titleId=settings?IDS_CLOSE_APPLICATIONS_TITLE:missingHelper?IDS_NATIVE_RISK_TITLE:kill?IDS_KILL_TITLE:IDS_HOLD_TITLE;
             const UINT bodyId=settings?IDS_HOLD_SETTINGS_BODY:missingHelper?IDS_NATIVE_RISK_BODY:kill?IDS_KILL_BODY:IDS_HOLD_BODY;
             DrawLabel(dc,Text(IDS_BRAND),Box(48,34,300,35),heading_,white);
             DrawLabel(dc,Text(titleId),Box(48,139,520,70),heading_,white);

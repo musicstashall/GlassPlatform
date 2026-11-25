@@ -366,7 +366,7 @@ assert "PrewarmButtonCache" not in setup
 
 # One-document UI, static initialization and user-driven cancel controls.
 for mode in ("welcome", "checking", "conflicts", "license",
-             "components", "installing", "settings-close", "unlock-modules", "unlock-processes", "confirm-cancel",
+             "components", "installing", "unlock-modules", "unlock-processes", "confirm-cancel",
              "cancelling", "cancelled", "launching", "complete", "error", "uninstall-select", "uninstalling"):
     assert mode in ui, mode
 for node in ("components-panel", "confirm-panel", "cancelling-panel", "cancelled-panel", "launch-panel", "unlock-panel"):

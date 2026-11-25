@@ -18,7 +18,8 @@ const binary=binaryModule.default||binaryModule;
    const animation=getComputedStyle(document.querySelector('.unlock-orbit')).animationName;
    return {hidden:panel.hidden,shade:!!document.getElementById('unlock-holder-shade'),filter,animation,
     inset:getComputedStyle(panel).left,left:report.left,right:report.right,top:report.top,bottom:report.bottom,copyRight:copy.right,scroll:list.scrollHeight>list.clientHeight,
-    rows:list.children.length,title:document.getElementById('unlock-title').textContent};
+    rows:list.children.length,title:document.getElementById('unlock-title').textContent,
+     description:document.getElementById('unlock-description').textContent,status:document.getElementById('unlock-status').textContent};
   });
   for(const locale of ['ru','en'])for(const mode of ['unlock-modules','unlock-processes']){
    const holdReport=Array.from({length:18},(_,i)=>`process${i}.exe (86) (PID ${1000+i}): GlassCompat.dll, GlassCore.dll, WndCompat.dll`).join('\n');
@@ -36,10 +37,19 @@ const binary=binaryModule.default||binaryModule;
    await send({holdReport:''});assert.equal((await state()).hidden,true);
    await send({page:'welcome',holdReport});assert.equal((await state()).hidden,true);
   }
-  await send({locale:'ru',page:'settings-close',unlockActive:false,holdReport:'GlassSettings.exe (PID 4120): окно не закрылось'});
-  const settings=await state();
-  assert.equal(settings.hidden,false);assert.equal(settings.shade,false);assert.match(settings.filter,/blur/i);
-  assert.equal(settings.title,'Закройте GlassSettings');assert.equal(settings.rows,1);assert.equal(settings.inset,'510px');
+  for(const locale of ['ru','en']){
+   const body=locale==='ru'?'Сохраните изменения в GlassSettings и закройте его окно. Затем нажмите «Повторить», чтобы продолжить установку.':'Save your changes in GlassSettings and close its window. Then select Retry to continue setup.';
+   await send({locale,page:'unlock-processes',settingsClose:true,unlockActive:false,holdReport:'GlassSettings.exe (PID 4120): window still open',ui:{settingsCloseBody:body}});
+   const settings=await state();
+   assert.equal(settings.hidden,false);assert.equal(settings.shade,false);assert.match(settings.filter,/blur/i);
+   assert.match(settings.status,/GlassSettings/);assert.equal(settings.description,body);
+   assert.equal(settings.rows,1);assert.equal(settings.inset,'480px');
+   await send({settingsClose:false});
+   const processes=await state();
+   assert.equal(processes.title,locale==='ru'?'Закрываем приложения':'Closing applications');
+   assert.equal(settings.title,processes.title);assert.notEqual(processes.description,body);
+   assert.match(processes.description,/принудительно|terminated/);
+  }
   await page.emulateMedia({reducedMotion:'reduce'});
   await send({page:'unlock-modules',unlockActive:true});
   assert.equal((await state()).hidden,true);

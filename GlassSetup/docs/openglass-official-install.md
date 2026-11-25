@@ -984,7 +984,10 @@ Current page coverage:
   the bootstrapper in the background and displays the final Error page if it
   fails. GlassUnins does not install the runtime and uses native UI immediately
   if it is missing. Debug `--demo-native` is a separate Setup preview.
-- The shared HTML recognizes 21 modes; `webview_all_pages_dom_test.cjs` exercises
+- Setup's SettingsBusy and ProcessesStuck both use the closing-applications screen.
+  SettingsBusy asks the user to save changes and close GlassSettings manually,
+  then select Retry; it does not offer forced termination.
+- The shared HTML recognizes 20 modes; `webview_all_pages_dom_test.cjs` exercises
   them in RU/EN with a mock host. `webview_page_coverage.py` checks C++ page routing
   and startup ordering separately. These checks do not establish Windows rendering,
   focus, DPI/accessibility or live WebView2 initialization.
