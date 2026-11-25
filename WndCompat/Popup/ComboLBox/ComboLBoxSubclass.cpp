@@ -261,6 +261,10 @@ namespace
 
         case WM_ERASEBKGND:
         {
+            // VCL TPopupListbox рисует себя сам; чёрная заливка ComboLBox ломает его фон.
+            if (WndCompat::IsWindowClass(hWnd, L"TPopupListbox"))
+                return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+
             // Диагностика (Round-5): видно, срабатывает ли «чёрная заливка» клиента attached-списка.
             static std::atomic<unsigned> s_eraseDiag{32};
             if (s_eraseDiag.fetch_sub(1, std::memory_order_relaxed) < 32)
@@ -278,6 +282,9 @@ namespace
 
         case WM_NCPAINT:
         {
+            if (WndCompat::IsWindowClass(hWnd, L"TPopupListbox"))
+                return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+
             auto* provider = WndCompat::DropDown::GetDropDownEventProvider();
             const bool defer = IsFlyoutBorderDeferredForDropDown(hWnd, provider);
 
@@ -343,6 +350,9 @@ namespace
 
         case WM_PRINT:
         {
+            if (WndCompat::IsWindowClass(hWnd, L"TPopupListbox"))
+                return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+
             auto result = DefSubclassProc(hWnd, uMsg, wParam, lParam);
             auto* provider = WndCompat::DropDown::GetDropDownEventProvider();
             const bool defer = IsFlyoutBorderDeferredForDropDown(hWnd, provider);
