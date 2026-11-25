@@ -26,7 +26,7 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
     {
         if (!_wallpaperReady || !_reflectionReady || _disposed) return;
         _desktopView.Opacity = 1;
-        _sourceBadge.Visibility = Visibility.Visible;
+        _sourceBadge.Opacity = 1;
         _loading.IsActive = false;
         _loading.Visibility = Visibility.Collapsed;
     }
@@ -34,13 +34,17 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
     private int _glassRevision;
     private readonly SemaphoreSlim _glassRefreshGate = new(1, 1);
     private DwmCompositionCascadePreview.PreviewState? _lastGlassState;
+    public string ProfileKey { get; }
     public int DesktopWidth { get; }
     public int DesktopHeight { get; }
+    public int MonitorCount => _bounds.Length;
+    // Multi-display layouts start narrower; the Viewbox still grows to 280 DIP when room allows.
 
     public ReflectionDesktopPreview()
     {
         System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] preview: EnumDisplayMonitors");
         var profile = ReflectionDisplayProfile.Capture();
+        ProfileKey = profile.Key;
         var bounds = profile.Monitors.Select(m => new Windows.Graphics.RectInt32(m.X, m.Y, m.Width, m.Height)).ToArray();
         System.Diagnostics.Debug.WriteLine($"[ReflectionConfigure] preview: monitor snapshot ready, count={bounds.Length}");
         _bounds = bounds;
@@ -52,26 +56,44 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
         var desktop = new Canvas { Width = DesktopWidth, Height = DesktopHeight };
         // Physical desktop coordinates are retained inside one proportionally scaled Viewbox.
         _desktopView = new Viewbox { Child = desktop, Stretch = Stretch.Uniform, MaxHeight = 280, Opacity = 0 };
-        Children.Add(_desktopView);
+        // Labels occupy their own rows, so neither name nor resolution can ever
+        // sit on top of a monitor rectangle. Opacity (not Visibility) is toggled
+        // when ready, so the preview does not jump when the name appears.
+        RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var frame = new Border
+        {
+            Child = _desktopView, CornerRadius = new CornerRadius(10),
+            BorderThickness = new Thickness(1),
+            BorderBrush = (Brush)Application.Current.Resources["ControlStrongStrokeColorDefaultBrush"],
+            Shadow = new ThemeShadow(), Translation = new System.Numerics.Vector3(0, 0, 16)
+        };
+        Grid.SetRow(frame, 1);
+        Children.Add(frame);
         _sourceBadge = new Border
         {
-            Child = _sourceName, HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(12),
+            Child = _sourceName, HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 0, 8),
             Padding = new Thickness(10, 4, 10, 4), CornerRadius = new CornerRadius(6),
             BorderThickness = new Thickness(1),
             Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"],
             BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"],
-            Visibility = Visibility.Collapsed, IsHitTestVisible = false
+            Opacity = 0, IsHitTestVisible = false
         };
+        Grid.SetRow(_sourceBadge, 0);
         Children.Add(_sourceBadge);
-        Children.Add(new Border
+        var displayBadge = new Border
         {
-            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom,
-            Margin = new Thickness(12), Padding = new Thickness(6, 2, 6, 2), CornerRadius = new CornerRadius(4),
+            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 8, 0, 0), Padding = new Thickness(6, 2, 6, 2), CornerRadius = new CornerRadius(4),
             Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"],
             IsHitTestVisible = false, Opacity = .65,
             Child = new TextBlock { Text = profile.Label, FontSize = 10 }
-        });
+        };
+        Grid.SetRow(displayBadge, 2);
+        Children.Add(displayBadge);
+        Grid.SetRow(_loading, 1);
         Children.Add(_loading);
         Margin = new Thickness(8, 8, 8, 16);
         foreach (var monitor in bounds)
@@ -83,40 +105,64 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
             };
             var a = new Image { Stretch = Stretch.UniformToFill };
             var b = new Image { Stretch = Stretch.UniformToFill };
-            var reflection = new Image
-            {
-                Width = DesktopWidth, Height = DesktopHeight, Stretch = Stretch.Fill
-            };
-            var reflectionCanvas = new Canvas();
-            Canvas.SetLeft(reflection, -(monitor.X - left));
-            Canvas.SetTop(reflection, -(monitor.Y - top));
-            reflectionCanvas.Children.Add(reflection);
             var layers = new Grid { Width = monitor.Width, Height = monitor.Height };
             layers.Children.Add(fallback); layers.Children.Add(a); layers.Children.Add(b);
             var glass = new FlatGlassPreviewLayer(monitor.Width, monitor.Height);
-            // Flat, co-located layers: wallpaper → factual glass → edited reflection.
+            // Flat, co-located layers: wallpaper → factual glass.
             layers.Children.Add(glass);
-            layers.Children.Add(reflectionCanvas);
             _glassLayers.Add(glass); _fallbacks.Add(fallback);
-            // Clip each monitor, including the reflection's viewport into the full canvas.
-            layers.Clip = new RectangleGeometry { Rect = new Rect(0, 0, monitor.Width, monitor.Height) };
-            double radius = Math.Max(8, DesktopWidth / 600.0 * 8);
-            // Do not assign CompositionGeometricClip to a XAML-owned visual.
-            // WinUI processes that clip later during rendering and can fail QI
-            // with E_NOINTERFACE in UpdateVisualClipAndTransform (stowed failfast).
-            // The XAML RectangleGeometry above owns content clipping instead.
-            var card = new Border
-            {
-                Width = monitor.Width, Height = monitor.Height,
-                BorderThickness = new Thickness(Math.Max(1, DesktopWidth / 600.0)),
-                BorderBrush = (Brush)Application.Current.Resources["ControlStrongStrokeColorDefaultBrush"],
-                CornerRadius = new CornerRadius(radius), Child = layers,
-                Shadow = new ThemeShadow(), Translation = new System.Numerics.Vector3(0, 0, 16)
-            };
-            Canvas.SetLeft(card, monitor.X - left); Canvas.SetTop(card, monitor.Y - top);
-            desktop.Children.Add(card);
-            _reflections.Add(reflection);
+            // No per-monitor clip: a clipped, fractionally scaled edge leaves a dark
+            // fringe exactly on the seam between neighbouring displays, which reads
+            // as a divider. Each layer covers its own rect and nothing overflows.
+            Canvas.SetLeft(layers, monitor.X - left); Canvas.SetTop(layers, monitor.Y - top);
+            desktop.Children.Add(layers);
             _wallpapers.Add(new WallpaperPreviewCrossfade(a, b, fallback));
+        }
+        // One reflection canvas for the whole virtual desktop: no per-monitor
+        // copies and no clipping, so the desktop picture stays continuous.
+        var reflection = new Image
+        {
+            Width = DesktopWidth, Height = DesktopHeight, Stretch = Stretch.Fill
+        };
+        desktop.Children.Add(reflection);
+        _reflections.Add(reflection);
+        double unit = Math.Max(1, DesktopWidth / 740.0);
+        // One stroke per monitor, inset inside its footprint. Nothing is drawn on
+        // the shared edge between two monitors and no border sits next to it, so
+        // no vertical line can appear at the seam; the gap shows the dialog
+        // background. The inset is uniform, so screen proportions are preserved.
+        double inset = Math.Max(8 * unit, bounds.Min(m => Math.Min(m.Width, m.Height)) * 0.06);
+        var stroke = (Brush)Application.Current.Resources["ControlStrongStrokeColorDefaultBrush"];
+        var scrim = (Brush)Application.Current.Resources["LayerFillColorDefaultBrush"];
+        for (int i = 0; i < bounds.Length; i++)
+        {
+            var monitor = bounds[i];
+            double width = Math.Max(1, monitor.Width - inset * 2), height = Math.Max(1, monitor.Height - inset * 2);
+            var monitorFrame = new Border
+            {
+                Width = width, Height = height, CornerRadius = new CornerRadius(8 * unit),
+                BorderThickness = new Thickness(unit), BorderBrush = stroke, IsHitTestVisible = false
+            };
+            Canvas.SetLeft(monitorFrame, monitor.X - left + inset); Canvas.SetTop(monitorFrame, monitor.Y - top + inset);
+            desktop.Children.Add(monitorFrame);
+            var number = new Border
+            {
+                CornerRadius = new CornerRadius(10 * unit),
+                Padding = new Thickness(14 * unit, 2 * unit, 14 * unit, 4 * unit),
+                Background = scrim, IsHitTestVisible = false,
+                Child = new TextBlock
+                {
+                    Text = ReflectionDisplayProfile.GetDisplayNumber(profile.Monitors[i], i + 1).ToString(),
+                    FontSize = 32 * unit, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground = (Brush)Application.Current.Resources["TextFillColorPrimaryBrush"]
+                }
+            };
+            var numberHost = new Grid { Width = width, Height = height, IsHitTestVisible = false };
+            number.HorizontalAlignment = HorizontalAlignment.Center;
+            number.VerticalAlignment = VerticalAlignment.Center;
+            numberHost.Children.Add(number);
+            Canvas.SetLeft(numberHost, monitor.X - left + inset); Canvas.SetTop(numberHost, monitor.Y - top + inset);
+            desktop.Children.Add(numberHost);
         }
         _watcher = DesktopEnvironmentWatcher.Current;
         if (_watcher is not null) _watcher.Changed += OnEnvironmentChanged;

@@ -16,9 +16,8 @@ public static class ReflectionSettingsDialog
     public static async Task<ReflectionRenderSettings?> ShowAsync(string source)
     {
         System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] dialog: read settings");
-        string initialProfile = ReflectionDisplayProfile.Capture().Key;
+        string initialProfile;
         HostedDialogHostContext? dialogContext = null;
-        bool displayChanged = false;
         var initial = ReflectionRenderState.Settings;
         var scale = Number("Reflection_SettingScale", 25, 200, initial.ScalePercent);
         System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] dialog: create picker");
@@ -66,7 +65,8 @@ public static class ReflectionSettingsDialog
             Header = GlassSettingsResources.Get("Reflection_EnableProcessing"), IsOn = initial.Enabled
         };
         System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] dialog: create desktop preview");
-        using var preview = new ReflectionDesktopPreview();
+        var preview = new ReflectionDesktopPreview();
+        initialProfile = preview.ProfileKey;
         System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] dialog: desktop preview ready");
         var renderGate = new SemaphoreSlim(1, 1);
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
@@ -154,6 +154,7 @@ public static class ReflectionSettingsDialog
                 inlinePicker.Children.Clear(); colorFlyout.Content = picker;
             }
             inlinePicker.Visibility = inline ? Visibility.Visible : Visibility.Collapsed;
+            customPreset.Visibility = inline ? Visibility.Collapsed : Visibility.Visible;
             bool stacked = width < 380;
             double paletteBudget = stacked ? width
                 : width - parameterBudget - gap - (inline ? pickerWidth + gap : 0);
@@ -166,12 +167,14 @@ public static class ReflectionSettingsDialog
             presets.ColumnDefinitions.Clear(); presets.RowDefinitions.Clear();
             for (int i = 0; i < columns; i++)
                 presets.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            for (int i = 0; i < (presets.Children.Count + columns - 1) / columns; i++)
+            var visiblePresets = presets.Children.OfType<FrameworkElement>()
+                .Where(item => item.Visibility == Visibility.Visible).ToArray();
+            for (int i = 0; i < (visiblePresets.Length + columns - 1) / columns; i++)
                 presets.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            for (int i = 0; i < presets.Children.Count; i++)
+            for (int i = 0; i < visiblePresets.Length; i++)
             {
-                Grid.SetRow((FrameworkElement)presets.Children[i], i / columns);
-                Grid.SetColumn((FrameworkElement)presets.Children[i], i % columns);
+                Grid.SetRow(visiblePresets[i], i / columns);
+                Grid.SetColumn(visiblePresets[i], i % columns);
             }
 
         }
@@ -182,6 +185,8 @@ public static class ReflectionSettingsDialog
         editors.SizeChanged += (_, args) => editorWidth = args.NewSize.Width;
         int revision = 0;
         bool closed = false;
+        // A live topology change must not publish a bitmap decoded for the old tree.
+        var previewTree = new object();
         ReflectionRenderSettings Values() => new(
             double.IsFinite(scale.Value) ? (int)scale.Value : 100,
             (int)Math.Round((picker.GetColorArgb() >> 24) * 100.0 / 255),
@@ -199,6 +204,7 @@ public static class ReflectionSettingsDialog
             {
                 if (closed || current != revision) return;
                 System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] reflection render: begin");
+                var treeAtStart = previewTree;
                 double rasterScale = preview.XamlRoot?.RasterizationScale ?? 1;
                 double factor = Math.Min(1, Math.Min(
                     Math.Max(1, preview.ActualWidth) * rasterScale / preview.DesktopWidth,
@@ -211,7 +217,7 @@ public static class ReflectionSettingsDialog
                 var png = await ReflectionTextureService.RenderConfiguredAsync(
                     source, texture ? width : preview.DesktopWidth,
                     texture ? height : preview.DesktopHeight, Values());
-                if (closed || current != revision) return;
+                if (closed || current != revision || !ReferenceEquals(treeAtStart, previewTree)) return;
                 System.Diagnostics.Debug.WriteLine($"[ReflectionConfigure] reflection render: complete, bytes={png.Length}");
                 using var stream = new MemoryStream(png);
                 using var random = stream.AsRandomAccessStream();
@@ -227,7 +233,7 @@ public static class ReflectionSettingsDialog
                     }, Windows.Graphics.Imaging.ExifOrientationMode.IgnoreExifOrientation,
                     Windows.Graphics.Imaging.ColorManagementMode.DoNotColorManage);
                 var bitmap = CompositionWallpaperPipelineBuilder.CreateBitmap(width, height, pixels.DetachPixelData());
-                if (closed || current != revision) return;
+                if (closed || current != revision || !ReferenceEquals(treeAtStart, previewTree)) return;
                 preview.SetReflection(bitmap); error.Text = ""; error.Visibility = Visibility.Collapsed;
             }
             catch (Exception exception)
@@ -310,8 +316,41 @@ public static class ReflectionSettingsDialog
             if (closed) return;
             if (args.DisplayChanged)
             {
-                displayChanged = true;
-                dialogContext?.CloseDismissed(); // Never transfer a draft to another topology.
+                ++revision; // Retire pending decodes before replacing the old visual tree.
+                try
+                {
+                    var replacement = new ReflectionDesktopPreview();
+                    replacement.SetSourceLabel(Path.GetFileNameWithoutExtension(source));
+                    var old = preview;
+                    if (!body.Children.Contains(old)) throw new InvalidOperationException("Desktop preview left the dialog.");
+                    int index = body.Children.IndexOf(old);
+                    // Placement must not depend on a ready bitmap: the old preview is
+                    // already visible, so the swap happens inside the same layout pass.
+                    body.Children.Add(replacement);
+                    body.Children.Move((uint)body.Children.IndexOf(replacement), (uint)index);
+                    preview = replacement;
+                    old.Dispose();
+                    previewTree = new object(); // Invalidate decodes still in flight for the old tree.
+                    initialProfile = replacement.ProfileKey;
+                    dialogContext?.SetPrimaryEnabled(true);
+                    error.Visibility = Visibility.Collapsed;
+                    replacement.Loaded += (_, _) => _ = RefreshAsync();
+                    // Keep the preview tied to the dialog's available width after re-layout.
+                    replacement.SizeChanged += (_, _) =>
+                    {
+                        if (!closed && ReferenceEquals(preview, replacement)) _ = RefreshAsync();
+                    };
+                    // Preferred shell width follows the new topology; it is never a hard cap.
+                    dialogContext?.UpdateMaxWidth(Math.Max(480,
+                        GetDialogWidth(replacement.DesktopWidth, replacement.DesktopHeight, replacement.MonitorCount)));
+                    _ = RefreshAsync(); // Preserve every pending editor value, including the color.
+                }
+                catch (Exception exception)
+                {
+                    dialogContext?.SetPrimaryEnabled(false);
+                    error.Text = exception.Message;
+                    error.Visibility = Visibility.Visible;
+                }
                 return;
             }
             if (!args.AccentChanged && !args.ThemeChanged) return;
@@ -343,10 +382,13 @@ public static class ReflectionSettingsDialog
         };
         SyncProcessingControls();
         SyncColorSelection();
-        preview.SizeChanged += (_, _) => _ = RefreshAsync();
+        preview.SizeChanged += (_, _) =>
+        {
+            if (!closed) _ = RefreshAsync();
+        };
         System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] dialog: start reflection render");
         _ = RefreshAsync();
-        double dialogWidth = GetDialogWidth(preview.DesktopWidth, preview.DesktopHeight);
+        double dialogWidth = GetDialogWidth(preview.DesktopWidth, preview.DesktopHeight, preview.MonitorCount);
         try
         {
             System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] dialog: show hosted dialog");
@@ -358,10 +400,10 @@ public static class ReflectionSettingsDialog
             }, context =>
             {
                 dialogContext = context;
-                if (displayChanged || ReflectionDisplayProfile.Capture().Key != initialProfile)
-                    context.CloseDismissed();
+                if (ReflectionDisplayProfile.Capture().Key != preview.ProfileKey)
+                    OnDesktopChanged(null, new DesktopEnvironmentChangedEventArgs { DisplayChanged = true });
             });
-            if (result == HostedDialogResult.Primary && !displayChanged
+            if (result == HostedDialogResult.Primary
                 && ReflectionDisplayProfile.Capture().Key == initialProfile)
             {
                 uint appliedColor = picker.GetColorArgb();
@@ -381,15 +423,18 @@ public static class ReflectionSettingsDialog
         finally
         {
             closed = true; revision++; colorFlyout.Hide();
-            if (watcher is not null) watcher.Changed -= OnDesktopChanged;
+            if (watcher is not null) watcher.Changed -= OnDesktopChanged; // Never touch a disposed preview.
+            preview.Dispose();
         }
     }
 
-    private static double GetDialogWidth(int desktopWidth, int desktopHeight)
+    private static double GetDialogWidth(int desktopWidth, int desktopHeight, int monitorCount)
     {
-        // Match the preview's 280 DIP height and physical desktop aspect ratio.
-        // The hosted shell still clamps this preferred width to available space.
-        double previewWidth = 280.0 * desktopWidth / Math.Max(1, desktopHeight);
+        // Multiple displays start at a smaller preferred scale. Do not cap
+        // the Viewbox at that scale: extra dialog width can still grow it to 280 DIP.
+        // The hosted shell clamps this preference to available space.
+        double preferredHeight = monitorCount > 1 ? 210.0 : 280.0;
+        double previewWidth = preferredHeight * desktopWidth / Math.Max(1, desktopHeight);
         return Math.Clamp(previewWidth + 64, 480, 1120);
     }
 

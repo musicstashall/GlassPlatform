@@ -356,6 +356,10 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         LoadReflectionImages();
         LoadMaterialImages();
         LoadAtlasImages();
+        // A topology change can happen while neither the platform nor this page runs.
+        // Then the applied value points at a canvas of a previous profile, so restore
+        // the ready canvas published for the current one before reading the selection.
+        RestoreReadyReflectionProfile();
         Reload();
         _lastPivotIndex = ActivePivot.SelectedIndex;
         DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, UpdateHeroLayout);
@@ -431,6 +435,46 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
             ScheduleWallpaperLayerRefresh();
     }
 
+    /// <summary>
+    /// Startup/open path: adopt the ready canvas of the current topology when the
+    /// applied value is our own managed output of a different profile. External or
+    /// default selections are left alone, and nothing is generated here.
+    /// </summary>
+    private void RestoreReadyReflectionProfile()
+    {
+        if (_hive != DwmRegistryHive.Hkcu) return;
+        var active = DwmRegistryStore.ReadString(_hive, ReflectionRegistryKey);
+        if (!ReflectionRenderState.IsManagedOutput(active)) return;
+        var ready = ReflectionRenderState.ReadReadyProfile();
+        if (ready is null || SamePath(ready.Output, active)) return;
+        try
+        {
+            using var publication = new Mutex(false, ReflectionDisplayProfile.PublicationMutex);
+            bool held;
+            try { held = publication.WaitOne(TimeSpan.FromSeconds(10)); }
+            catch (AbandonedMutexException) { held = true; }
+            if (!held) return;
+            try
+            {
+                string profile = ReflectionDisplayProfile.Capture().Key;
+                if (ReflectionRenderState.AdoptReadyProfile(profile))
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        $"[ReflectionConfigure] startup: restored ready profile={profile}");
+                    // Match a normal selection: the session baseline follows the
+                    // value we just restored, so no unsaved edit is implied.
+                    SettingsSession.Current.SyncScopeBaseline(
+                        DwmThemeScopeCatalog.ReflectionCollectionScope());
+                }
+            }
+            finally { publication.ReleaseMutex(); }
+        }
+        catch (Exception error)
+        {
+            System.Diagnostics.Trace.TraceWarning("Reflection profile restore: {0}", error);
+        }
+    }
+
     private async Task RebindReflectionToDisplayAsync()
     {
         if (_hive != DwmRegistryHive.Hkcu) { Reload(); return; }
@@ -457,7 +501,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
                     && (SamePath(active, selectedPath) || (matching is not null && SamePath(active, matching.Output))
                         || string.IsNullOrWhiteSpace(active));
             }
-            await ApplyReflectionSourceAsync(recipe.Source, recipe.Settings, profile, StillSelected);
+            await ApplyReflectionSourceAsync(recipe.Source, recipe.Settings, profile, StillSelected, activeAtSignal);
         }
         catch (Exception error)
         {
@@ -881,8 +925,8 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] click: opening dialog");
         try
         {
-            string profile = ReflectionDisplayProfile.Capture().Key;
             var settings = await ReflectionSettingsDialog.ShowAsync(source);
+            string profile = ReflectionDisplayProfile.Capture().Key;
             System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] dialog: closed");
             if (settings is not null) await ApplyReflectionSourceAsync(source, settings, profile);
         }
@@ -1176,7 +1220,8 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         await ApplyReflectionSourceAsync(model.FilePath);
     }
 
-    private async Task ApplyReflectionSourceAsync(string source, ReflectionRenderSettings? settings = null, string? expectedProfile = null, Func<bool>? canApply = null)
+    private async Task ApplyReflectionSourceAsync(string source, ReflectionRenderSettings? settings = null,
+        string? expectedProfile = null, Func<bool>? canApply = null, string? baselineAtSignal = null)
     {
         if (canApply is null)
         {
@@ -1196,6 +1241,11 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
                 {
                     path = await ReflectionTextureService.PrepareAsync(source, settings, expectedProfile);
                     TrySelectCustomImage(ReflectionRegistryKey, path, refreshNotice: false, canApply: canApply);
+                    // Only the display-change rebind passes canApply; manual tile or
+                    // Configure Apply selections stay unsaved as before.
+                    if (canApply is not null
+                        && SamePath(DwmRegistryStore.ReadString(_hive, ReflectionRegistryKey), path))
+                        SettingsSession.Current.AcceptAutomaticReflectionBaseline(baselineAtSignal, path);
                 }
                 catch (Exception error)
                 {

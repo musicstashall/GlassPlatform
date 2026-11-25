@@ -97,6 +97,7 @@ assert 'Checkerboard' not in desktop_preview and 'preview.Opacity' not in dialog
 print('PASS: process-only Pivot selection, shared wallpaper without image dimming, top content inset')
 assert 'groups.Loaded +=' in dialog and 'groups.Unloaded +=' in dialog
 assert 'pickerRail.Children.Add(presets)' in dialog and 'var reset =' not in dialog
+assert 'One reflection canvas for the whole virtual desktop' in desktop_preview
 assert 'Shadow = new ThemeShadow()' in desktop_preview
 assert 'Reflection_NoiseSand' in (root / 'GlassSettings/Strings/ru-RU/Resources.resw').read_text()
 assert 'if (type == 4)' in effects and 'u < 1311' in effects and 'u < 64004' in effects
@@ -131,7 +132,11 @@ flat = (root / 'GlassSettings/Controls/FlatGlassPreviewLayer.cs').read_text()
 shared_state = (root / 'GlassSettings/Services/CompositionPreviewRegistryStates.cs').read_text()
 stylization = (root / 'GlassSettings/Controls/StylizationLayeredPreview.xaml.cs').read_text()
 assert desktop_preview.index('layers.Children.Add(a)') < desktop_preview.index('layers.Children.Add(glass)')
-assert desktop_preview.index('layers.Children.Add(glass)') < desktop_preview.index('layers.Children.Add(reflectionCanvas)')
+assert 'layers.Children.Add(glass);' in desktop_preview
+assert 'One reflection canvas for the whole virtual desktop' in desktop_preview
+assert 'desktop.Children.Add(reflection);' in desktop_preview
+assert 'reflectionViewport' not in desktop_preview
+assert 'desktop.Children.Add(layers);' in desktop_preview
 assert 'CompositionWallpaperPipelineBuilder.Build(' in flat
 assert 'CompositionPreviewRegistryStates.BuildRuntimeActive()' in flat and 'CompositionPreviewRegistryStates.BuildRuntimeActive()' in stylization
 assert 'CompositionWallpaperPipelineBuilder.CreateBitmap(' in flat and 'CompositionWallpaperPipelineBuilder.CreateBitmap(' in stylization
@@ -163,11 +168,12 @@ assert 'EnumDisplayMonitors(nullptr, nullptr, Enumerate' in native_profile
 assert 'rect->right - rect->left, rect->bottom - rect->top' in native_profile
 print('PASS: monitor snapshot uses native full monitor rectangles, without WinRT DisplayArea calls')
 
-assert 'layers.Clip = new RectangleGeometry' in desktop_preview
+assert 'layers.Clip' not in desktop_preview
 assert 'CreateGeometricClip(' not in desktop_preview
 assert 'GetElementVisual(layers)' not in desktop_preview
 assert 'layers.Loaded +=' not in desktop_preview
-print('PASS: XAML owns monitor clipping; no geometric Composition clip on its visual')
+assert 'No per-monitor clip' in desktop_preview
+print('PASS: no monitor clip (no seam fringe) and no geometric Composition clip on XAML visuals')
 
 assert 'layout.Children.Add(body); layout.Children.Add(editors);' in dialog
 assert 'editors.Children.Add(groups); editors.Children.Add(pickerRail);' in dialog
@@ -194,7 +200,7 @@ assert '_wallpaperReady || !_reflectionReady' in desktop_preview
 assert '_desktopView.Opacity = 1' in desktop_preview and 'Opacity = 0' in desktop_preview
 print('PASS: shared checked swatches, standard flyout picker, pixel-scale texture vs desktop-scale SVG, loading readiness gate')
 
-assert 'GetDialogWidth(preview.DesktopWidth, preview.DesktopHeight)' in dialog
+assert 'GetDialogWidth(preview.DesktopWidth, preview.DesktopHeight, preview.MonitorCount)' in dialog
 assert 'Math.Clamp(previewWidth + 64, 480, 1120)' in dialog
 assert 'bool inline = width >= parameterBudget + cell + 2 * gap + pickerWidth' in dialog
 assert 'colorFlyout.Content = null' in dialog and 'colorFlyout.Content = picker' in dialog
@@ -218,7 +224,8 @@ assert 'ReadCustom()' in history and '"CustomColor"' in history
 print('PASS: fourth custom preset, previous custom enters history, all preset duplicates excluded, no imported Windows colors')
 
 assert 'Themes_Colors_RecentColors' not in dialog
-assert '280.0 * desktopWidth / Math.Max(1, desktopHeight)' in dialog
+assert 'monitorCount > 1 ? 210.0 : 280.0' in dialog
+assert 'preferredHeight * desktopWidth / Math.Max(1, desktopHeight)' in dialog
 assert 'MonitorFromWindow' not in dialog and 'XamlRoot?.Size.Width' not in dialog
 assert 'Grid.SetRow(pickerRail, stacked ? 1 : 0)' in dialog
 print('PASS: preview-aspect dialog width, vertical narrow palettes/history, stacked fallback and no detached history heading')
@@ -231,7 +238,7 @@ print('PASS: always-visible custom picker launcher, no redundant button, left-al
 assert 'var presets = new Grid' in dialog
 assert 'paletteBudget >= 4 * cell + 3 * cellGap ? 4' in dialog
 assert 'paletteBudget >= 2 * cell + cellGap ? 2 : 1' in dialog
-assert 'Grid.SetColumn((FrameworkElement)presets.Children[i], i % columns)' in dialog
+assert 'Grid.SetColumn(visiblePresets[i], i % columns)' in dialog
 assert 'double pickerWidth = Math.Max(300, picker.DesiredSize.Width)' in dialog
 assert 'Width = new GridLength(1, GridUnitType.Star)' in dialog
 assert 'MaxWidth = 420, Height = 176' in dialog
@@ -263,3 +270,34 @@ assert '_glassLayers[i].RefreshAsync(_glassWallpaperPaths[i] ?? state.WallpaperP
 assert 'SetReflection' not in live_glass and 'ReadMonitorWallpapers' not in live_glass
 assert 'new RegistryValueChangeWatcher' not in desktop_preview
 print('PASS: live glass reuses session registry notifications, debounces/deduplicates and preserves reflection/wallpaper sources')
+
+assert 'customPreset.Visibility = inline ? Visibility.Collapsed : Visibility.Visible' in dialog
+assert '.Where(item => item.Visibility == Visibility.Visible).ToArray()' in dialog
+assert 'Grid.SetRow(frame, 1)' in desktop_preview
+assert 'Grid.SetRow(_sourceBadge, 0)' in desktop_preview
+assert 'Grid.SetRow(displayBadge, 2)' in desktop_preview
+assert 'Grid.SetRow(_loading, 1)' in desktop_preview
+assert '_sourceBadge.Opacity = 1' in desktop_preview
+assert 'Visibility = Visibility.Visible;' not in desktop_preview
+assert 'ReflectionDisplayProfile.GetDisplayNumber' in desktop_preview
+assert 'SharesVerticalEdge' not in desktop_preview and 'sharedLeft' not in desktop_preview
+assert 'BorderThickness = new Thickness(unit)' in desktop_preview
+assert 'Width = width, Height = height, CornerRadius = new CornerRadius(8 * unit)' in desktop_preview
+assert 'double inset = Math.Max(8 * unit' in desktop_preview
+assert 'Canvas.SetLeft(monitorFrame, monitor.X - left + inset)' in desktop_preview
+# the previous per-side stripe implementation could border the seam; it is gone
+assert 'strokeWidth, strokeHeight, strokeX, strokeY' not in desktop_preview
+assert 'desktop.Children.Add(monitorFrame)' in desktop_preview
+assert 'desktop.Children.Add(numberHost)' in desktop_preview
+assert 'public int MonitorCount => _bounds.Length' in desktop_preview
+assert 'public string ProfileKey { get; }' in desktop_preview
+assert 'MaxHeight = 280' in desktop_preview
+print('PASS: labels in own rows, complete monitor frames with real gap and system numbers, one reflection canvas, inline picker hides its launcher')
+
+# Documentation must describe the current preview/dialog implementation.
+docs = (root / 'GlassSettings/docs/ReflectionTextures.md').read_text()
+assert 'высота 210 DIP' in docs or '210 DIP' in docs
+assert 'диалог следует открыть заново' not in docs
+assert 'ярлычок поверх верхней части' not in docs
+assert 'в промежутках между мониторами отражение не рисуется' not in docs.lower()
+print('PASS: reflection documentation matches the current preview, labels and live display-change behaviour')

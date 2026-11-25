@@ -64,6 +64,28 @@ public static class ReflectionRenderState
         return null;
     }
 
+    /// <summary>
+    /// Ready canvas of the current display topology. Unlike <see cref="Read"/> this
+    /// does not re-check the source file, so the applied image can still be identified
+    /// after its source was deleted.
+    /// </summary>
+    public static State? ReadReadyProfile()
+    {
+        try
+        {
+            var snapshot = ReflectionDisplayProfile.Capture();
+            string profile = snapshot.Key;
+            using var root = OpenRoot();
+            using var key = root.OpenSubKey(RegistryPath + @"\Profiles\" + profile);
+            var state = key?.GetValue("State") is string text ? JsonSerializer.Deserialize<State>(text) : null;
+            if (state is not { Version: 2, Ready: true } || state.Settings is null || state.Profile != profile
+                || state.Width != snapshot.Width || state.Height != snapshot.Height
+                || key?.GetValue("Ready") is not int ready || ready != 1) return null;
+            return state;
+        }
+        catch { return null; }
+    }
+
     public static ReflectionRenderSettings Settings => (Read()?.Settings ?? new()).Normalize();
 
     public static void Invalidate(string? profile = null) => Write(new(2, false, "", "", 0, 0, "", "", new(),
@@ -86,7 +108,9 @@ public static class ReflectionRenderState
         catch { return false; }
     }
 
-    public static void MarkManaged(string output)
+    public static void MarkManaged(string output) => MarkManaged(output, notify: true);
+
+    private static void MarkManaged(string output, bool notify)
     {
         var state = Read();
         if (state is null || !string.Equals(state.Output, output, StringComparison.OrdinalIgnoreCase)) return;
@@ -94,7 +118,45 @@ public static class ReflectionRenderState
         using var key = root.CreateSubKey(RegistryPath, writable: true);
         key.SetValue("ManagedOutput", output, RegistryValueKind.String);
         key.SetValue("Managed", 1, RegistryValueKind.DWord);
-        _ = PostMessage(new IntPtr(0xFFFF), RegisterWindowMessage("GlassPlatform.ReflectionProfileChanged.V1"), IntPtr.Zero, IntPtr.Zero);
+        if (notify)
+            _ = PostMessage(new IntPtr(0xFFFF), RegisterWindowMessage("GlassPlatform.ReflectionProfileChanged.V1"), IntPtr.Zero, IntPtr.Zero);
+    }
+
+    /// <summary>
+    /// Restores a ready canvas published for the current topology when the platform
+    /// starts after a display change that happened while it was not observing.
+    /// Only our own published PNG is restored; other values are never replaced.
+    /// </summary>
+    public static bool AdoptReadyProfile(string profile)
+    {
+        var state = ReadReadyProfile();
+        if (state is null || state.Profile != profile || !File.Exists(state.Output)) return false;
+        // Published canvases live in ProgramData; a record pointing elsewhere is foreign.
+        if (!string.Equals(Path.GetDirectoryName(state.Output),
+                GlassSettings.Core.Platform.PlatformPaths.ReflectionAppliedDirectory,
+                StringComparison.OrdinalIgnoreCase)) return false;
+        try
+        {
+            using var image = File.OpenRead(state.Output);
+            if (Convert.ToHexString(SHA256.HashData(image)) != state.OutputHash) return false;
+        }
+        catch { return false; }
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\DWM", writable: true);
+            if (key is null) return false;
+            if (string.Equals(key.GetValue("CustomThemeReflection") as string ?? "", state.Output,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                // Already active: only re-assert ownership so the host may reuse it.
+                MarkManaged(state.Output, notify: false);
+                return false;
+            }
+            key.SetValue("CustomThemeReflection", state.Output, RegistryValueKind.String);
+            MarkManaged(state.Output, notify: false);
+            return true;
+        }
+        catch { return false; }
     }
 
     public static void ReleaseManagement()

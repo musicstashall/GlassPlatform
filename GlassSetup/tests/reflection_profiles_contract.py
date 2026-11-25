@@ -55,7 +55,8 @@ assert 'GetTickCount64() + 750' in native
 assert 'SetThreadDpiAwarenessContext' in native and 'GetDpiForMonitor' in native
 assert 'm.x -= left; m.y -= top;' in native
 assert 'm.dpiX, m.dpiY' in native and 'std::sort' in native
-assert 'if (!managed || _wcsicmp(active.c_str(), owned.c_str()))' in native
+assert 'const bool adopt = managed != 0' in native
+assert 'if (!adopt)' in native
 assert 'RegDeleteValueW(dwm.value, L"CustomThemeReflection")' in native
 assert 'ValidHash(candidate,' in native and 'integer(16) == DWORD(width)' in native
 assert 'FindWindowW(L"Dwm", nullptr)' in native and 'PostMessageW(window, WM_THEMECHANGED' in native
@@ -71,7 +72,12 @@ assert 'Directory.Enumerate' not in service and 'Inventory(' not in service
 assert 'saved.Profile == profile.Key' in service and 'saved.SourceHash == sourceHash' in service
 assert 'ReflectionRenderState.ReleaseManagement()' in page and 'ReflectionRenderState.MarkManaged' in page
 assert 'expectedProfile != profile.Key' in service
-assert 'args.DisplayChanged' in dialog and 'dialogContext?.CloseDismissed()' in dialog
+assert 'args.DisplayChanged' in dialog and 'var replacement = new ReflectionDesktopPreview()' in dialog
+assert 'CloseDismissed()' not in dialog
+assert 'old.Dispose()' in dialog and 'preview.Dispose()' in dialog
+assert 'body.Children.Move((uint)body.Children.IndexOf(replacement), (uint)index)' in dialog
+assert '!ReferenceEquals(treeAtStart, previewTree)' in dialog
+assert 'initialProfile = replacement.ProfileKey' in dialog
 assert 'ReflectionDisplayProfile.Capture().Key == initialProfile' in dialog
 assert '_pendingDisplay' in watcher and 'DisplayChanged = displayChanged' in watcher
 assert 'new RegistryValueChangeWatcher' not in wrapper
@@ -99,3 +105,39 @@ assert key(a) != key(a[:1])
 assert key(a) != key([a[0], (1920, 100, 2560, 1440, 144, 144)])
 print('PASS: canonical identity specification: enumeration/origin invariant, geometry/DPI/connectivity sensitive')
 print('NOTE: Windows compilation, optional loader, HKCU/DWM, mixed-DPI and hot-plug require Windows testing')
+
+assert 'SettingsSession.Current.AcceptAutomaticReflectionBaseline(baselineAtSignal, path)' in page
+assert 'StillSelected, activeAtSignal);' in page
+assert 'if (canApply is not null' in page
+snapshot = read('GlassSettings/Core/Snapshot/SettingsSnapshot.cs')
+session = read('GlassSettings/Services/SettingsSession.cs')
+watch = read('GlassSettings/Services/RegistrySnapshotWatchService.cs')
+assert 'ReconcileAutomaticReflectionFromWatch' not in watch and 'ReconcileAutomaticReflectionFromWatch' not in session
+profile = read('GlassSettings/Services/ReflectionDisplayProfile.cs')
+assert 'GetMonitorInfoW' in profile and 'MonitorDefaultToNearest' in profile
+assert 'TakeWhile(character => char.IsDigit(character))' in profile
+assert 'internal bool AcceptAutomaticReflectionBaseline(string? previousOutput, string expectedOutput)' in snapshot
+assert 'internal bool AcceptAutomaticReflectionBaseline(string? previousOutput, string expectedOutput)' in session
+assert 'ReflectionRenderState.ReadForOutput(expectedOutput) is null' in session
+assert 'StampDirtyScopesFromSnapshot();' in session
+assert 'string.Equals(previousOutput, expectedOutput, StringComparison.OrdinalIgnoreCase)' in snapshot
+assert 'CaptureDwmKeySubset([name], DwmRegistryHive.Hkcu)' in snapshot
+assert 'ReconcileScopeDirtyFlags();' in session
+assert 'Save(' not in snapshot[snapshot.index('internal bool AcceptAutomaticReflectionBaseline'):snapshot.index('internal bool AcceptAutomaticReflectionBaseline') + 700]
+print('PASS: live dialog re-layout preserves draft, single reflection canvas and targeted automatic path baseline reconciliation')
+
+state = read('GlassSettings/Services/ReflectionRenderSettings.cs')
+assert 'public static State? ReadReadyProfile()' in state
+assert 'public static bool AdoptReadyProfile(string profile)' in state
+assert 'PlatformPaths.ReflectionAppliedDirectory' in state
+assert 'MarkManaged(state.Output, notify: false)' in state
+assert 'RestoreReadyReflectionProfile();' in page
+assert 'ReflectionRenderState.IsManagedOutput(active)' in page
+assert 'ReflectionDisplayProfile.PublicationMutex' in page
+print('PASS: startup restores a verified ready canvas for the current topology without replacing external selections')
+
+native = read('GlassSettings/Native/ReflectionProfilesNative.cpp')
+assert 'const bool adopt = managed != 0' in native
+assert '(active.empty() || _wcsicmp(active.c_str(), owned.c_str()) != 0)' in native
+assert '_wcsicmp(active.c_str(), output.c_str())' in native
+print('PASS: platform startup adopts the ready canvas only when the last selection was managed')
