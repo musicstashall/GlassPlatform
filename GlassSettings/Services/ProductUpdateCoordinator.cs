@@ -5,10 +5,11 @@ using GlassSettings.Strings;
 namespace GlassSettings.Services;
 
 /// <summary>
-/// Проверка обновлений OpenGlass и установленных продуктов Glass.
-/// Уведомление закрывается отдельно для продукта, архитектуры и версии.
+/// Проверка обновлений комплекта Glass, его продуктов и двух сторонних продуктов.
+/// Новый билд комплекта перекрывает версии Settings и OpenGlass Resources.
+/// OpenGlass и SecureUxTheme имеют свои независимые каталоги и закрытие уведомлений.
 /// Неудачная проверка не стирает уже найденное обновление и не выглядит как «обновлений нет».
-/// Кнопки только запускают закэшированный Setup.
+/// Кнопка Glass только запускает закэшированный Setup; сторонние продукты ведут на релиз автора.
 /// </summary>
 public static class ProductUpdateCoordinator
 {
@@ -37,6 +38,32 @@ public static class ProductUpdateCoordinator
         NotifyChanged();
     }
 
+    /// <summary>SecureUxTheme не зависит от Glass и OpenGlass: своё предложение и своё закрытие.</summary>
+    public static bool ShouldShowSecureUxThemeNotice =>
+        HasPendingSecureUxThemeUpdate() && !IsSecureUxThemeNoticeDismissed();
+
+    public static bool HasPendingSecureUxThemeUpdate() =>
+        GlassSettingsRegistry.HasSecureUxThemeUpdatePending();
+
+    public static SecureUxThemeReleaseInfo? GetPendingSecureUxTheme() =>
+        SecureUxThemeReleaseUpdateService.TryReadPendingRelease();
+
+    public static void DismissSecureUxThemeNotice()
+    {
+        var version = GlassSettingsRegistry.ReadSecureUxThemeUpdatePendingVersion();
+        if (!string.IsNullOrWhiteSpace(version))
+            GlassSettingsRegistry.WriteSecureUxThemeUpdateNoticeDismissedVersion(version);
+        NotifyChanged();
+    }
+
+    private static bool IsSecureUxThemeNoticeDismissed()
+    {
+        var pending = GlassSettingsRegistry.ReadSecureUxThemeUpdatePendingVersion();
+        var dismissed = GlassSettingsRegistry.ReadSecureUxThemeUpdateNoticeDismissedVersion();
+        return !string.IsNullOrWhiteSpace(pending)
+            && string.Equals(pending, dismissed, StringComparison.OrdinalIgnoreCase);
+    }
+
     public static async Task RunStartupAsync()
     {
         if (_startupDone)
@@ -45,10 +72,14 @@ public static class ProductUpdateCoordinator
         _startupDone = true;
         MigrateLegacyDismissedTag();
         ReconcileOpenGlassPendingWithInstalled();
+        ReconcileSecureUxThemePendingWithInstalled();
         ReconcileGlassPendingWithInstalled();
 
         if (OpenGlassReleaseUpdateService.ShouldRefreshNetworkCheck() || NeedsOpenGlassRepairCheck())
             await CheckNetworkForOpenGlassAsync().ConfigureAwait(false);
+
+        if (SecureUxThemeReleaseUpdateService.ShouldRefreshNetworkCheck())
+            await CheckNetworkForSecureUxThemeAsync().ConfigureAwait(false);
 
         if (GlassPlatformUiPolicy.ShouldExposePlatformSections()
             && GlassReleaseUpdateService.ShouldRefreshNetworkCheck())
@@ -63,6 +94,12 @@ public static class ProductUpdateCoordinator
             return;
 
         await CheckNetworkForOpenGlassAsync().ConfigureAwait(false);
+        NotifyChanged();
+    }
+
+    public static async Task RefreshSecureUxThemeFromNetworkAsync()
+    {
+        await CheckNetworkForSecureUxThemeAsync().ConfigureAwait(false);
         NotifyChanged();
     }
 
@@ -82,18 +119,96 @@ public static class ProductUpdateCoordinator
         return Task.CompletedTask;
     }
 
+    /// <summary>Сторонний MSI Settings не скачивает и не запускает: только страница релиза автора.</summary>
+    public static Task OpenPendingSecureUxThemeDownloadAsync()
+    {
+        var url = GlassSettingsRegistry.ReadSecureUxThemeUpdatePendingUrl();
+        if (HasPendingSecureUxThemeUpdate() && !string.IsNullOrWhiteSpace(url))
+        {
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url)
+                {
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception error)
+            {
+                System.Diagnostics.Trace.TraceWarning("[UpdateCheck] SecureUxTheme open release {0}: {1}",
+                    error.GetType().Name, error.Message);
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
     public static bool ShouldShowGlassNotice =>
-        HasPendingGlassUpdate() && !GlassSettingsRegistry.IsGlassUpdateNoticeDismissedForPending();
+        HasPendingGlassUpdate() && !IsGlassNoticeDismissedForVisibleOffers();
 
     public static bool HasPendingGlassUpdate() => GlassSettingsRegistry.HasGlassUpdatePending();
 
     public static GlassReleaseInfo? GetPendingGlass() =>
         GlassReleaseUpdateService.TryReadPendingRelease();
 
+    /// <summary>
+    /// Закрываются только видимые предложения: комплект или отдельные продукты, но не оба.
+    /// Иначе скрытый обновлением комплекта продукт пропал бы после установки комплекта.
+    /// </summary>
     public static void DismissGlassNotice()
     {
-        GlassSettingsRegistry.DismissGlassPendingOffers();
+        var pending = GetPendingGlass();
+        if (pending is null)
+        {
+            GlassSettingsRegistry.DismissGlassPendingOffers();
+            NotifyChanged();
+            return;
+        }
+
+        var visible = GlassReleaseUpdateService.VisibleOffers(pending.Updates);
+        if (visible.Count == 0)
+        {
+            if (!string.IsNullOrWhiteSpace(pending.Version))
+                GlassSettingsRegistry.WriteGlassUpdateNoticeDismissedVersion(pending.Version);
+        }
+        else
+        {
+            GlassSettingsRegistry.WriteGlassUpdateDismissedOffers(visible.Select(item => item.Token));
+        }
+
         NotifyChanged();
+    }
+
+    private static bool IsGlassNoticeDismissedForVisibleOffers()
+    {
+        var pending = GetPendingGlass();
+        if (pending is null)
+            return false;
+
+        var visible = GlassReleaseUpdateService.VisibleOffers(pending.Updates);
+        if (visible.Count == 0)
+        {
+            var version = GlassSettingsRegistry.ReadGlassUpdatePendingVersion();
+            return !string.IsNullOrWhiteSpace(version)
+                && string.Equals(version, GlassSettingsRegistry.ReadGlassUpdateNoticeDismissedVersion(),
+                    StringComparison.OrdinalIgnoreCase);
+        }
+
+        var dismissed = GlassSettingsRegistry.ReadGlassUpdateDismissedOffers();
+        var dismissedTokens = new HashSet<string>(
+            (dismissed ?? string.Empty).Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+            StringComparer.OrdinalIgnoreCase);
+        var legacy = GlassSettingsRegistry.ReadGlassUpdateNoticeDismissedVersion();
+        foreach (var offer in visible)
+        {
+            if (dismissedTokens.Contains(offer.Token))
+                continue;
+            if (visible.Count == 1 && !string.IsNullOrWhiteSpace(legacy)
+                && string.Equals(legacy, offer.Version, StringComparison.OrdinalIgnoreCase))
+                continue;
+            return false;
+        }
+
+        return true;
     }
 
     public static void DismissVisibleUpdateNotice()
@@ -102,6 +217,8 @@ public static class ProductUpdateCoordinator
             DismissOpenGlassNotice();
         else if (ShouldShowGlassNotice)
             DismissGlassNotice();
+        else if (ShouldShowSecureUxThemeNotice)
+            DismissSecureUxThemeNotice();
     }
 
     public static Task OpenPendingGlassDownloadAsync()
@@ -117,6 +234,8 @@ public static class ProductUpdateCoordinator
             return OpenPendingOpenGlassDownloadAsync();
         if (ShouldShowGlassNotice)
             return OpenPendingGlassDownloadAsync();
+        if (ShouldShowSecureUxThemeNotice)
+            return OpenPendingSecureUxThemeDownloadAsync();
         return Task.CompletedTask;
     }
 
@@ -148,43 +267,109 @@ public static class ProductUpdateCoordinator
         return string.Format(GlassSettingsResources.Get("System_OpenGlassUpdateSpoilerFormat"), info.Version);
     }
 
+    public static string FormatSecureUxThemeNotice(SecureUxThemeReleaseInfo info, string installed) =>
+        string.Format(GlassSettingsResources.Get("Home_SecureUxThemeUpdateNotice"), info.Version, installed);
+
+    public static string FormatSecureUxThemeSystemNotice(SecureUxThemeReleaseInfo info, string installed) =>
+        string.Format(GlassSettingsResources.Get("System_SecureUxThemeUpdateTitle"), info.Version, installed);
+
+    public static string FormatSecureUxThemeLink(SecureUxThemeReleaseInfo info) =>
+        string.Format(GlassSettingsResources.Get("Home_SecureUxThemeUpdateLinkFormat"), info.Version);
+
+    public static string FormatSecureUxThemeSpoiler(SecureUxThemeReleaseInfo info) =>
+        string.Format(GlassSettingsResources.Get("System_SecureUxThemeUpdateSpoilerFormat"), info.Version);
+
     public static string FormatGlassNotice(GlassReleaseInfo info, string installed)
     {
-        if (info.Updates.Count > 1)
-            return string.Format(GlassSettingsResources.Get("Home_GlassUpdateSummary"), info.Updates.Count);
-        if (info.Updates.Count == 1)
+        var visible = info.VisibleUpdates;
+        if (visible.Count == 0)
+            return string.Format(GlassSettingsResources.Get("Home_GlassUpdateNotice"), info.Version, installed);
+        if (visible[0].IsBundle)
             return string.Format(
-                GlassSettingsResources.Get("Home_GlassUpdateNotice"),
-                info.Updates[0].Version,
-                InstalledOfferVersion(info.Updates[0], installed));
-        return string.Format(GlassSettingsResources.Get("Home_GlassUpdateNotice"), info.Version, installed);
+                GlassSettingsResources.Get("Home_GlassBundleUpdateNotice"),
+                GlassReleaseUpdateService.HighestVersion(visible),
+                installed);
+        if (visible.Count == 1)
+            return string.Format(
+                GlassSettingsResources.Get("Home_GlassProductUpdateNotice"),
+                ProductName(visible[0].Kind),
+                visible[0].Version,
+                InstalledOfferVersion(visible[0], installed));
+        return string.Format(
+            GlassSettingsResources.Get("Home_GlassProductUpdateSummary"),
+            ProductEntries(visible));
     }
 
     public static string FormatGlassSystemNotice(GlassReleaseInfo info, string installed)
     {
-        if (info.Updates.Count > 1)
-            return string.Format(GlassSettingsResources.Get("System_GlassUpdateSummary"), info.Updates.Count);
-        if (info.Updates.Count == 1)
+        var visible = info.VisibleUpdates;
+        if (visible.Count == 0)
+            return string.Format(GlassSettingsResources.Get("System_GlassUpdateTitle"), info.Version, installed);
+        if (visible[0].IsBundle)
             return string.Format(
-                GlassSettingsResources.Get("System_GlassUpdateTitle"),
-                info.Updates[0].Version,
-                InstalledOfferVersion(info.Updates[0], installed));
-        return string.Format(GlassSettingsResources.Get("System_GlassUpdateTitle"), info.Version, installed);
+                GlassSettingsResources.Get("System_GlassBundleUpdateTitle"),
+                GlassReleaseUpdateService.HighestVersion(visible),
+                installed);
+        if (visible.Count == 1)
+            return string.Format(
+                GlassSettingsResources.Get("System_GlassProductUpdateTitle"),
+                ProductName(visible[0].Kind),
+                visible[0].Version,
+                InstalledOfferVersion(visible[0], installed));
+        return string.Format(
+            GlassSettingsResources.Get("System_GlassProductUpdateSummary"),
+            ProductEntries(visible));
     }
 
     public static string FormatGlassLink(GlassReleaseInfo info)
     {
-        if (info.Updates.Count > 1)
-            return string.Format(GlassSettingsResources.Get("Home_GlassUpdateLinkSummary"), info.Updates.Count);
-        return string.Format(GlassSettingsResources.Get("Home_OpenGlassUpdateLinkFormat"), info.Version);
+        var visible = info.VisibleUpdates;
+        if (visible.Count == 0)
+            return string.Format(GlassSettingsResources.Get("Home_OpenGlassUpdateLinkFormat"), info.Version);
+        if (visible[0].IsBundle)
+            return string.Format(
+                GlassSettingsResources.Get("Home_GlassBundleUpdateLinkFormat"),
+                GlassReleaseUpdateService.HighestVersion(visible));
+        if (visible.Count == 1)
+            return string.Format(
+                GlassSettingsResources.Get("Home_GlassProductUpdateLinkFormat"),
+                ProductName(visible[0].Kind),
+                visible[0].Version);
+        return string.Format(GlassSettingsResources.Get("Home_GlassUpdateLinkSummary"), visible.Count);
     }
 
     public static string FormatGlassSpoiler(GlassReleaseInfo info)
     {
-        if (info.Updates.Count > 1)
-            return string.Format(GlassSettingsResources.Get("System_GlassUpdateSpoilerSummary"), info.Updates.Count);
-        return string.Format(GlassSettingsResources.Get("System_OpenGlassUpdateSpoilerFormat"), info.Version);
+        var visible = info.VisibleUpdates;
+        if (visible.Count == 0)
+            return string.Format(GlassSettingsResources.Get("System_OpenGlassUpdateSpoilerFormat"), info.Version);
+        if (visible[0].IsBundle)
+            return string.Format(
+                GlassSettingsResources.Get("System_GlassBundleUpdateSpoilerFormat"),
+                GlassReleaseUpdateService.HighestVersion(visible));
+        if (visible.Count == 1)
+            return string.Format(
+                GlassSettingsResources.Get("System_GlassProductUpdateSpoilerFormat"),
+                ProductName(visible[0].Kind),
+                visible[0].Version);
+        return string.Format(GlassSettingsResources.Get("System_GlassUpdateSpoilerSummary"), visible.Count);
     }
+
+    private static string ProductName(GlassUpdateKind kind) => GlassSettingsResources.Get(kind switch
+    {
+        GlassUpdateKind.Bundle => "GlassUpdate_Name_Bundle",
+        GlassUpdateKind.GlassSettings => "GlassUpdate_Name_Settings",
+        _ => "GlassUpdate_Name_Resources"
+    });
+
+    private static string ProductEntries(IReadOnlyList<GlassProductUpdate> updates) =>
+        string.Join(", ", updates
+            .GroupBy(item => item.Kind)
+            .OrderBy(group => group.Key)
+            .Select(group => string.Format(
+                GlassSettingsResources.Get("GlassUpdate_ProductEntryFormat"),
+                ProductName(group.Key),
+                GlassReleaseUpdateService.HighestVersion(group.ToList()))));
 
     private static void MigrateLegacyDismissedTag()
     {
@@ -284,6 +469,38 @@ public static class ProductUpdateCoordinator
             DisplayVersion(still),
             url,
             GlassReleaseUpdateService.JoinOffers(still));
+    }
+
+    private static void ReconcileSecureUxThemePendingWithInstalled()
+    {
+        if (!GlassSettingsRegistry.HasSecureUxThemeUpdatePending())
+            return;
+
+        var installed = SecureUxThemeMsiService.TryReadInstalledVersion();
+        var pending = GlassSettingsRegistry.ReadSecureUxThemeUpdatePendingVersion();
+        if (string.IsNullOrWhiteSpace(installed) || string.IsNullOrWhiteSpace(pending))
+            return;
+
+        if (!GlassReleaseUpdateService.IsInstalledOlderThan(installed, pending))
+            GlassSettingsRegistry.ClearSecureUxThemeUpdatePending();
+    }
+
+    private static async Task CheckNetworkForSecureUxThemeAsync()
+    {
+        // Нет установленного MSI — нет и основанного на версии предложения: оставшиеся
+        // файлы или DLL сами по себе не доказывают установку продукта.
+        var installed = SecureUxThemeMsiService.TryReadInstalledVersion();
+        if (string.IsNullOrWhiteSpace(installed))
+            return;
+
+        var check = await SecureUxThemeReleaseUpdateService.TryFetchLatestAsync().ConfigureAwait(false);
+        if (!check.Reached || check.Latest is null)
+            return;
+
+        if (GlassReleaseUpdateService.IsInstalledOlderThan(installed, check.Latest.Version))
+            GlassSettingsRegistry.WriteSecureUxThemeUpdatePending(check.Latest.Version, check.Latest.HtmlUrl);
+        else
+            GlassSettingsRegistry.ClearSecureUxThemeUpdatePending();
     }
 
     private static async Task CheckNetworkForGlassAsync()
@@ -405,8 +622,15 @@ public static class ProductUpdateCoordinator
         return next;
     }
 
-    private static string DisplayVersion(IReadOnlyList<GlassProductUpdate> updates) =>
-        updates.Count == 1 ? updates[0].Version : GlassReleaseUpdateService.HighestVersion(updates);
+    /// <summary>
+    /// pending.version — версия видимого предложения. При обновлении комплекта скрытые
+    /// версии Settings/Resources не должны подменять номер билда в уведомлении.
+    /// </summary>
+    private static string DisplayVersion(IReadOnlyList<GlassProductUpdate> updates)
+    {
+        var visible = GlassReleaseUpdateService.VisibleOffers(updates);
+        return visible.Count == 1 ? visible[0].Version : GlassReleaseUpdateService.HighestVersion(visible);
+    }
 
     private static string InstalledOfferVersion(GlassProductUpdate update, string fallback) =>
         GlassInstalledProducts.TryReadVersion(update.Id, out var installed) ? installed : fallback;

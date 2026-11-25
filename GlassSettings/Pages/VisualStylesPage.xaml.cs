@@ -35,6 +35,7 @@ public sealed partial class VisualStylesPage : Page
     private bool _signatureToggleLoading;
     private bool _signatureBusy;
     private EventHandler? _rebootActionHandler;
+    private bool _productUpdateSubscribed;
     private bool _heroActionsStacked;
     private bool _heroLayoutInitialized;
     private double _quickActionsCol0Width;
@@ -66,6 +67,12 @@ public sealed partial class VisualStylesPage : Page
         base.OnNavigatedTo(e);
         ThemesExpander.IsExpanded = true;
         HookEnvironmentWatcher();
+        if (!_productUpdateSubscribed)
+        {
+            ProductUpdateCoordinator.PendingUpdatesChanged += OnProductUpdatesChanged;
+            _productUpdateSubscribed = true;
+        }
+        RefreshSecureUxThemeOnlineLink();
         TextFontsCard.Visibility = GlassPlatformUiPolicy.ShouldExposePlatformSections()
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -107,7 +114,26 @@ public sealed partial class VisualStylesPage : Page
     protected override void OnNavigatedFrom(NavigationEventArgs e)
     {
         UnhookEnvironmentWatcher();
+        if (_productUpdateSubscribed)
+        {
+            ProductUpdateCoordinator.PendingUpdatesChanged -= OnProductUpdatesChanged;
+            _productUpdateSubscribed = false;
+        }
         base.OnNavigatedFrom(e);
+    }
+
+    private void OnProductUpdatesChanged(object? sender, EventArgs e) =>
+        DispatcherQueue.TryEnqueue(RefreshSecureUxThemeOnlineLink);
+
+    /// <summary>Ссылка на автора SecureUxTheme показывает отдельное pending, не Glass-каталог.</summary>
+    private void RefreshSecureUxThemeOnlineLink()
+    {
+        var pending = ProductUpdateCoordinator.HasPendingSecureUxThemeUpdate()
+            ? ProductUpdateCoordinator.GetPendingSecureUxTheme()
+            : null;
+        SecureUxThemeOnlineText.Text = pending is not null
+            ? ProductUpdateCoordinator.FormatSecureUxThemeLink(pending)
+            : GlassSettingsResources.Get("Themes_SecureUxThemeOnlineLink");
     }
 
     private void HookEnvironmentWatcher()
@@ -349,7 +375,7 @@ public sealed partial class VisualStylesPage : Page
         FindThemesText.Text = GlassSettingsResources.Get("Themes_FindOnline");
         BrowseThemesButton.Content = GlassSettingsResources.Get("Themes_BrowseThemes");
         SecureUxThemeOnlineIcon.Glyph = SettingsSectionGlyphs.WebSearch;
-        SecureUxThemeOnlineText.Text = GlassSettingsResources.Get("Themes_SecureUxThemeOnlineLink");
+        RefreshSecureUxThemeOnlineLink();
 
         _quickActionsWidthsDirty = true;
     }

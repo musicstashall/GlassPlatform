@@ -4,11 +4,24 @@ using GlassSettings.Core.Registry;
 
 namespace GlassSettings.Services;
 
+/// <summary>Тип предложения каталога. Комплект и отдельные продукты не смешиваются.</summary>
+public enum GlassUpdateKind
+{
+    Bundle,
+    GlassSettings,
+    OpenGlassResources
+}
+
 public sealed class GlassProductUpdate
 {
     public required string Id { get; init; }
     public required string Architecture { get; init; }
     public required string Version { get; init; }
+
+    /// <summary>Определяется по id каталога, поэтому старые токены в реестре читаются так же.</summary>
+    public GlassUpdateKind Kind => GlassReleaseUpdateService.KindForId(Id);
+
+    public bool IsBundle => Kind == GlassUpdateKind.Bundle;
 
     public string Token => Id + "|" + Architecture + "|" + Version;
 
@@ -38,6 +51,13 @@ public sealed class GlassReleaseInfo
     public required string Version { get; init; }
     public required string HtmlUrl { get; init; }
     public IReadOnlyList<GlassProductUpdate> Updates { get; init; } = [];
+
+    /// <summary>
+    /// Обновление комплекта перекрывает отдельные продукты Glass: если есть новый билд
+    /// платформы, версии Settings/Resources не показываются даже при их собственных обновлениях.
+    /// </summary>
+    public IReadOnlyList<GlassProductUpdate> VisibleUpdates =>
+        GlassReleaseUpdateService.VisibleOffers(Updates);
 }
 
 public enum GlassCatalogCheckKind
@@ -82,6 +102,25 @@ public static class GlassReleaseUpdateService
     ];
 
     private static readonly HttpClient Http = CreateHttpClient();
+
+    /// <summary>
+    /// platform64/platform32 — номер билда всего комплекта. Остальные id — отдельные продукты.
+    /// OpenGlass и SecureUxTheme сюда не входят: у них свои каталоги и ключи checks.
+    /// </summary>
+    public static GlassUpdateKind KindForId(string id) => id switch
+    {
+        "platform64" or "platform32" => GlassUpdateKind.Bundle,
+        "settings64" or "settings32" => GlassUpdateKind.GlassSettings,
+        "openglassResources" => GlassUpdateKind.OpenGlassResources,
+        _ => GlassUpdateKind.GlassSettings
+    };
+
+    /// <summary>Видимые предложения: комплект целиком либо только отдельные продукты.</summary>
+    public static IReadOnlyList<GlassProductUpdate> VisibleOffers(IReadOnlyList<GlassProductUpdate> updates)
+    {
+        var bundle = updates.Where(item => item.IsBundle).ToList();
+        return bundle.Count > 0 ? bundle : updates.Where(item => !item.IsBundle).ToList();
+    }
 
     public static bool ShouldRefreshNetworkCheck()
     {
