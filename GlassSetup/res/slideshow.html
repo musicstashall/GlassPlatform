@@ -202,8 +202,9 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 .error-reason-label{color:#ffb6c1;font-size:9px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase}
 .error-detail{flex:1 1 auto;min-height:0;margin:7px 0 0;padding-right:6px;max-height:168px;overflow:auto;color:#f3e6e9;font-size:12px;line-height:1.52;white-space:pre-wrap;overflow-wrap:anywhere;scrollbar-color:#8d6472 #2d1e32;scrollbar-width:thin}
 .error-reason[hidden],#error-copy-menu[hidden]{display:none}
-.error-detail{-webkit-user-select:text;user-select:text;cursor:text}
+.error-detail,.complete-warn-list{-webkit-user-select:text;user-select:text;cursor:text}
 .error-detail:focus-visible{outline:1px solid #f8b9cb;outline-offset:2px}
+.complete-warn-list:focus-visible{outline:1px solid #f0c27a;outline-offset:2px}
 #error-copy-menu{position:fixed;z-index:1000;padding:4px;border:1px solid #8d6472;border-radius:6px;background:#291f35;color:#fff;box-shadow:0 3px 12px #0009}
 #error-copy-command{display:block;padding:6px 16px;border:0;border-radius:3px;background:transparent;color:inherit;font:inherit;cursor:pointer}
 #error-copy-command:hover,#error-copy-command:focus-visible{background:#694457}
@@ -850,7 +851,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 <section id="complete-panel" class="mode-panel complete-scene" role="status" aria-live="polite">
 <img id="complete-banner" class="banner-portrait" alt="" aria-hidden="true"><div class="complete-ambient" aria-hidden="true"></div><div class="complete-sheen" aria-hidden="true"></div><div class="native-brand">GlassPlatform</div>
 <div class="complete-copy"><div id="complete-tag" class="complete-tag"></div><h1 id="complete-title" class="complete-title"></h1><p id="complete-body" class="complete-body"></p>
-<div id="complete-warnings" class="complete-warnings"><div id="complete-warn-label" class="complete-warn-label"></div><ul id="complete-warn-list" class="complete-warn-list"></ul></div>
+<div id="complete-warnings" class="complete-warnings"><div id="complete-warn-label" class="complete-warn-label"></div><ul id="complete-warn-list" class="complete-warn-list" tabindex="0" aria-labelledby="complete-warn-label"></ul></div>
 <div class="complete-ready"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3 8 3 3 7-7"/></svg><span id="complete-ready-text"></span></div>
 <p id="complete-note" class="complete-note"></p></div>
 <div class="complete-visual" aria-hidden="true"><svg class="complete-svg" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg"><defs>
@@ -1792,51 +1793,77 @@ function renderCertificatePanel(){
  setModeText('certificate-subject',cert.subject||'');setModeText('certificate-thumbprint',cert.thumbprint||'');setModeText('certificate-validity',cert.validity||'');setModeText('certificate-store',hostUi.certStore||'LocalMachine\\TrustedPeople');
 }
 const errorDetail=document.getElementById('error-detail');
-const errorCopyMenu=document.getElementById('error-copy-menu');
-const errorCopyCommand=document.getElementById('error-copy-command');
-function selectedErrorText(){
+const warnList=document.getElementById('complete-warn-list');
+const detailCopyMenu=document.getElementById('error-copy-menu');
+const detailCopyCommand=document.getElementById('error-copy-command');
+let copyMenuSource=null,finishWarningSignature='';
+function activeCopySource(){
+ if(mode==='error'&&!errorDetail.parentElement.hidden)return errorDetail;
+ if(mode==='complete'&&warnList.childElementCount)return warnList;
+ return null;
+}
+function hasSelectionIn(source){
  const selection=window.getSelection();
- return mode==='error'&&selection&&!selection.isCollapsed&&
-  errorDetail.contains(selection.anchorNode)&&errorDetail.contains(selection.focusNode)?selection.toString():'';
+ return source&&selection&&!selection.isCollapsed&&source.contains(selection.anchorNode)&&source.contains(selection.focusNode);
 }
-function closeErrorCopyMenu(){errorCopyMenu.hidden=true;}
-function syncErrorDetail(text,copyCaption){
- if(errorDetail.textContent!==text){closeErrorCopyMenu();errorDetail.textContent=text;}
+function closeDetailCopyMenu(){detailCopyMenu.hidden=true;copyMenuSource=null;}
+function syncErrorDetail(text){
+ if(errorDetail.textContent!==text){
+  if(copyMenuSource===errorDetail)closeDetailCopyMenu();
+  errorDetail.textContent=text;
+ }
  errorDetail.parentElement.hidden=!text.trim();
- errorCopyCommand.textContent=copyCaption||'';
- if(!copyCaption||mode!=='error'||errorDetail.parentElement.hidden)closeErrorCopyMenu();
 }
-function openErrorCopyMenu(x,y){
- if(!errorCopyCommand.textContent)return;
- errorCopyMenu.hidden=false;
- errorCopyCommand.disabled=!selectedErrorText();
- errorCopyMenu.style.left=Math.max(0,Math.min(x,window.innerWidth-errorCopyMenu.offsetWidth))+'px';
- errorCopyMenu.style.top=Math.max(0,Math.min(y,window.innerHeight-errorCopyMenu.offsetHeight))+'px';
+function syncFinishWarnings(warnings){
+ const rows=warnings.map(w=>[w.title,typeof w.detail==='string'?w.detail:'']);
+ const signature=JSON.stringify(rows);
+ // Повторный state не должен сбрасывать выделение или позицию прокрутки.
+ if(signature===finishWarningSignature)return;
+ finishWarningSignature=signature;
+ if(copyMenuSource===warnList)closeDetailCopyMenu();
+ warnList.replaceChildren();
+ for(const [title,detail] of rows){
+  const li=document.createElement('li');li.className='complete-warn-item';li.append(document.createTextNode(title));
+  if(detail){const d=document.createElement('span');d.className='complete-warn-detail';d.textContent=detail;li.append(d);}
+  warnList.append(li);
+ }
+}
+function syncDetailCopyCaption(caption){
+ detailCopyCommand.textContent=caption||'';
+ if(!caption||copyMenuSource!==activeCopySource())closeDetailCopyMenu();
+}
+function openDetailCopyMenu(source,x,y){
+ if(!detailCopyCommand.textContent)return;
+ copyMenuSource=source;
+ detailCopyMenu.hidden=false;
+ detailCopyCommand.disabled=!hasSelectionIn(source);
+ detailCopyMenu.style.left=Math.max(0,Math.min(x,window.innerWidth-detailCopyMenu.offsetWidth))+'px';
+ detailCopyMenu.style.top=Math.max(0,Math.min(y,window.innerHeight-detailCopyMenu.offsetHeight))+'px';
 }
 document.addEventListener('contextmenu',e=>{
  e.preventDefault();
- closeErrorCopyMenu();
- if(mode!=='error'||errorDetail.parentElement.hidden||!errorDetail.contains(e.target))return;
- openErrorCopyMenu(e.clientX,e.clientY);
+ closeDetailCopyMenu();
+ const source=activeCopySource();
+ if(source?.contains(e.target))openDetailCopyMenu(source,e.clientX,e.clientY);
 });
 // Не переносим фокус мышью: иначе Chromium может снять выделение до Copy.
-errorCopyCommand.addEventListener('mousedown',e=>e.preventDefault());
-errorCopyCommand.addEventListener('click',()=>{
- if(selectedErrorText())document.execCommand('copy');
- closeErrorCopyMenu();
+detailCopyCommand.addEventListener('mousedown',e=>e.preventDefault());
+detailCopyCommand.addEventListener('click',()=>{
+ if(copyMenuSource===activeCopySource()&&hasSelectionIn(copyMenuSource))document.execCommand('copy');
+ closeDetailCopyMenu();
 });
-document.addEventListener('pointerdown',e=>{if(!errorCopyMenu.contains(e.target))closeErrorCopyMenu();});
-window.addEventListener('blur',closeErrorCopyMenu);
+document.addEventListener('pointerdown',e=>{if(!detailCopyMenu.contains(e.target))closeDetailCopyMenu();});
+window.addEventListener('blur',closeDetailCopyMenu);
 document.addEventListener('keydown',e=>{
- if(mode==='error'&&!errorDetail.parentElement.hidden&&e.target===errorDetail&&
-    (e.key==='ContextMenu'||(e.shiftKey&&e.key==='F10'))){
+ const source=activeCopySource();
+ if(source&&e.target===source&&(e.key==='ContextMenu'||(e.shiftKey&&e.key==='F10'))){
   e.preventDefault();
-  const bounds=errorDetail.getBoundingClientRect();
-  openErrorCopyMenu(bounds.left,bounds.bottom);
- }else if(!errorCopyMenu.hidden&&(e.key==='Escape'||e.key==='Enter'||e.key===' ')){
+  const bounds=source.getBoundingClientRect();
+  openDetailCopyMenu(source,bounds.left,bounds.bottom);
+ }else if(!detailCopyMenu.hidden&&(e.key==='Escape'||e.key==='Enter'||e.key===' ')){
   e.preventDefault();e.stopImmediatePropagation();
-  if(e.key==='Escape')closeErrorCopyMenu();
-  else if(!errorCopyCommand.disabled)errorCopyCommand.click();
+  if(e.key==='Escape')closeDetailCopyMenu();
+  else if(!detailCopyCommand.disabled)detailCopyCommand.click();
  }
 },true);
 function syncModeText(){const x=uiResources[locale],hostUi=hostState.ui||{},done=completionText||hostUi||x,failed=errorText||hostUi||x;
@@ -1853,8 +1880,8 @@ function syncModeText(){const x=uiResources[locale],hostUi=hostState.ui||{},done
  renderHolderReport(processMode,settingsClose);
  const finishWarnings=Array.isArray(hostState.finishWarnings)?hostState.finishWarnings.filter(w=>w&&typeof w.title==='string'&&w.title):[],hasWarnings=finishWarnings.length>0;document.getElementById('complete-panel').classList.toggle('has-warnings',hasWarnings);
  document.getElementById('complete-tag').textContent=hasWarnings?(hostUi.doneWarnTag||x.doneWarnTag):(done.doneTag||x.doneTag);document.getElementById('complete-title').textContent=hasWarnings?(hostUi.doneWarnTitle||x.doneWarnTitle):(done.doneTitle||x.doneTitle);document.getElementById('complete-body').textContent=hasWarnings?(hostUi.doneWarnBody||x.doneWarnBody):(done.doneBody||x.doneBody);document.getElementById('complete-ready-text').textContent=done.doneReady||x.doneReady;document.getElementById('complete-note').textContent=done.doneNote||x.doneNote;
- document.getElementById('complete-warn-label').textContent=hostUi.doneWarnLabel||x.doneWarnLabel;const warnList=document.getElementById('complete-warn-list');warnList.replaceChildren();for(const w of finishWarnings){const li=document.createElement('li');li.className='complete-warn-item';li.append(document.createTextNode(w.title));if(typeof w.detail==='string'&&w.detail){const d=document.createElement('span');d.className='complete-warn-detail';d.textContent=w.detail;li.append(d);}warnList.append(li);}
- document.getElementById('error-tag').textContent=failed.errorTag||hostUi.errorTag||'';document.getElementById('error-title').textContent=failed.errorTitle||x.errorTitle;document.getElementById('error-body').textContent=failed.errorBody||x.errorBody;document.getElementById('error-reason-label').textContent=failed.errorDetails||hostUi.errorDetails||'';syncErrorDetail(String(hostState.errorReason??failed.errorReason??x.errorReason??''),hostUi.errorCopy);document.getElementById('error-note').textContent=(hostState.page==='error'&&hostState.status)?(hostState.status+'\n'+(failed.errorNote||x.errorNote)):(failed.errorNote||x.errorNote);
+ document.getElementById('complete-warn-label').textContent=hostUi.doneWarnLabel||x.doneWarnLabel;syncFinishWarnings(finishWarnings);
+ document.getElementById('error-tag').textContent=failed.errorTag||hostUi.errorTag||'';document.getElementById('error-title').textContent=failed.errorTitle||x.errorTitle;document.getElementById('error-body').textContent=failed.errorBody||x.errorBody;document.getElementById('error-reason-label').textContent=failed.errorDetails||hostUi.errorDetails||'';syncErrorDetail(String(hostState.errorReason??failed.errorReason??x.errorReason??''));syncDetailCopyCaption(hostUi.errorCopy);document.getElementById('error-note').textContent=(hostState.page==='error'&&hostState.status)?(hostState.status+'\n'+(failed.errorNote||x.errorNote)):(failed.errorNote||x.errorNote);
  setModeText('conflicts-kicker',hostUi.conflictsTag);setModeText('conflicts-title',hostUi.conflictsTitle);setModeText('conflicts-body',hostUi.conflictsBody);setModeText('conflicts-instructions',hostUi.conflictsInstructions);
  const conflictList=document.getElementById('conflict-list');conflictList.replaceChildren();for(const item of Array.isArray(hostState.conflicts)?hostState.conflicts:[]){if(!item||typeof item.name!=='string'||typeof item.detail!=='string')continue;const li=document.createElement('li');li.className='conflict-item';const dot=document.createElement('span');dot.className='conflict-dot';dot.setAttribute('aria-hidden','true');const copy=document.createElement('div');copy.className='conflict-copy';const name=document.createElement('strong');name.className='conflict-name';name.textContent=item.name;const detail=document.createElement('span');detail.className='conflict-detail';detail.textContent=item.detail;copy.append(name,detail);li.append(dot,copy);conflictList.append(li)}
  setModeText('license-brand',hostUi.brand||'GlassPlatform');setModeText('license-title',hostUi.licenseTitle);setModeText('license-intro',hostUi.licenseIntro);setModeText('license-accept-text',hostUi.licenseAccept);setModeText('eula-content',hostState.eula);
