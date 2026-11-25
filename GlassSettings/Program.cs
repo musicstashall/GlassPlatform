@@ -1,3 +1,5 @@
+// Вход только для Debug: в Release используется генерируемый WinUI Main (свой bootstrap WASDK),
+// поэтому замеры старта (StartupPhaseTrace) и порядок инициализации сверять на обеих конфигурациях.
 #if DEBUG
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;

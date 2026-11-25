@@ -15,10 +15,6 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
-            <Border
-                x:Name="AcrylicBackdropLayer"
-                Grid.RowSpan="2"
-                Visibility="Collapsed" />
             <TitleBar
                 x:Name="AppTitleBar"
                 Grid.Row="0"
@@ -246,6 +242,11 @@
                 </Border>
             </Grid>
         </Grid>
+        <!--
+            Прозрачный in-content индикатор cold start: фона нет — сквозь него видно живой backdrop окна.
+            Он не управляет видимостью/состоянием окна (см. docs/GlassSettings-startup-window-plan.md),
+            только перехватывает клики, пока shell достраивается.
+        -->
         <Grid
             x:Name="LoadingOverlay"
             Grid.RowSpan="2"
@@ -258,15 +259,27 @@
             PointerCaptureLost="LoadingOverlay_OnPointerInput"
             Tapped="LoadingOverlay_OnTappedInput"
             DoubleTapped="LoadingOverlay_OnDoubleTappedInput">
-            <Image
-                x:Name="LoadingIcon"
-                Width="108"
-                Height="108"
+            <StackPanel
                 HorizontalAlignment="Center"
                 VerticalAlignment="Center"
-                IsHitTestVisible="False"
-                Source="ms-appx:///Assets/app.ico"
-                Stretch="Uniform" />
+                Spacing="16">
+                <Image
+                    x:Name="LoadingIcon"
+                    Width="108"
+                    Height="108"
+                    HorizontalAlignment="Center"
+                    IsHitTestVisible="False"
+                    Source="ms-appx:///Assets/app.ico"
+                    Stretch="Uniform" />
+                <ProgressRing
+                    x:Name="LoadingRing"
+                    Width="24"
+                    Height="24"
+                    HorizontalAlignment="Center"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    IsHitTestVisible="False"
+                    IsActive="True" />
+            </StackPanel>
         </Grid>
     </Grid>
 </Window>

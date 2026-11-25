@@ -52,7 +52,7 @@ GlassSettings (сборка Native выполняется его target) → Gla
 | Adaptive layout | [docs/GlassSettings-adaptive-layout.md](docs/GlassSettings-adaptive-layout.md) |
 | Visual styles | [docs/GlassSettings-visual-styles.md](docs/GlassSettings-visual-styles.md) |
 | Startup white flash (журнал попыток) | [docs/GlassSettings-startup-white-flash.md](docs/GlassSettings-startup-white-flash.md) |
-| Штатный старт окна + живой акрил в 1-м кадре (**план**) | [docs/GlassSettings-startup-window-plan.md](docs/GlassSettings-startup-window-plan.md) |
+| Штатный старт окна + живой акрил в 1-м кадре (план + статус Э1–Э4) | [docs/GlassSettings-startup-window-plan.md](docs/GlassSettings-startup-window-plan.md) |
 | Мастер ink (TextVisualTuning) | [docs/TextVisualTuningWizard.md](docs/TextVisualTuningWizard.md) |
 
 ## Отражения OpenGlass

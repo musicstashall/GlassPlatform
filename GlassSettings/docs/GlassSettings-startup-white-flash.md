@@ -4,9 +4,24 @@
 
 **Статус:** попытки устранения вспышки только в GlassSettings **откачены** (2026-06-08). Код возвращён к состоянию до экспериментов. Документ фиксирует матрицу, чтобы не повторять неудачные ветки.
 
+**Статус (2026-11-25):** вместо управления видимостью окна реализован план: один `Activate()`,
+`Window.SystemBackdrop` присвоен один раз до показа (`GlassWindowBackdrop`), shell строится до
+`Activate()`, заставка → прозрачный in-content индикатор. **Код изменён, не собран** —
+проверка только на Windows, см. раздел 12 плана.
+
 См. также: [GlassSettings-development.md](GlassSettings-development.md), [GlassSettings-visual-styles.md](GlassSettings-visual-styles.md).
 
-> **2026-11-25.** Текущая цепочка «solid bootstrap + cloak + reveal-fade» признана костылём и ставится под вопрос: план отказа от неё (порядок запуска и объявление backdrop как в WinUI Gallery, корневая механика серого кадра по исходникам WinUI) — в [GlassSettings-startup-window-plan.md](GlassSettings-startup-window-plan.md). После его реализации разделы «Solid bootstrap + DWM cloak → splash-first show», «StartupSplashWindow + hidden MainWindow» и «Single-window splash на Main» считать *superseded* (оставлены как анти-паттерны), пункты матрицы #9/#12/#13/#16 закрыты сменой порядка запуска, а не состоянием окна.
+> **Правило (закреплено реализацией плана 2026-11-25).** Первый кадр обеспечивается
+> **порядком** `content → Activate` (тема корня → `Window.SystemBackdrop` → chrome/иконка →
+> `NavigateToRoot` → единственный `Activate()`), а не состоянием окна. Любая попытка
+> «выторговать» кадр через `DWMWA_CLOAK`, `IsShownInSwitchers`, `SW_HIDE`/`SW_SHOW`, парковку за
+> экран, solid-подложку или отложенное переприсваивание `SystemBackdrop` даёт либо серую
+> рамку, либо «дырку», либо скачок геометрии: WinUI сам включает прозрачность острова и
+> подключает backdrop-цель в момент активации, и всё, что происходит после
+> `Activate()`, уже видно. Разделы «Solid bootstrap + DWM cloak → splash-first show», «StartupSplashWindow
+> + hidden MainWindow» и «Single-window splash на Main» считать *superseded* (оставлены как
+> анти-паттерны); пункты матрицы #9/#12/#13/#16 закрыты сменой порядка запуска, а не
+> состоянием окна. Подробно: [GlassSettings-startup-window-plan.md](GlassSettings-startup-window-plan.md).
 
 ---
 

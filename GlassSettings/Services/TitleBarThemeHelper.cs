@@ -7,29 +7,36 @@ using WinRT.Interop;
 
 namespace GlassSettings.Services;
 
+/// <summary>
+/// Caption окна: DWM immersive dark + цвета AppWindow.TitleBar.
+/// Части разделены намеренно: <see cref="ApplyDwmDarkMode"/> — чистый DwmSetWindowAttribute по hwnd,
+/// применяется уже в конструкторе окна (до показа), а <see cref="ApplyTitleBarColors"/> трогает
+/// <c>AppWindow.TitleBar.*</c>, что исторически требует состоявшегося Activate().
+/// </summary>
 internal static class TitleBarThemeHelper
 {
     private const int DwmwaUseImmersiveDarkModeBefore20H1 = 19;
     private const int DwmwaUseImmersiveDarkMode = 20;
 
-    private static bool? _lastDark;
-    private static TitleBarTheme _lastPreferredTheme;
+    private static bool? _lastDwmDark;
+    private static bool? _lastTitleBarDark;
+    private static TitleBarTheme? _lastPreferredTheme;
 
+    /// <summary>Полный chrome caption (DWM + TitleBar цвета). Вызывать после Activate().</summary>
     public static void Apply(Window window, bool extendsContentIntoTitleBar = true)
     {
-        var dark = AppThemeVisualResolver.ResolveIsDarkMode();
-        var preferred = ResolvePreferredTheme();
-        if (_lastDark == dark && _lastPreferredTheme == preferred)
-            return;
-
-        _lastDark = dark;
-        _lastPreferredTheme = preferred;
-        ApplyCore(window, extendsContentIntoTitleBar);
+        ApplyDwmDarkMode(window);
+        ApplyTitleBarColors(window, extendsContentIntoTitleBar);
     }
 
-    private static void ApplyCore(Window window, bool extendsContentIntoTitleBar)
+    /// <summary>Тёмная caption по DWM — безопасно до первого кадра.</summary>
+    public static void ApplyDwmDarkMode(Window window)
     {
         var dark = AppThemeVisualResolver.ResolveIsDarkMode();
+        if (_lastDwmDark == dark)
+            return;
+
+        _lastDwmDark = dark;
 
         try
         {
@@ -38,12 +45,27 @@ internal static class TitleBarThemeHelper
             _ = DwmSetWindowAttribute(hwnd, DwmwaUseImmersiveDarkModeBefore20H1, ref darkMode, sizeof(int));
             _ = DwmSetWindowAttribute(hwnd, DwmwaUseImmersiveDarkMode, ref darkMode, sizeof(int));
         }
-        catch { /* ignore */ }
+        catch
+        {
+            /* ignore */
+        }
+    }
+
+    /// <summary>Цвета caption/кнопок через AppWindow.TitleBar — только после Activate().</summary>
+    public static void ApplyTitleBarColors(Window window, bool extendsContentIntoTitleBar = true)
+    {
+        var dark = AppThemeVisualResolver.ResolveIsDarkMode();
+        var preferred = ResolvePreferredTheme();
+        if (_lastTitleBarDark == dark && _lastPreferredTheme == preferred)
+            return;
+
+        _lastTitleBarDark = dark;
+        _lastPreferredTheme = preferred;
 
         try
         {
             var titleBar = window.AppWindow.TitleBar;
-            titleBar.PreferredTheme = ResolvePreferredTheme();
+            titleBar.PreferredTheme = preferred;
 
             var bg = dark ? Color.FromArgb(255, 32, 32, 32) : Color.FromArgb(255, 243, 243, 243);
             var fg = dark ? Colors.White : Color.FromArgb(255, 0, 0, 0);
@@ -81,7 +103,10 @@ internal static class TitleBarThemeHelper
                 titleBar.ButtonInactiveBackgroundColor = inactiveBg;
             }
         }
-        catch { /* ignore */ }
+        catch
+        {
+            /* ignore */
+        }
     }
 
     private static TitleBarTheme ResolvePreferredTheme() =>

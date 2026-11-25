@@ -225,3 +225,64 @@ App.OnLaunched
 2. **Бюджет до `Activate()`:** сколько мс допустимо «двойной клик по ярлыку → окно появилось» (моё предложение: ≤ 150 мс, и тогда часть холодно-стартовых вещей уходит до показа).
 3. **Win10 (17763+) в приоритете?** От ответа зависит, идём ли в Э6-A (нативный `DWMWA_SYSTEMBACKDROP_TYPE`) и нужны ли `Window.Width/MinWidth` с `E_NOTIMPL`-ветками.
 4. Готовность принять, что `AGENTS.md`-запреты (#10/#11, self-glass) остаются в силе — подтверждение, что «нативный DWM-путь» рассматриваем только как Э6, а не как основной.
+
+---
+
+## 12. Статус реализации (2026-11-25)
+
+Состояние: **код изменён, не собран** — сборка и прогоны возможны только на Windows
+(`msbuild GlassProject.sln /p:Configuration=Debug /p:Platform=x64`, артефакты `Build\x64\Debug\`).
+
+### Что сделано (Э1–Э4 + Э0)
+
+| Что | Файлы |
+| --- | --- |
+| `GlassWindowBackdrop : SystemBackdrop` — один объект на всё время жизни окна: `OnTargetConnected` создаёт контроллер и подключает цель; смена режима (`TryApplyMode`) пересоздаёт **только контроллер**; явный `FallbackColor` по теме; `SystemBackdrop` никогда не обнуляется, пока материал доступен | `Services/GlassWindowBackdrop.cs` (новый) |
+| `AttachStartupBackdrop` (один раз, до `Activate()`) + `ApplyModeFromRegistry` (runtime, без переприсваивания) вместо `ApplyFromRegistry` / `ApplyMode` / `ApplyMica` / `ApplyAcrylic` / `ApplyDesktopAcrylicFallback` / `HideAcrylicLayer`; in-app chrome-хелперы сохранены без изменений | `Services/WindowBackdropService.cs` |
+| Удалены: `StartupWindowCloakService.cs`, `StartupChromeService.cs`, `ActivateAsSplashSurface`, `EnsureLoadingOverlaySolidBootstrap`, весь «догоняющий» backdrop (`ReapplyWindowBackdropIfChanged`, `ApplyMainWindowBackdropAndTransparent`, `ApplyTransparentSplashChrome`, `EnsureSplashBackdropAndTransparent`, `TryApplyBackdropAndTransparentWhenOverlayReady`, `OnLoadingOverlaySizeChangedForStartupChrome`), reveal-машинерия (`ScheduleSplashFirstPaintReveal` + 3 обработчика + счётчики), switchers-toggle, `RootGrid`/`WindowBlurSourceHost` opacity-fade, `ScheduleColdStartAfterPaintFrames(8)`; `AcrylicBackdropLayer` убран из XAML | `MainWindow.xaml(.cs)`, `App.xaml.cs` |
+| `LoadingOverlay` → прозрачный in-content индикатор: без фона, `LoadingIcon` + `ProgressRing`; при снятии — fade-out самого overlay (220 мс) и `MarkReady`; **в видимостью окна не связанные**; минимум видимости 800→300 мс; ожидание decode иконки из dismiss убрано (оно обслуживало reveal) | `MainWindow.xaml`, `MainWindow.xaml.cs` |
+| Один `Activate()` (`ActivateAtStartup`) из `App.OnLaunched` (после `App.ShellWindow = window` вызывается `PrepareShellForStartup()` — HomePage/`NoticeViewportMirrorService` читают `App.ShellWindow` во время навигации); до него — тема, `ExtendsContentIntoTitleBar`/`SetTitleBar`, DWM dark, backdrop, placement, `AppWindow.SetIcon`, nav+`NavigateToRoot` (порядок Gallery); после него — `AppWindow.TitleBar.*`/`PreferredHeightOption`, Presence/watchers, Ensure, `Capture→RegWatch`; `ApplyPlacement` больше не двигает окно повторно | `App.xaml.cs`, `MainWindow.xaml.cs` |
+| `WindowPlacementStore`: rect обязан пересекаться с виртуальным экраном (иначе — центр рабочего пространства primary), `Save` не закрепляет «заэкранный» RECT | `Core/Placement/WindowPlacementStore.cs` |
+| Safety-dismiss: `StartupDismissFallbackAsync` (8 с) и `LoadingOverlayFallbackAsync` (8 с) слиты в один `LoadingOverlayFallbackAsync` — он же поднимает `_navigationReady`/`_shellInteractiveReady` и снимает индикатор, если pipeline завис | `MainWindow.xaml.cs` |
+| `StartupPhaseTrace.Begin/Mark/MarkWindow` — трасса фаз + снимок `visible/switchers/cloaked/fg/backdrop/size/pos` в ctor:exit, activate:begin/end, first-present, cold-start-core, titlebar-chrome, indicator-dismiss | `Services/StartupPhaseTrace.cs` (новый) |
+
+### Отклонения от плана
+
+- `Window.SystemBackdrop` объявлен не в XAML, а в конструкторе (`ApplyStartupChrome` →
+  `WindowBackdropService.AttachStartupBackdrop`): режим читается из реестра, поэтому тип
+  материала нельзя зафиксировать в разметке. Смысл тот же: один объект, присвоен до показа.
+- `WindowBlurSourceHost` оставлен как контейнер раскладки: после удаления reveal-fade и
+  solid-слоёв код к нему больше не обращается (переименование/слияние с `RootGrid` — отдельная
+  чистка, к старту отношения не имеет).
+- `Window.Width/MinWidth` не используем: это клиентские DIP и `E_NOTIMPL` без new windowing (17763) —
+  смешение единиц на масштабированном мониторе дороже выигрыша. Оставляем `AppWindow`-геометрию (physical px),
+  как в Э4 «вариант А».
+- `SetPresenter(Overlapped)` из пути старта убран полностью (был `SetPresenter(Default)` в `ApplyEarlyWindowPlacement`).
+- Э2 по `Program.cs` выполнен как «явно задокументировать разницу»: Debug-вход (наш `Main`)
+  и Release-вход (генерируемый `Main`) не унифицированы — порядок окна от этого не зависит
+  (оба пути приходят в `App.OnLaunched`), а менять публичный вход Release без проверки на Windows нельзя.
+- Гейт ввода оставлен **реальным**, а не no-op (п. 3 Э3): shell виден с первого кадра, поэтому
+  `IsHitTestVisible` и `LoadingOverlay`-перехват держат клики до `MarkReady` — иначе клик по ещё
+  не построенной Home даёт навигацию. Отвязка от него — отдельный шаг после тестов.
+- Цвета `AppWindow.TitleBar.*` и `PreferredHeightOption` оставлены после `Activate()` (поздний эксперимент
+  Э4 по #15 не проведён); в ctor перенесено то, что заведомо безопасно — `ExtendsContentIntoTitleBar`,
+  `SetTitleBar`, DWM 19/20, `AppWindow.SetIcon`, геометрия.
+- Двухфазная инициализация `AppThemeService` (Э5) **не** делалась — тема в ctor читается один раз, это не противоречит Э1–Э4.
+- Э5 (тестовая кнопка перезапуска) и Э6-A (`DWMWA_SYSTEMBACKDROP_TYPE`) отложены; Э6-B (нативный
+  `DwmDefWindowProc`-хук `WM_NCHITTEST`) и Э6-C (`Window.PlacementId` как optional-путь) не делались.
+
+### Что нужно проверить на Windows (критерии приёмки из раздела 10)
+
+1. Cold start x64 (Mica и Acrylic) + x86: нет grey frame, нет «пустой рамки», нет скачка геометрии;
+   в первом кадре — shell + живой материал.
+2. `StartupPhaseTrace`: `activate-in → first-present` ≤ 100 мс (x64) / ≤ 250 мс (x86); `cloaked=0`,
+   `switchers=true`, `visible=true` на метках `activate:end` / `first-present` / `indicator-dismiss` совпадают
+   (то есть окно не меняло состояние после показа).
+3. Смена Mica ↔ Acrylic в панели настроек и извне (`GlassSettingsPreferencesWatcher`): без мигания
+   и без «opaque»-кадра; после отказа материала (`transparency` off) фон окна остаётся читаемым (solid).
+4. 10× старт: `App.log` без «opaque→acrylic→opaque»; ошибок `0x8007139F` в логе старта нет.
+5. Win10 17763 (или `-ForceSolidBackdrop`-подобный прогон): окно непрозрачное, без «дырки», chrome корректный.
+6. Регрессии: tooltips, hosted dialogs, notices (green/yellow после `MarkReady`), повторный activate из
+   ShellExt (WM_APP, elevated GS), `Closing → Capture → Dispose RegWatch`, cold start x86 без AV.
+7. Placement: окно с «заэкранным» RECT в реестре открывается по центру primary; перетаскивание на
+   отключённый монитор не «запечатывает» координаты (см. `WindowPlacementStore.Save`).

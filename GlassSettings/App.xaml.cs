@@ -45,9 +45,13 @@ public partial class App : Application
         if (GlassSettings.Core.Registry.GlassSettingsRegistry.ReadValidateSettingsOnStartup())
             _ = System.Threading.Tasks.Task.Run(() => NativeHostInterop.ValidateRegistryState(applyFixes: true));
 
-        // Single-window: Main сразу как splash (SystemBackdrop + transparent + иконка).
+        // Штатный старт: ctor готовит тему/backdrop/chrome/placement, затем shell первого кадра,
+        // показ — один Activate() (без cloak, парковки за экраном и «догоняющего» backdrop).
+        // Порядок shell после ShellWindow: HomePage/NoticeViewportMirrorService читают App.ShellWindow.
+        // См. docs/GlassSettings-startup-window-plan.md.
         var window = new MainWindow();
         ShellWindow = window;
-        window.ActivateAsSplashSurface();
+        window.PrepareShellForStartup();
+        window.ActivateAtStartup();
     }
 }
