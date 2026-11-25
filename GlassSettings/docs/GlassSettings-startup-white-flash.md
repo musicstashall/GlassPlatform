@@ -6,8 +6,8 @@
 
 **Статус (2026-11-25):** вместо управления видимостью окна реализован план: один `Activate()`,
 `Window.SystemBackdrop` присвоен один раз до показа (`GlassWindowBackdrop`), shell строится до
-`Activate()`, заставка → прозрачный in-content индикатор. **Код изменён, не собран** —
-проверка только на Windows, см. раздел 12 плана.
+`Activate()`, заставка → панель in-app acrylic в области страницы (Э7.2). **Код изменён, не собран** —
+проверка только на Windows, см. разделы 12–13 плана.
 
 См. также: [GlassSettings-development.md](GlassSettings-development.md), [GlassSettings-visual-styles.md](GlassSettings-visual-styles.md).
 
@@ -22,6 +22,13 @@
 > + hidden MainWindow» и «Single-window splash на Main» считать *superseded* (оставлены как
 > анти-паттерны); пункты матрицы #9/#12/#13/#16 закрыты сменой порядка запуска, а не
 > состоянием окна. Подробно: [GlassSettings-startup-window-plan.md](GlassSettings-startup-window-plan.md).
+>
+> **Форма индикатора (Э7.2, 2026-11-25).** Заставка — `LoadingOverlay` с `AcrylicInAppFillColorDefaultBrush`
+> **рядом с `PageContentHost`** (область страницы `NavigationView`), а не `Grid.RowSpan="2"` над всем окном:
+> caption и pane остаются живыми в первом кадре, материал окна не перекрывается. Показ **отложен** на
+> ~150 мс от `Activate()` (тёплый старт проходит без индикатора вовсе) и ограничен ~900 мс видимости:
+> «бублик/иконка поверх загруженного контента» — дефект. Тяжёлые данные (`DesktopWallpaperImageCache`,
+> composition blur) дожидаются снятия только в пределах этого окна (`maxPreviewWaitMs` 250 мс).
 
 ---
 

@@ -181,6 +181,47 @@
                             </Grid>
                         </Grid>
                     </Grid>
+                    <!--
+                        Заставка cold start (Э7.2, вариант А): панель in-app acrylic над ОБЛАСТЬЮ
+                        СТРАНИЦЫ — caption и pane остаются живыми с первого кадра, материал окна не
+                        перекрывается. Показ отложен (LoadingIndicatorShowDelayMs): если Home успела
+                        подготовиться раньше, панель не показывается вовсе — нет мигания на тёплом
+                        старте. Видимостью/состоянием окна НЕ управляет:
+                        docs/GlassSettings-startup-window-plan.md.
+                    -->
+                    <Grid
+                        x:Name="LoadingOverlay"
+                        Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}"
+                        IsHitTestVisible="True"
+                        Visibility="Collapsed"
+                        PointerPressed="LoadingOverlay_OnPointerInput"
+                        PointerReleased="LoadingOverlay_OnPointerInput"
+                        PointerCanceled="LoadingOverlay_OnPointerInput"
+                        PointerCaptureLost="LoadingOverlay_OnPointerInput"
+                        Tapped="LoadingOverlay_OnTappedInput"
+                        DoubleTapped="LoadingOverlay_OnDoubleTappedInput">
+                        <StackPanel
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Spacing="20">
+                            <Image
+                                x:Name="LoadingIcon"
+                                Width="108"
+                                Height="108"
+                                HorizontalAlignment="Center"
+                                IsHitTestVisible="False"
+                                Source="ms-appx:///Assets/app.ico"
+                                Stretch="Uniform" />
+                            <ProgressRing
+                                x:Name="LoadingRing"
+                                Width="28"
+                                Height="28"
+                                HorizontalAlignment="Center"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                IsHitTestVisible="False"
+                                IsActive="False" />
+                        </StackPanel>
+                    </Grid>
                 </Grid>
             </NavigationView>
         </Grid>
@@ -241,45 +282,6 @@
                     </Border>
                 </Border>
             </Grid>
-        </Grid>
-        <!--
-            Прозрачный in-content индикатор cold start: фона нет — сквозь него видно живой backdrop окна.
-            Он не управляет видимостью/состоянием окна (см. docs/GlassSettings-startup-window-plan.md),
-            только перехватывает клики, пока shell достраивается.
-        -->
-        <Grid
-            x:Name="LoadingOverlay"
-            Grid.RowSpan="2"
-            Background="Transparent"
-            IsHitTestVisible="True"
-            Visibility="Visible"
-            PointerPressed="LoadingOverlay_OnPointerInput"
-            PointerReleased="LoadingOverlay_OnPointerInput"
-            PointerCanceled="LoadingOverlay_OnPointerInput"
-            PointerCaptureLost="LoadingOverlay_OnPointerInput"
-            Tapped="LoadingOverlay_OnTappedInput"
-            DoubleTapped="LoadingOverlay_OnDoubleTappedInput">
-            <StackPanel
-                HorizontalAlignment="Center"
-                VerticalAlignment="Center"
-                Spacing="16">
-                <Image
-                    x:Name="LoadingIcon"
-                    Width="108"
-                    Height="108"
-                    HorizontalAlignment="Center"
-                    IsHitTestVisible="False"
-                    Source="ms-appx:///Assets/app.ico"
-                    Stretch="Uniform" />
-                <ProgressRing
-                    x:Name="LoadingRing"
-                    Width="24"
-                    Height="24"
-                    HorizontalAlignment="Center"
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    IsHitTestVisible="False"
-                    IsActive="True" />
-            </StackPanel>
         </Grid>
     </Grid>
 </Window>

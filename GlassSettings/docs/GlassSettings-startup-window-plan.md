@@ -338,3 +338,41 @@ App.OnLaunched
 | **Б — только бублик** | Как сейчас: прозрачный overlay, иконка + `ProgressRing`; жёсткий потолок жизни `LoadingMaximumMs` ≈ 600–900 мс от `Activate()`, `maxPreviewWaitMs` 800 → ~250 | Максимально «честно»: контент виден с первого кадра, ничего не перекрывается | Видно, как догружаются превью/notice-слоты (ради этого когда-то и вводились ожидания) |
 
 Оба варианта не возвращают cloak/park/solid-подложку окна и не трогают `SystemBackdrop` после `Activate()`.
+
+### Э7.2 — реализовано (выбран вариант А + отложенный показ)
+
+Форма: `LoadingOverlay` — панель `AcrylicInAppFillColorDefaultBrush` **внутри области страницы**
+(`NavigationView` → `Grid`, сосед `PageContentHost`), а не `Grid.RowSpan="2"` над всем окном: caption и pane
+живые с первого кадра, материал окна не перекрыт. Внутри — значок 108 и `ProgressRing` 28. `SystemBackdrop`
+окна не меняется, индикатор окном по-прежнему не управляет.
+
+Тайминг (`MainWindow.xaml.cs`, поля `LoadingIndicator*Ms`):
+
+| Параметр | Значение | Смысл |
+|---|---|---|
+| `LoadingIndicatorShowDelayMs` | 150 | `ArmStartupLoadingIndicator()` ставит таймер от `Activate()`; если shell готов раньше — панель не показывается вовсе (тёплый старт без мигания) |
+| момент показа | не раньше `CompleteFirstPresent` | `RequestShowLoadingIndicator()` при `_firstPresentSeen == false` только ставит `_indicatorPendingShow`: acrylic-панель в нулевом кадре удорожала бы сам первый кадр (тот же урок, что и с PostNav) |
+| `LoadingIndicatorMaxMs` | 900 | таймер запускается в `ShowLoadingIndicatorNow()`, то есть ограничивает **видимость**, а не старт; по нему — `indicator-cap` + `TryDismissLoadingOverlay()`, даже если данные не отдались |
+| `LoadingIndicatorMinVisibleMs` | 90 | показанную <90 мс панель гасим без 220-мс фейда (`HoldIndicatorBrieflyAsync` + `FinishIndicatorDismiss`): короткий фейд читается как мигание |
+| `maxPreviewWaitMs` | 800 → 250 | ожидание `DesktopWallpaperImageCache` / composition blur под заставкой |
+| `LoadingMinimumMs` | удалён | «не моргать» теперь обеспечивает задержка показа, а не искусственный минимум |
+| ожидание dismiss | дедлайн 900 мс | `while (!_shellInteractiveReady …)` ограничен временем, а не привязан к `first-present`-поллингу |
+
+Снятие: `TryDismissLoadingOverlay()` → `FinishIndicatorDismiss()` (панель в `Collapsed`,
+`LoadingRing.IsActive = false`, `ArmShellInputAfterLoading()`, `ShellContentReadyGate.MarkReady()`);
+если панель не показывалась — без анимации вообще.
+
+Отказ от отдельного хука «Home отрендерилась / загрузка обоев упала» (`CompleteStartupIndicator`,
+`NoteStartupPreviewFailure`): снятие по `Loaded` HomePage вернуло бы баг «пустой слот превью» (данные ещё не
+отрисованы), а сценарий сбоя уже ограничен `LoadingIndicatorMaxMs` — панель живёт ≤ 900 мс и не зависает
+поверх контента. `LoadingOverlayFallbackAsync` (8 с) остаётся страховкой конвейера.
+
+Заметка по вводу: панель лежит внутри `NavigationView`, а `SetShellInputEnabled(false)` выключает hit-test
+на всём его поддереве — во время старта `IsHitTestVisible` панели ни на что не влияет, клики не доходят ни до
+неё, ни до shell. Раньше это делал overlay уровня `RootGrid` (он был вне `NavView` и проглатывал клики);
+теперь защиту «недоигравшие клики не доезжают как навигация» обеспечивает hit-test-off subtree, а
+`LoadingOverlay_OnPointerInput` остаются на случай повтора показа панели при уже включённом вводе.
+
+Трасса после Э7.2 обязана показать: `activate:begin → first-present` ≤ ~500 мс (цель ≤100 на x64),
+затем `indicator-shown` (на тёплом старте — его отсутствие), `indicator-dismiss − indicator-shown` ≤ ~900 мс,
+`backdrop:mode=… <controller>` в первых строках.

@@ -50,9 +50,8 @@ public sealed partial class MainWindow : Window
     private bool _shellInteractiveReady;
     private bool _postDismissHooksDone;
     private bool _navigationReady;
+    /// <summary>Момент РЕАЛЬНОГО показа заставки (не начала старта): от него считаются min/max видимости.</summary>
     private DateTimeOffset _loadingShownAt = DateTimeOffset.UtcNow;
-    /// <summary>Минимум видимости прозрачного in-content индикатора (не окна!): кадр не «мигает».</summary>
-    private const int LoadingMinimumMs = 300;
     private Task? _attachIconPreload;
     private SettingsLayoutMode _layoutMode = SettingsLayoutMode.Medium;
     private DesktopEnvironmentWatcher? _desktopEnvironmentWatcher;
@@ -99,8 +98,26 @@ public sealed partial class MainWindow : Window
     private bool _firstPresentWatchArmed;
     private readonly System.Collections.Generic.List<Action> _afterFirstPresent = new();
     private bool _loadingIconFallbackApplied;
-    /// <summary>Fade-out прозрачного индикатора при снятии: анимация контента, окна не касается.</summary>
+    /// <summary>Fade-out заставки при снятии: анимация контента, окна не касается.</summary>
     private const int LoadingIndicatorFadeOutMs = 220;
+    /// <summary>
+    /// Задержка показа заставки-панели (Э7.2): тёплый старт, где Home успевает подготовиться
+    /// раньше, проходит без индикатора вовсе — панель не мелькает.
+    /// </summary>
+    private const int LoadingIndicatorShowDelayMs = 150;
+    /// <summary>
+    /// Жёсткий потолок ВИДИМОСТИ заставки: дольше она только висела бы поверх готового контента,
+    /// поэтому снимаем даже если данные ещё догружаются (они догружаются и так — снизу).
+    /// </summary>
+    private const int LoadingIndicatorMaxMs = 900;
+    /// <summary>Очень короткий показ гасим без фейда: 1-2 кадра с анимацией читаются как мигание.</summary>
+    private const int LoadingIndicatorMinVisibleMs = 90;
+    private bool _indicatorArmed;
+    private bool _indicatorShown;
+    /// <summary>Показ запрошен таймером, но ждёт первого present (акрил панели в нулевом кадре дорог).</summary>
+    private bool _indicatorPendingShow;
+    private DispatcherQueueTimer? _indicatorShowTimer;
+    private DispatcherQueueTimer? _indicatorCapTimer;
 
     /// <summary>Планирует cold start на следующий проход dispatcher (не внутри Activate/reentrancy).</summary>
     internal void TryCompleteColdStartBootstrap()
@@ -170,6 +187,14 @@ public sealed partial class MainWindow : Window
         Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= OnFirstPresentRendering;
         StartupPhaseTrace.MarkWindow(phase, this);
 
+        // Заставку поднимаем только после present: тот же урок, что и с PostNav, — лишняя
+        // acrylic-панель в нулевом кадре удорожает и сдвигает первый кадр целиком.
+        if (_indicatorPendingShow)
+        {
+            _indicatorPendingShow = false;
+            ShowLoadingIndicatorNow();
+        }
+
         var pending = _afterFirstPresent.ToArray();
         _afterFirstPresent.Clear();
         foreach (var work in pending)
@@ -191,10 +216,6 @@ public sealed partial class MainWindow : Window
             return;
 
         _bootstrapCoreDone = true;
-
-        // Минимум видимости индикатора — отсчёт с ActivateAtStartup.
-        if (_loadingShownAt == default)
-            _loadingShownAt = DateTimeOffset.UtcNow;
 
         DesktopWallpaperImageCache.BeginLoad(DispatcherQueue);
         // Recent thumbs для страницы «Фон» — до drill-навигации.
@@ -357,7 +378,6 @@ public sealed partial class MainWindow : Window
             return;
 
         _startupActivated = true;
-        _loadingShownAt = DateTimeOffset.UtcNow;
         PrepareShellForStartup();
 
         try
@@ -367,6 +387,7 @@ public sealed partial class MainWindow : Window
         }
         catch { /* ignore */ }
 
+        ArmStartupLoadingIndicator();
         StartupPhaseTrace.MarkWindow("activate:begin", this);
 
         try
@@ -936,12 +957,93 @@ public sealed partial class MainWindow : Window
         catch { /* ignore */ }
     }
 
+    /// <summary>
+    /// Отложенный показ заставки (Э7.2). Таймер на LoadingIndicatorShowDelayMs от Activate:
+    /// если shell успел подготовиться раньше, панель не показывается вообще. Таймер-потолок
+    /// стартует в момент фактического показа и ограничивает только ВИДИМОСТЬ — заставка не
+    /// имеет права висеть поверх уже отрисованного контента, пока догружаются данные.
+    /// </summary>
+    private void ArmStartupLoadingIndicator()
+    {
+        if (_indicatorArmed)
+            return;
+
+        _indicatorArmed = true;
+
+        var show = DispatcherQueue.CreateTimer();
+        show.Interval = TimeSpan.FromMilliseconds(LoadingIndicatorShowDelayMs);
+        show.IsRepeating = false;
+        show.Tick += (_, _) => RequestShowLoadingIndicator();
+        show.Start();
+        _indicatorShowTimer = show;
+    }
+
+    /// <summary>Запрос показа по таймеру: удовлетворяется не раньше первого present окна.</summary>
+    private void RequestShowLoadingIndicator()
+    {
+        if (_contentReady || _indicatorShown)
+            return;
+
+        if (!_firstPresentSeen)
+        {
+            _indicatorPendingShow = true;
+            return;
+        }
+
+        ShowLoadingIndicatorNow();
+    }
+
+    private void ShowLoadingIndicatorNow()
+    {
+        if (_contentReady || _indicatorShown)
+            return;
+
+        _indicatorShown = true;
+        _loadingShownAt = DateTimeOffset.UtcNow;
+        LoadingOverlay.Opacity = 1;
+        LoadingOverlay.Visibility = Visibility.Visible;
+        LoadingRing.IsActive = true;
+        StartupPhaseTrace.MarkWindow("indicator-shown", this);
+
+        var cap = DispatcherQueue.CreateTimer();
+        cap.Interval = TimeSpan.FromMilliseconds(LoadingIndicatorMaxMs);
+        cap.IsRepeating = false;
+        cap.Tick += (_, _) =>
+        {
+            if (_contentReady)
+                return;
+
+            StartupPhaseTrace.MarkWindow("indicator-cap", this);
+            TryDismissLoadingOverlay();
+        };
+        cap.Start();
+        _indicatorCapTimer = cap;
+    }
+
+    private void StopLoadingIndicatorTimers()
+    {
+        _indicatorPendingShow = false;
+        try
+        {
+            _indicatorShowTimer?.Stop();
+            _indicatorCapTimer?.Stop();
+        }
+        catch
+        {
+            /* таймеры best-effort: окно может закрываться */
+        }
+
+        _indicatorShowTimer = null;
+        _indicatorCapTimer = null;
+    }
+
     private void TryDismissLoadingOverlay()
     {
         if (_contentReady)
             return;
 
         _contentReady = true;
+        StopLoadingIndicatorTimers();
         NavView.Visibility = Visibility.Visible;
         if (NavFrame.Content is not Page)
             NavigateTo(_currentTag, force: true);
@@ -955,16 +1057,56 @@ public sealed partial class MainWindow : Window
         if (SettingsBackupOpenRequest.TryPeek(out var backupPath))
             OpenSettingsBackup(backupPath);
 
-        // Индикатор снимается как обычная анимация контента: видимость/позиция/клоак
-        // окна не трогаются. Hit-test остаётся off до MarkReady — иначе отложенные
-        // клики индикатора доезжают как навигация с Главной.
-        BeginIndicatorFadeOut(LoadingIndicatorFadeOutMs, () =>
+        // Заставка снимается как обычная анимация контента: видимость/позиция/клоак
+        // окна не трогаются. Hit-test subtree остаётся off до MarkReady — иначе клики,
+        // полученные во время достройки Home, доезжают как навигация с Главной.
+        if (_indicatorShown &&
+            (DateTimeOffset.UtcNow - _loadingShownAt).TotalMilliseconds < LoadingIndicatorMinVisibleMs)
         {
-            ArmShellInputAfterLoading();
-            ShellContentReadyGate.MarkReady();
-        });
+            _ = HoldIndicatorBrieflyAsync(() => BeginIndicatorFadeOut(LoadingIndicatorFadeOutMs, FinishIndicatorDismiss));
+        }
+        else
+        {
+            FinishIndicatorDismiss();
+        }
+
         DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, StartPostDismissShellHooks);
         StartupPhaseTrace.MarkWindow("indicator-dismiss", this);
+    }
+
+    /// <summary>Панель снята: hit-test shell включаем только здесь.</summary>
+    private void FinishIndicatorDismiss()
+    {
+        if (LoadingOverlay.Visibility == Visibility.Visible)
+        {
+            LoadingOverlay.Visibility = Visibility.Collapsed;
+            LoadingOverlay.Opacity = 1;
+        }
+
+        LoadingRing.IsActive = false;
+        ArmShellInputAfterLoading();
+        ShellContentReadyGate.MarkReady();
+    }
+
+    private async Task HoldIndicatorBrieflyAsync(Action resume)
+    {
+        try
+        {
+            await Task.Delay(LoadingIndicatorMinVisibleMs).ConfigureAwait(true);
+        }
+        catch
+        {
+            return;
+        }
+
+        try
+        {
+            resume();
+        }
+        catch
+        {
+            /* dismiss best-effort */
+        }
     }
 
     /// <summary>Включить hit-test shell только после fade-out индикатора.</summary>
@@ -1017,8 +1159,9 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Ввод shell: off, пока под прозрачным индикатором строится Home.
-    /// Видимость shell этим методом НЕ управляется: он виден с первого кадра.
+    /// Ввод shell: off, пока под заставкой строится Home.
+    /// Видимость shell этим методом НЕ управляется: он виден с первого кадра
+    /// (caption и pane не перекрываются — заставка лежит в области страницы).
     /// </summary>
     private void SetShellInputEnabled(bool enabled)
     {
@@ -2426,9 +2569,12 @@ public sealed partial class MainWindow : Window
             if (_contentReady)
                 return;
 
+            // Ожидание readiness — с дедлайном: индикатор не должен превращаться в «заставку
+            // поверх готового контента» из-за того, что данные (wallpaper/composition) не отдались.
+            var deadline = DateTimeOffset.UtcNow.AddMilliseconds(LoadingIndicatorMaxMs);
             if (!fallback)
             {
-                while (!_shellInteractiveReady)
+                while (!_shellInteractiveReady && DateTimeOffset.UtcNow < deadline)
                 {
                     await Task.Delay(50);
                     if (_contentReady)
@@ -2437,17 +2583,13 @@ public sealed partial class MainWindow : Window
             }
             else
             {
-                while (!_navigationReady)
+                while (!_navigationReady && DateTimeOffset.UtcNow < deadline)
                 {
                     await Task.Delay(50);
                     if (_contentReady)
                         return;
                 }
             }
-
-            var elapsed = (DateTimeOffset.UtcNow - _loadingShownAt).TotalMilliseconds;
-            var minDelayMs = Math.Max(0, (int)(LoadingMinimumMs - elapsed));
-            var minDelay = Task.Delay(minDelayMs);
 
             // Names-only (без native SHGetFileInfo) + обои + composition blur — под индикатором.
             // Раньше wait на icon-preload (~600 ms) маскировал готовность DesktopWallpaperImageCache;
@@ -2456,14 +2598,15 @@ public sealed partial class MainWindow : Window
             if (CompositionWallpaperLayersCache.ShouldPrewarm())
                 CompositionWallpaperLayersCache.BeginPrewarm(DispatcherQueue);
 
-            const int maxPreviewWaitMs = 800;
+            // 250 мс вместо прежних 800: превью успевает стартовать под заставкой, но панель
+            // не переживает готовность контента (верхняя граница — LoadingIndicatorMaxMs).
+            const int maxPreviewWaitMs = 250;
             var wallpaperTask = DesktopWallpaperImageCache.LoadTask ?? Task.CompletedTask;
             var wallpaperOrTimeout = Task.WhenAny(wallpaperTask, Task.Delay(maxPreviewWaitMs));
             var compositionTask = CompositionWallpaperLayersCache.PrewarmTask ?? Task.CompletedTask;
             var compositionOrTimeout = Task.WhenAny(compositionTask, Task.Delay(maxPreviewWaitMs));
 
             await Task.WhenAll(
-                    minDelay,
                     wallpaperOrTimeout,
                     compositionOrTimeout,
                     _attachIconPreload)
