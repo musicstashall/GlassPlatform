@@ -17,6 +17,17 @@ const binary=pkg.default||pkg,path=require('node:path'),assert=require('node:ass
    assert.ok(Math.abs(heading.y-reference.y)<2,JSON.stringify({mode,locale,heading,reference}));
    assert.equal(heading.x,reference.x);
   }
+  for(const locale of ['ru','en']){
+   await page.evaluate(locale=>window.receive({data:{type:'state',page:'certificate',locale,
+    certificate:{subject:'CN=Example Publisher',thumbprint:'0123456789ABCDEF0123456789ABCDEF01234567',validity:'2026-01-01 – 2027-01-01'},
+    ui:{certSubjectLabel:'Subject',certThumbprintLabel:'Thumbprint',certValidityLabel:'Validity',certStoreLabel:'Store',certDetailsLabel:'Certificate'}}}),locale);
+   const facts=await page.locator('.cert-facts').boundingBox(),last=await page.locator('#certificate-options .cert-card').last().boundingBox();
+   assert.ok(Math.abs(facts.y+facts.height-last.y-last.height)<1,JSON.stringify({locale,facts,last}));
+   assert.ok(facts.y+facts.height<540);
+   const overlay=await page.locator('#certificate-panel .components-overlay').evaluate(e=>getComputedStyle(e).backgroundImage);
+   const opacities=[...overlay.matchAll(/rgba\([^)]*,\s*([\d.]+)\)/g)].map(m=>Number(m[1]));
+   assert.equal(opacities.length,2);assert.ok(opacities.every(alpha=>alpha>=.4));
+  }
   let headingPosition;
   for(const locale of ['ru','en'])for(const [platform,og] of [[true,true],[true,false],[false,true]]){
    await page.evaluate(({locale,platform,og})=>{window.messages=[];window.receive({data:{type:'state',page:'full-cleanup',locale,cleanupBody:locale==='ru'?'Выберите, параметры каких продуктов нужно удалить.\nНеотмеченные параметры сохранятся для повторной установки.':'Choose which product settings to remove.\nUnchecked settings are kept for reinstallation.',cleanupPlatformEligible:platform,cleanupOgEligible:og,cleanupUserData:false,cleanupOpenGlassConfig:false}})}, {locale,platform,og});
@@ -58,11 +69,21 @@ const binary=pkg.default||pkg,path=require('node:path'),assert=require('node:ass
     const label=page.locator('#'+id+'-cleanup-option');assert.equal(await label.isVisible(),eligible);
     if(!eligible)continue;
     const box=await label.boundingBox();assert.ok(box.y>=0&&box.y+box.height<=516,JSON.stringify(box));
-    await label.click();assert.equal(await page.locator('#'+id+'-cleanup-choice').isChecked(),true);
+    const choice=page.locator('#'+id+'-cleanup-choice');
+    await label.click();assert.equal(await choice.isChecked(),true);
+    assert.equal(await choice.getAttribute('type'),'checkbox');
+    const marker=await choice.evaluate(e=>({radius:getComputedStyle(e).borderRadius,dot:getComputedStyle(e,'::after').borderRadius}));
+    assert.deepEqual(marker,{radius:'50%',dot:'50%'});
     assert.ok((await page.evaluate(()=>window.messages)).includes('cleanup:'+key+':1'));
     assert.equal(await label.evaluate(e=>getComputedStyle(e).outlineStyle),'none','mouse click must not outline the whole card');
-    await page.locator('#'+id+'-cleanup-choice').focus();
-
+    await choice.focus();
+   }
+   if(platform&&og){
+    const platformChoice=page.locator('#full-cleanup-choice'),ogChoice=page.locator('#og-cleanup-choice');
+    assert.equal(await platformChoice.isChecked(),true);assert.equal(await ogChoice.isChecked(),true);
+    await platformChoice.press('Space');
+    assert.equal(await platformChoice.isChecked(),false);assert.equal(await ogChoice.isChecked(),true);
+    assert.ok((await page.evaluate(()=>window.messages)).includes('cleanup:platform:0'));
    }
   }
   for(const locale of ['ru','en']){

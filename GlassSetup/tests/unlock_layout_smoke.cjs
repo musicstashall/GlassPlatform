@@ -17,7 +17,7 @@ const binary=binaryModule.default||binaryModule;
    const filter=getComputedStyle(panel).backdropFilter||getComputedStyle(panel).webkitBackdropFilter||'';
    const animation=getComputedStyle(document.querySelector('.unlock-orbit')).animationName;
    return {hidden:panel.hidden,shade:!!document.getElementById('unlock-holder-shade'),filter,animation,
-    left:report.left,right:report.right,top:report.top,bottom:report.bottom,copyRight:copy.right,scroll:list.scrollHeight>list.clientHeight,
+    inset:getComputedStyle(panel).left,left:report.left,right:report.right,top:report.top,bottom:report.bottom,copyRight:copy.right,scroll:list.scrollHeight>list.clientHeight,
     rows:list.children.length,title:document.getElementById('unlock-title').textContent};
   });
   for(const locale of ['ru','en'])for(const mode of ['unlock-modules','unlock-processes']){
@@ -26,7 +26,7 @@ const binary=binaryModule.default||binaryModule;
    const waiting=await state();
    assert.equal(waiting.hidden,false);assert.equal(waiting.shade,false);assert.equal(waiting.animation,'none');
    assert.match(waiting.filter,/blur/i);
-   assert.ok(waiting.left>waiting.copyRight,JSON.stringify(waiting));
+   assert.equal(waiting.inset,'480px');assert.ok(waiting.left>waiting.copyRight,JSON.stringify(waiting));
    assert.ok(waiting.top>=0&&waiting.bottom<=540&&waiting.right<=1000);assert.ok(waiting.scroll);assert.equal(waiting.rows,18);
    // Stale report remains in the host state during retry: never display it over activity.
    await send({unlockActive:true});
@@ -39,7 +39,7 @@ const binary=binaryModule.default||binaryModule;
   await send({locale:'ru',page:'settings-close',unlockActive:false,holdReport:'GlassSettings.exe (PID 4120): окно не закрылось'});
   const settings=await state();
   assert.equal(settings.hidden,false);assert.equal(settings.shade,false);assert.match(settings.filter,/blur/i);
-  assert.equal(settings.title,'Закройте GlassSettings');assert.equal(settings.rows,1);
+  assert.equal(settings.title,'Закройте GlassSettings');assert.equal(settings.rows,1);assert.equal(settings.inset,'510px');
   await page.emulateMedia({reducedMotion:'reduce'});
   await send({page:'unlock-modules',unlockActive:true});
   assert.equal((await state()).hidden,true);

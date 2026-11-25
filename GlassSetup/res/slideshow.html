@@ -86,6 +86,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 #unlock-panel .unlock-copy{top:var(--page-heading-top);max-height:326px;overflow:auto;padding-right:8px}
 #unlock-panel .unlock-status{margin-top:18px}
 #unlock-panel .unlock-holders{position:absolute;left:510px;right:48px;top:94px;bottom:48px;z-index:5;display:flex;flex-direction:column;min-height:0;padding:18px;border:1px solid #ffffff38;border-radius:14px;background:linear-gradient(160deg,#ffffff2e,#ffffff0a 46%),linear-gradient(165deg,#4a4e8680,#1a1d38a6);backdrop-filter:blur(28px) saturate(180%);-webkit-backdrop-filter:blur(28px) saturate(180%);box-shadow:inset 0 1px #ffffff38,inset 0 0 0 1px #ffffff14,0 18px 40px #04050e40;pointer-events:auto}
+#stage:is([data-mode="unlock-modules"],[data-mode="unlock-processes"]) #unlock-panel .unlock-holders{left:480px}
 .unlock-holders-title{flex:0 0 auto;margin:0 0 14px;padding-bottom:12px;border-bottom:1px solid #ffffff20;color:#c1b4ff;font-size:10px;font-weight:700;letter-spacing:1.3px;text-transform:uppercase}
 .unlock-holder-list{display:flex;flex-direction:column;gap:6px;margin:0;padding:0 4px 0 0;min-height:0;overflow:auto;list-style:none;scrollbar-color:#777296 #191b30;scrollbar-width:thin}
 .unlock-holder{flex-shrink:0;min-width:0;padding:8px 9px;border:1px solid #ffffff12;border-left:2px solid #a7dddf;border-radius:7px;background:#ffffff05}
@@ -378,11 +379,13 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 /* Windows 11 certificate page: same scene as components; two exclusive choice cards + a facts card. */
 .cert-intro{margin:0 0 13px;color:#aeb2c9;font-size:12.5px;line-height:1.45}
 .cert-columns{position:absolute;left:48px;top:150px;width:904px;display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:18px;z-index:3;pointer-events:auto}
-.cert-options{display:grid;grid-template-columns:1fr;gap:10px}
+#certificate-panel .components-overlay{background:linear-gradient(90deg,#101225a6,#10122570)}
+.cert-columns>div{display:flex;flex-direction:column}
+.cert-options{flex:1;display:grid;grid-template-columns:1fr;gap:10px}
 .cert-card{min-height:auto;align-items:flex-start}
-.cert-card .comp-check{border-radius:50%}
-.cert-card .comp-check:checked:after{width:8px;height:8px;margin:5px;border:0;border-radius:50%;background:#17162a;transform:none}
-.cert-facts{align-self:start;padding:14px 16px 13px;border:1px solid #a7dddf38;border-left:2px solid #a7dddf;border-radius:13px;background:linear-gradient(145deg,#19253aeb,#121a2cf2);box-shadow:inset 0 1px #ffffff0c,0 10px 26px #07081336}
+.comp-check.choice-dot{border-radius:50%}
+.comp-check.choice-dot:checked:after{width:8px;height:8px;margin:5px;border:0;border-radius:50%;background:#17162a;transform:none}
+.cert-facts{padding:14px 16px 13px;border:1px solid #a7dddf38;border-left:2px solid #a7dddf;border-radius:13px;background:linear-gradient(145deg,#19253aeb,#121a2cf2);box-shadow:inset 0 1px #ffffff0c,0 10px 26px #07081336}
 .cert-facts-label{margin:0 0 9px;color:#a7dddf;font-size:9px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase}
 .cert-facts dl{margin:0;display:grid;grid-template-columns:1fr;gap:7px}
 .cert-facts dt{color:#8fa0b3;font-size:9.5px;letter-spacing:.6px;text-transform:uppercase}
@@ -772,12 +775,10 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 #stage[data-mode="full-cleanup"] #confirm-note{order:5;flex-shrink:0;width:auto;max-width:none;margin:10px 0 0;padding:0;border:0;border-radius:0;background:none;box-shadow:none;color:#aaa6bc;font-size:12px;line-height:1.5}
 #cleanup-explanation:not([hidden]){order:4;flex-shrink:0;max-width:780px;margin:6px 0 4px;color:#b5b1c6;font-size:13px;line-height:1.55}
 .cleanup-option:not([hidden]){display:flex;flex-shrink:0;align-items:flex-start;gap:12px;margin:0 0 10px;padding:12px 16px;border:1px solid #ffffff24;border-radius:10px;background:linear-gradient(150deg,#ffffff12,#ffffff00 40%),linear-gradient(165deg,#343756cf,#131526df);backdrop-filter:blur(22px) saturate(160%);-webkit-backdrop-filter:blur(22px) saturate(160%);box-shadow:inset 0 1px #ffffff1a,0 8px 24px #04050e30;color:#eeeaf7;font-size:15px;cursor:pointer;pointer-events:auto;box-sizing:border-box}
-.cleanup-option input{width:18px;height:18px;margin:2px 0 0;flex:none;accent-color:#8cc6ac;cursor:pointer}
 .cleanup-option strong{display:block;font-weight:600;margin-bottom:5px}
 .cleanup-option small{display:block;color:#bdb9cd;font-size:13px;line-height:1.45}
 .cleanup-option:hover{border-color:#ffffff40;background:linear-gradient(150deg,#ffffff18,#ffffff04 40%),linear-gradient(165deg,#3d405fcf,#1b1c32df)}
 .cleanup-option:has(input:checked){border-color:#a99bc34d;background:linear-gradient(150deg,#c1b4ff18,#ffffff04 40%),linear-gradient(165deg,#3a3658cf,#201e36df)}
-.cleanup-option input:focus-visible{outline:2px solid #c5b7ee;outline-offset:4px;border-radius:3px}
 
 /* Cleanup choices and guidance share the maintenance page's acrylic language. */
 #stage[data-mode="full-cleanup"] .cleanup-option{width:480px;max-width:100%}
@@ -921,7 +922,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 <section id="confirm-panel" class="mode-panel confirm-scene" role="alertdialog" aria-labelledby="confirm-title" aria-describedby="confirm-body">
 <img id="confirm-banner" class="banner-portrait" alt="" aria-hidden="true"><div class="confirm-ambient" aria-hidden="true"></div><div class="native-brand">GlassPlatform</div>
 <div class="error-copy"><div id="confirm-tag" class="confirm-tag"></div><h1 id="confirm-title" class="complete-title"></h1><p id="confirm-body" class="complete-body"></p>
-<p id="cleanup-explanation" hidden></p><div id="confirm-note" class="confirm-callout"></div><label id="full-cleanup-option" class="cleanup-option" hidden><input id="full-cleanup-choice" type="checkbox"><span><strong>GlassPlatform</strong><small></small></span></label><label id="og-cleanup-option" class="cleanup-option" hidden><input id="og-cleanup-choice" type="checkbox"><span><strong>OpenGlass</strong><small></small></span></label></div>
+<p id="cleanup-explanation" hidden></p><div id="confirm-note" class="confirm-callout"></div><label id="full-cleanup-option" class="cleanup-option" hidden><input id="full-cleanup-choice" class="comp-check choice-dot" type="checkbox"><span><strong>GlassPlatform</strong><small></small></span></label><label id="og-cleanup-option" class="cleanup-option" hidden><input id="og-cleanup-choice" class="comp-check choice-dot" type="checkbox"><span><strong>OpenGlass</strong><small></small></span></label></div>
 <aside id="cleanup-backup" class="cleanup-backup" hidden aria-labelledby="cleanup-backup-title"><h2><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.3 4.5a2 2 0 0 1 3.4 0l7.5 13a2 2 0 0 1-1.7 3H4.5a2 2 0 0 1-1.7-3z"/><path d="M12 9v4m0 3v.2"/></svg><span id="cleanup-backup-title"></span></h2><p id="cleanup-backup-body"></p><p id="cleanup-backup-note"></p></aside>
 <div class="complete-visual" aria-hidden="true"><svg class="complete-svg" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
 <circle class="complete-halo" cx="200" cy="200" r="157"/><circle class="complete-orbit" cx="200" cy="200" r="158"/><circle class="complete-orbit inner" cx="200" cy="200" r="132"/>
@@ -1783,7 +1784,7 @@ function renderCertificatePanel(){
   certificateSignature=signature;host.replaceChildren();
   for(const item of options){
    const label=document.createElement('label');label.className='comp-card cert-card'+(item.checked?' is-checked':'');
-   const input=document.createElement('input');input.type='radio';input.name='certificate-choice';input.className='comp-check';input.dataset.certificate=item.id;input.checked=item.checked;
+   const input=document.createElement('input');input.type='radio';input.name='certificate-choice';input.className='comp-check choice-dot';input.dataset.certificate=item.id;input.checked=item.checked;
    input.addEventListener('change',()=>{for(const card of host.querySelectorAll('.cert-card'))card.classList.toggle('is-checked',card.contains(input)&&input.checked);if(window.chrome&&window.chrome.webview)window.chrome.webview.postMessage('certificate:'+item.id);});
    const body=document.createElement('div');body.className='comp-body';
    const head=document.createElement('div');head.className='comp-head';const name=document.createElement('span');name.className='comp-name';name.textContent=item.title;head.append(name);
