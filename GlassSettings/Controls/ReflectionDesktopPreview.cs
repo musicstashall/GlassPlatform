@@ -1,6 +1,4 @@
 using GlassSettings.Services;
-using System.Runtime.InteropServices;
-using System.ComponentModel;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -42,7 +40,8 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
     public ReflectionDesktopPreview()
     {
         System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] preview: EnumDisplayMonitors");
-        var bounds = ReadMonitorBounds();
+        var profile = ReflectionDisplayProfile.Capture();
+        var bounds = profile.Monitors.Select(m => new Windows.Graphics.RectInt32(m.X, m.Y, m.Width, m.Height)).ToArray();
         System.Diagnostics.Debug.WriteLine($"[ReflectionConfigure] preview: monitor snapshot ready, count={bounds.Length}");
         _bounds = bounds;
         _glassWallpaperPaths = new string?[bounds.Length];
@@ -65,6 +64,14 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
             Visibility = Visibility.Collapsed, IsHitTestVisible = false
         };
         Children.Add(_sourceBadge);
+        Children.Add(new Border
+        {
+            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Thickness(12), Padding = new Thickness(6, 2, 6, 2), CornerRadius = new CornerRadius(4),
+            Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"],
+            IsHitTestVisible = false, Opacity = .65,
+            Child = new TextBlock { Text = profile.Label, FontSize = 10 }
+        });
         Children.Add(_loading);
         Margin = new Thickness(8, 8, 8, 16);
         foreach (var monitor in bounds)
@@ -116,38 +123,6 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
         SettingsSession.Current.DirtyChanged += OnSessionChanged;
         Loaded += OnLoaded;
     }
-
-    // Avoid DisplayArea.FindAll and its failing WinRT collection projection.
-    // EnumDisplayMonitors supplies full monitor rectangles, not working areas.
-    private static Windows.Graphics.RectInt32[] ReadMonitorBounds()
-    {
-        var bounds = new List<Windows.Graphics.RectInt32>();
-        MonitorEnumProc callback = (IntPtr monitor, IntPtr hdc, ref MonitorRect rect, IntPtr data) =>
-        {
-            if (rect.Right > rect.Left && rect.Bottom > rect.Top)
-                bounds.Add(new Windows.Graphics.RectInt32(rect.Left, rect.Top,
-                    rect.Right - rect.Left, rect.Bottom - rect.Top));
-            return true;
-        };
-        if (!EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, callback, IntPtr.Zero))
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot enumerate desktop monitors.");
-        return bounds.ToArray();
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MonitorRect
-    {
-        public int Left, Top, Right, Bottom;
-    }
-
-    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private delegate bool MonitorEnumProc(IntPtr monitor, IntPtr hdc, ref MonitorRect rect, IntPtr data);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr clip,
-        MonitorEnumProc callback, IntPtr data);
 
     public void SetSourceLabel(string name) => _sourceName.Text = name;
 

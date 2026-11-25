@@ -20,7 +20,7 @@ assert 'RenderPng(source, 148, 92)' in renderer
 assert 'new Svg.SvgUnit(width)' in renderer and 'document.Draw(width, height)' in renderer
 assert 'bitmap.Save(output, ImageFormat.Png)' in renderer
 assert 'ReflectionRenderState.Save(source, output' in service
-assert 'Path.ChangeExtension(source, ".png")' in service
+assert 'profile.Key + ".png"' in service
 assert 'Path.GetFullPath(state.Source)' in service
 assert 'ReflectionPatternAppliedDirectory' not in service
 assert '"OpenGlass", "Presets", "Pattern"' not in paths

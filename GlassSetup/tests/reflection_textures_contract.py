@@ -97,8 +97,8 @@ assert 'SpecialFolder.CommonApplicationData' in paths
 assert '"OpenGlass", "Presets", "Textured"' in paths
 assert 'var output = Publish(target);' in service
 assert 'PlatformPaths.ReflectionAppliedDirectory' in service
-assert service.index('Inventory(directory);') < service.index('File.Delete(file)')
-assert service.index('File.Delete(file)') < service.index('File.Copy(cachedImage, temporary')
+assert 'Inventory(directory)' not in service and 'File.Delete(file)' not in service
+assert 'profile.Key + ".png"' in service
 assert service.index('File.Copy(cachedImage, temporary') < service.index('File.Move(temporary, target', service.index('private static string Publish'))
 assert 'FileAttributes.ReparsePoint' in service
 assert 'Directory.Delete(directory' not in service
@@ -107,7 +107,7 @@ for language in ('ru-RU', 'en-US'):
     tree = ET.parse(ROOT / f'GlassSettings/Strings/{language}/Resources.resw')
     for key in ('Dialog_ReflectionPrepareFailedTitle', 'Dialog_ReflectionPrepareFailedBody'):
         assert tree.find(f"data[@name='{key}']/value").text
-print('PASS: ProgramData destination, cleanup before copying, localized failure UI')
+print('PASS: ProgramData destination, profile-preserving atomic copy, localized failure UI')
 
 control = (ROOT / 'GlassSettings/Controls/ReflectionImageTile.xaml.cs').read_text()
 assert 'ReflectionTextureService.CreatePreviewAsync(FilePath)' in control

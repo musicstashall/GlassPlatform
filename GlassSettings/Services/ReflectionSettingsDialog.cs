@@ -16,6 +16,9 @@ public static class ReflectionSettingsDialog
     public static async Task<ReflectionRenderSettings?> ShowAsync(string source)
     {
         System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] dialog: read settings");
+        string initialProfile = ReflectionDisplayProfile.Capture().Key;
+        HostedDialogHostContext? dialogContext = null;
+        bool displayChanged = false;
         var initial = ReflectionRenderState.Settings;
         var scale = Number("Reflection_SettingScale", 25, 200, initial.ScalePercent);
         System.Diagnostics.Debug.WriteLine("[ReflectionConfigure] dialog: create picker");
@@ -304,7 +307,14 @@ public static class ReflectionSettingsDialog
         var watcher = DesktopEnvironmentWatcher.Current;
         void OnDesktopChanged(object? sender, DesktopEnvironmentChangedEventArgs args)
         {
-            if (closed || (!args.AccentChanged && !args.ThemeChanged)) return;
+            if (closed) return;
+            if (args.DisplayChanged)
+            {
+                displayChanged = true;
+                dialogContext?.CloseDismissed(); // Never transfer a draft to another topology.
+                return;
+            }
+            if (!args.AccentChanged && !args.ThemeChanged) return;
             accentPreset.SwatchColor = WindowsPersonalizationService.ReadUserAccentColor();
             PopulateRecentColors();
         }
@@ -345,8 +355,14 @@ public static class ReflectionSettingsDialog
                 Title = GlassSettingsResources.Get("Reflection_Configure"), Body = HostedDialogLayout.WrapBodyWithContentPadding(layout),
                 MinWidth = Math.Min(480, dialogWidth), MaxWidth = dialogWidth, MaxHeight = 820,
                 Footer = HostedConfirmationDialogService.CreateCancelConfirmFooter(GlassSettingsResources.Get("CmdApply"))
+            }, context =>
+            {
+                dialogContext = context;
+                if (displayChanged || ReflectionDisplayProfile.Capture().Key != initialProfile)
+                    context.CloseDismissed();
             });
-            if (result == HostedDialogResult.Primary)
+            if (result == HostedDialogResult.Primary && !displayChanged
+                && ReflectionDisplayProfile.Capture().Key == initialProfile)
             {
                 uint appliedColor = picker.GetColorArgb();
                 if (!IsBuiltInColor(appliedColor))

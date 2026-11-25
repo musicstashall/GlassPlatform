@@ -1,13 +1,12 @@
 namespace GlassSettings.Services;
 
-using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.WindowsRuntime;
 using System.Security.Cryptography;
 using Microsoft.UI.Xaml.Media.Imaging;
 using GlassSettings.Core.Platform;
 using Windows.Graphics.Imaging;
 
-/// <summary>Renders PNG tiles/SVG to one published canvas; native tile pixels unless explicitly scaled.</summary>
+/// <summary>Renders PNG tiles/SVG to one published canvas per display profile; native tile pixels unless explicitly scaled.</summary>
 public static class ReflectionTextureService
 {
     private static readonly SemaphoreSlim Gate = new(1, 1);
@@ -31,7 +30,7 @@ public static class ReflectionTextureService
                 StringComparison.OrdinalIgnoreCase))?.FilePath ?? path;
     }
 
-    public static async Task<string> PrepareAsync(string source, ReflectionRenderSettings? settings = null)
+    public static async Task<string> PrepareAsync(string source, ReflectionRenderSettings? settings = null, string? expectedProfile = null)
     {
         // Resolve the current published canvas back to its recorded source.
         source = ResolveSource(source);
@@ -42,17 +41,24 @@ public static class ReflectionTextureService
         string? stagingDirectory = null;
         try
         {
-            int width = GetSystemMetrics(78), height = GetSystemMetrics(79);
+            var profile = ReflectionDisplayProfile.Capture();
+            if (expectedProfile is not null && expectedProfile != profile.Key)
+                throw new IOException("Display configuration changed; reopen reflection settings.");
+            int width = profile.Width, height = profile.Height;
             if (width <= 0 || height <= 0 || width > 16384 || height > 16384 ||
                 (long)width * height > 33554432)
                 throw new InvalidOperationException("Unsupported reflection canvas size.");
             var sourceHash = Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(source)));
+            var saved = ReflectionRenderState.Read();
+            if (saved is not null && saved.Profile == profile.Key && saved.Source == source && saved.SourceHash == sourceHash
+                && saved.Width == width && saved.Height == height && saved.Settings.Normalize() == settings)
+                return saved.Output;
             var png = await RenderConfiguredAsync(source, width, height, settings);
             if (sourceHash != Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(source))))
                 throw new IOException("Reflection source changed during generation.");
             var directory = Directory.CreateTempSubdirectory("GlassPlatform-Reflection-").FullName;
             stagingDirectory = directory;
-            var target = Path.Combine(directory, Path.GetFileName(Path.ChangeExtension(source, ".png")));
+            var target = Path.Combine(directory, profile.Key + ".png");
             var temporary = target + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
@@ -60,12 +66,24 @@ public static class ReflectionTextureService
                 File.Move(temporary, target, overwrite: true);
             }
             finally { if (File.Exists(temporary)) File.Delete(temporary); }
-            // Invalidate and save happen under the same generation gate as publication.
-            ReflectionRenderState.Invalidate();
-            var output = Publish(target);
-            ReflectionRenderState.Save(source, output, width, height, sourceHash,
-                Convert.ToHexString(SHA256.HashData(png)), settings);
-            return output;
+            // Cross-process exclusion with host reconcile; acquire/release on
+            // this thread only, after all asynchronous generation has completed.
+            using var publication = new Mutex(false, ReflectionDisplayProfile.PublicationMutex);
+            bool held;
+            try { held = publication.WaitOne(TimeSpan.FromSeconds(10)); }
+            catch (AbandonedMutexException) { held = true; }
+            if (!held) throw new IOException("Reflection profile publication is busy.");
+            try
+            {
+                if (ReflectionDisplayProfile.Capture().Key != profile.Key)
+                    throw new IOException("Display configuration changed during reflection generation.");
+                ReflectionRenderState.Invalidate(profile.Key);
+                var output = Publish(target);
+                ReflectionRenderState.Save(source, output, width, height, sourceHash,
+                    Convert.ToHexString(SHA256.HashData(png)), settings, profile.Key);
+                return output;
+            }
+            finally { publication.ReleaseMutex(); }
         }
         finally
         {
@@ -172,39 +190,21 @@ public static class ReflectionTextureService
 
     private static string Publish(string cachedImage)
     {
-        // Check the encoded size before removing the previous applied canvas.
+        // Check the encoded size before replacing this profile’s canvas.
         if (new FileInfo(cachedImage).Length is <= 0 or > 67108864)
             throw new InvalidOperationException("Reflection PNG exceeds the OpenGlass file size limit.");
         var directory = Path.GetFullPath(PlatformPaths.ReflectionAppliedDirectory);
         var target = Path.Combine(directory, Path.GetFileName(cachedImage));
         if (target.Length >= 260)
             throw new IOException("Reflection output path exceeds the OpenGlass MAX_PATH limit.");
-        // Never follow junctions/symlinks while cleaning a shared, writable directory.
+        // Never follow junctions/symlinks in a shared, writable directory.
         for (var parent = new DirectoryInfo(directory); parent is not null; parent = parent.Parent)
             if (parent.Exists && (parent.Attributes & FileAttributes.ReparsePoint) != 0)
                 throw new IOException("Reflection output directory must not be a reparse point.");
         Directory.CreateDirectory(directory);
-        var files = new List<string>();
-        var directories = new List<string>();
-        void Inventory(string path)
-        {
-            foreach (var entry in Directory.EnumerateFileSystemEntries(path))
-            {
-                var attributes = File.GetAttributes(entry);
-                if ((attributes & FileAttributes.ReparsePoint) != 0)
-                    throw new IOException("Reflection output contains a reparse point; cleanup refused.");
-                if ((attributes & FileAttributes.Directory) != 0)
-                {
-                    Inventory(entry);
-                    directories.Add(entry);
-                }
-                else files.Add(entry);
-            }
-        }
-        Inventory(directory);
-        // Only the selected generated category is cleaned; never Presets itself.
-        foreach (var file in files) File.Delete(file);
-        foreach (var child in directories) Directory.Delete(child);
+        // Other profiles own their own PNGs. Never inventory/delete them here.
+        if (File.Exists(target) && (File.GetAttributes(target) & FileAttributes.ReparsePoint) != 0)
+            throw new IOException("Reflection target must not be a reparse point.");
         var temporary = target + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
@@ -218,6 +218,4 @@ public static class ReflectionTextureService
         return target;
     }
 
-    [DllImport("user32.dll")]
-    private static extern int GetSystemMetrics(int index);
 }

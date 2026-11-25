@@ -10,7 +10,7 @@ dialog = (root / 'GlassSettings/Services/ReflectionSettingsDialog.cs').read_text
 assert 'Software\\StanislavKa\\GlassPlatform\\GlassSettings\\Textured' in state
 assert 'RegistryHive.CurrentUser' in state and 'RegistryValueKind.String' in state
 assert 'key.SetValue("State"' in state and 'SHA256.HashData(image)' in state
-assert service.index('ReflectionRenderState.Invalidate();') < service.index('var output = Publish(target);')
+assert service.index('ReflectionRenderState.Invalidate(profile.Key);') < service.index('var output = Publish(target);')
 assert service.index('var output = Publish(target);') < service.index('ReflectionRenderState.Save(')
 assert 'var directory = Path.GetFullPath(PlatformPaths.ReflectionAppliedDirectory);' in service
 assert 'if (!IsTexture(source) && !isSvg) return source;' in service
@@ -20,7 +20,7 @@ assert 'ReflectionPixelEffects.ApplyAlpha(pixels, width, height, settings, wrap:
 assert 'if (category != 1) return items;' in page
 assert '.Where(item => ReflectionCategory(item.FilePath) == category)' in page
 assert 'ReflectionSettingsDialog.ShowAsync(source)' in page
-assert 'if (settings is not null) await ApplyReflectionSourceAsync(source, settings)' in page
+assert 'if (settings is not null) await ApplyReflectionSourceAsync(source, settings, profile)' in page
 assert 'ReflectionRenderState.Save' not in dialog and 'WriteDwm' not in dialog
 assert 'source, texture ? width : preview.DesktopWidth,' in dialog
 assert 'texture ? height : preview.DesktopHeight, Values()' in dialog
@@ -120,7 +120,8 @@ assert 'GlassAlphaColorPicker' in dialog and 'IsAlphaVisible = true' in dialog
 assert 'ColorRgb' in state and 'Colorize(pixels, settings.ColorRgb)' in service
 assert 'Reflection_PresetDark' in dialog and 'Reflection_PresetLight' in dialog
 assert 'MaxWidth = dialogWidth' in dialog and 'Grid.SetColumn(pickerRail, 1)' in dialog
-assert 'EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, callback, IntPtr.Zero)' in desktop_preview
+assert 'ReflectionDisplayProfile.Capture()' in desktop_preview
+assert 'profile.Monitors.Select' in desktop_preview
 assert 'WallpaperPreviewCrossfade' in desktop_preview
 assert '_watcher.Changed += OnEnvironmentChanged' in desktop_preview
 assert '_watcher.Changed -= OnEnvironmentChanged' in desktop_preview
@@ -156,9 +157,10 @@ assert 'state.Source' in service and 'state.Output' in service
 print('PASS: only current publication resolves its explicit source; no legacy paths, filename aliases or color migration')
 
 assert 'var displays = DisplayArea.FindAll();' not in desktop_preview
-assert 'bounds.Add(new Windows.Graphics.RectInt32(rect.Left, rect.Top,' in desktop_preview
-assert 'rect.Right - rect.Left, rect.Bottom - rect.Top' in desktop_preview
-assert 'return bounds.ToArray();' in desktop_preview
+assert 'new Windows.Graphics.RectInt32(m.X, m.Y, m.Width, m.Height)' in desktop_preview
+native_profile = (root / 'GlassSettings/Native/ReflectionProfilesNative.cpp').read_text()
+assert 'EnumDisplayMonitors(nullptr, nullptr, Enumerate' in native_profile
+assert 'rect->right - rect->left, rect->bottom - rect->top' in native_profile
 print('PASS: monitor snapshot uses native full monitor rectangles, without WinRT DisplayArea calls')
 
 assert 'layers.Clip = new RectangleGeometry' in desktop_preview
@@ -245,7 +247,7 @@ print('PASS: neutral icon picker launcher stays last in unified grid, max four c
 pending_color = dialog[dialog.index('void UpdatePendingColor()'):dialog.index('void ApplyPreset')]
 assert 'recentValues.' not in pending_color and 'PopulateRecentColors()' not in pending_color
 assert 'UpdatePendingColor(); _ = RefreshAsync();' in pending_color
-apply_block = dialog[dialog.index('if (result == HostedDialogResult.Primary)'):dialog.index('return null;')]
+apply_block = dialog[dialog.index('if (result == HostedDialogResult.Primary'):dialog.index('return null;')]
 assert 'recentValues.Insert(0, appliedColor)' in apply_block
 assert 'ReflectionColorHistory.Save(recentValues, customColor)' in apply_block
 assert dialog.count('recentValues.Insert(0, appliedColor)') == 1
