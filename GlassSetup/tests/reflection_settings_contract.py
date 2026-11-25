@@ -272,17 +272,21 @@ print('PASS: live glass reuses session registry notifications, debounces/dedupli
 
 assert 'customPreset.Visibility = inline ? Visibility.Collapsed : Visibility.Visible' in dialog
 assert '.Where(item => item.Visibility == Visibility.Visible).ToArray()' in dialog
-assert 'Grid.SetRow(_desktopView, 1)' not in desktop_preview
-assert 'Margin = new Thickness(12)' in desktop_preview
+assert 'Grid.SetRow(frame, 1)' in desktop_preview
+assert 'Grid.SetRow(_sourceBadge, 0)' in desktop_preview
+assert 'Grid.SetRow(displayBadge, 2)' in desktop_preview
+assert 'Grid.SetRow(_loading, 1)' in desktop_preview
+assert '_sourceBadge.Opacity = 1' in desktop_preview
+assert 'Visibility = Visibility.Visible;' not in desktop_preview
 assert 'ReflectionDisplayProfile.GetDisplayNumber' in desktop_preview
-assert 'bool SharesVerticalEdge(' in desktop_preview and 'bool SharesHorizontalEdge(' in desktop_preview
-assert 'sharedLeft ? 0 : unit, sharedTop ? 0 : unit' in desktop_preview
-assert 'sharedRight ? 0 : unit, sharedBottom ? 0 : unit' in desktop_preview
-assert 'double gap = 5 * unit, halfStroke = unit / 2;' in desktop_preview
-assert 'monitor.X - left + gap + halfStroke' in desktop_preview
-assert 'CornerRadius = new CornerRadius(6 * unit)' in desktop_preview
+assert 'SharesVerticalEdge' not in desktop_preview and 'sharedLeft' not in desktop_preview
+assert 'BorderThickness = new Thickness(unit)' in desktop_preview
+assert 'Width = Math.Max(0, monitor.Width - inset * 2)' in desktop_preview
+assert 'double inset = Math.Max(6 * unit' in desktop_preview
+assert 'Canvas.SetLeft(outline, monitor.X - left + inset)' in desktop_preview
+assert 'CornerRadius = new CornerRadius(8 * unit)' in desktop_preview
 assert 'desktop.Children.Add(outline)' in desktop_preview
 assert 'public int MonitorCount => _bounds.Length' in desktop_preview
 assert 'public string ProfileKey { get; }' in desktop_preview
 assert 'MaxHeight = 280' in desktop_preview
-print('PASS: source name on the preview card, monitor outlines with system numbers, one reflection canvas, inline picker hides its launcher')
+print('PASS: labels in own rows, complete monitor frames with real gap and system numbers, one reflection canvas, inline picker hides its launcher')

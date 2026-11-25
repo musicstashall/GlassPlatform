@@ -26,7 +26,7 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
     {
         if (!_wallpaperReady || !_reflectionReady || _disposed) return;
         _desktopView.Opacity = 1;
-        _sourceBadge.Visibility = Visibility.Visible;
+        _sourceBadge.Opacity = 1;
         _loading.IsActive = false;
         _loading.Visibility = Visibility.Collapsed;
     }
@@ -56,33 +56,44 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
         var desktop = new Canvas { Width = DesktopWidth, Height = DesktopHeight };
         // Physical desktop coordinates are retained inside one proportionally scaled Viewbox.
         _desktopView = new Viewbox { Child = desktop, Stretch = Stretch.Uniform, MaxHeight = 280, Opacity = 0 };
-        Children.Add(new Border
+        // Labels occupy their own rows, so neither name nor resolution can ever
+        // sit on top of a monitor rectangle. Opacity (not Visibility) is toggled
+        // when ready, so the preview does not jump when the name appears.
+        RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var frame = new Border
         {
             Child = _desktopView, CornerRadius = new CornerRadius(10),
             BorderThickness = new Thickness(1),
             BorderBrush = (Brush)Application.Current.Resources["ControlStrongStrokeColorDefaultBrush"],
             Shadow = new ThemeShadow(), Translation = new System.Numerics.Vector3(0, 0, 16)
-        });
+        };
+        Grid.SetRow(frame, 1);
+        Children.Add(frame);
         _sourceBadge = new Border
         {
             Child = _sourceName, HorizontalAlignment = HorizontalAlignment.Left,
-            VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(12),
+            VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 0, 8),
             Padding = new Thickness(10, 4, 10, 4), CornerRadius = new CornerRadius(6),
             BorderThickness = new Thickness(1),
             Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"],
             BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"],
-            Visibility = Visibility.Collapsed, IsHitTestVisible = false
+            Opacity = 0, IsHitTestVisible = false
         };
+        Grid.SetRow(_sourceBadge, 0);
         Children.Add(_sourceBadge);
         var displayBadge = new Border
         {
-            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom,
-            Margin = new Thickness(12), Padding = new Thickness(6, 2, 6, 2), CornerRadius = new CornerRadius(4),
+            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 8, 0, 0), Padding = new Thickness(6, 2, 6, 2), CornerRadius = new CornerRadius(4),
             Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"],
             IsHitTestVisible = false, Opacity = .65,
             Child = new TextBlock { Text = profile.Label, FontSize = 10 }
         };
+        Grid.SetRow(displayBadge, 2);
         Children.Add(displayBadge);
+        Grid.SetRow(_loading, 1);
         Children.Add(_loading);
         Margin = new Thickness(8, 8, 8, 16);
         foreach (var monitor in bounds)
@@ -119,44 +130,18 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
             _wallpapers.Add(new WallpaperPreviewCrossfade(a, b, fallback));
         }
         double unit = Math.Max(1, DesktopWidth / 740.0);
-        // Frames follow the outer silhouette only. An edge shared with another
-        // monitor is not stroked, so one desktop picture has no internal divider.
-        bool SharesVerticalEdge(Windows.Graphics.RectInt32 a, Windows.Graphics.RectInt32 b) =>
-            (a.X + a.Width == b.X || b.X + b.Width == a.X)
-            && Math.Min(a.Y + a.Height, b.Y + b.Height) > Math.Max(a.Y, b.Y);
-        bool SharesHorizontalEdge(Windows.Graphics.RectInt32 a, Windows.Graphics.RectInt32 b) =>
-            (a.Y + a.Height == b.Y || b.Y + b.Height == a.Y)
-            && Math.Min(a.X + a.Width, b.X + b.Width) > Math.Max(a.X, b.X);
+        // Every monitor gets a complete rounded frame, shrunk inside its footprint
+        // so neighbouring frames keep a clear gap and no shared edge is collapsed
+        // into a divider. The inset is uniform, so the screen keeps its aspect.
+        double inset = Math.Max(6 * unit, bounds.Min(m => Math.Min(m.Width, m.Height)) * 0.045);
         for (int i = 0; i < bounds.Length; i++)
         {
             var monitor = bounds[i];
-            bool sharedLeft = false, sharedTop = false, sharedRight = false, sharedBottom = false;
-            for (int j = 0; j < bounds.Length; j++)
-            {
-                if (i == j) continue;
-                if (SharesVerticalEdge(monitor, bounds[j]))
-                {
-                    sharedLeft |= bounds[j].X < monitor.X;
-                    sharedRight |= bounds[j].X > monitor.X;
-                }
-                if (SharesHorizontalEdge(monitor, bounds[j]))
-                {
-                    sharedTop |= bounds[j].Y < monitor.Y;
-                    sharedBottom |= bounds[j].Y > monitor.Y;
-                }
-            }
-            // Keep a few inset DIPs inside the uniform-scaled Viewbox, so the
-            // outer stroke stays visible and the rounded looks/tuning are sane.
-            // Small visible gap between neighbouring frames; shared edges are inset
-            // in the canvas (not by padding cards), so wallpaper/reflection stay 1:1.
-            double gap = 5 * unit, halfStroke = unit / 2;
             var outline = new Border
             {
-                Width = Math.Max(0, monitor.Width - gap * 2), Height = Math.Max(0, monitor.Height - gap * 2),
-                CornerRadius = new CornerRadius(6 * unit),
-                BorderThickness = new Thickness(
-                    sharedLeft ? 0 : unit, sharedTop ? 0 : unit,
-                    sharedRight ? 0 : unit, sharedBottom ? 0 : unit),
+                Width = Math.Max(0, monitor.Width - inset * 2), Height = Math.Max(0, monitor.Height - inset * 2),
+                CornerRadius = new CornerRadius(8 * unit),
+                BorderThickness = new Thickness(unit),
                 BorderBrush = (Brush)Application.Current.Resources["ControlStrongStrokeColorDefaultBrush"],
                 IsHitTestVisible = false,
                 // Only the number gets a scrim: the wallpaper stays visible and the frame stays quiet.
@@ -173,8 +158,8 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
                     }
                 }
             };
-            Canvas.SetLeft(outline, monitor.X - left + gap + halfStroke);
-            Canvas.SetTop(outline, monitor.Y - top + gap + halfStroke);
+            Canvas.SetLeft(outline, monitor.X - left + inset);
+            Canvas.SetTop(outline, monitor.Y - top + inset);
             desktop.Children.Add(outline);
         }
         _watcher = DesktopEnvironmentWatcher.Current;
