@@ -19,6 +19,9 @@ wrapper = read('GlassSettings/Services/ReflectionDisplayProfile.cs')
 
 assert 'Snapshot' in api and 'monitors[32]' in api and 'key[128]' in api
 assert 'SizeConst = 32' in wrapper and 'SizeConst = 128' in wrapper
+assert 'ReflectionDisplayProfile.DisplayMonitor[] Monitors)' in wrapper
+assert 'internal struct DisplayMonitor' in wrapper and 'new DisplayMonitor[32]' in wrapper
+assert 'Monitor[] Monitors)' not in wrapper.replace('DisplayMonitor[] Monitors)', '')
 for export in ('CaptureReflectionProfile', 'SignalReflectionDisplayChange', 'TickReflectionProfiles'):
     assert f'GlassSettings_{export}V1' in native and f'GlassSettings_{export}V1' in host
 assert 'IsWow64Process' in host and '|| wow) return' in host
