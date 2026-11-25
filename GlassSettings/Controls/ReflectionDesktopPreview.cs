@@ -147,10 +147,12 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
             }
             // Keep a few inset DIPs inside the uniform-scaled Viewbox, so the
             // outer stroke stays visible and the rounded looks/tuning are sane.
-            double halfStroke = unit / 2;
+            // Small visible gap between neighbouring frames; shared edges are inset
+            // in the canvas (not by padding cards), so wallpaper/reflection stay 1:1.
+            double gap = 5 * unit, halfStroke = unit / 2;
             var outline = new Border
             {
-                Width = Math.Max(0, monitor.Width - unit), Height = Math.Max(0, monitor.Height - unit),
+                Width = Math.Max(0, monitor.Width - gap * 2), Height = Math.Max(0, monitor.Height - gap * 2),
                 CornerRadius = new CornerRadius(6 * unit),
                 BorderThickness = new Thickness(
                     sharedLeft ? 0 : unit, sharedTop ? 0 : unit,
@@ -171,8 +173,8 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
                     }
                 }
             };
-            Canvas.SetLeft(outline, monitor.X - left + halfStroke);
-            Canvas.SetTop(outline, monitor.Y - top + halfStroke);
+            Canvas.SetLeft(outline, monitor.X - left + gap + halfStroke);
+            Canvas.SetTop(outline, monitor.Y - top + gap + halfStroke);
             desktop.Children.Add(outline);
         }
         _watcher = DesktopEnvironmentWatcher.Current;

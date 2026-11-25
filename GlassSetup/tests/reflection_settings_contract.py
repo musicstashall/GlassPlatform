@@ -278,7 +278,8 @@ assert 'ReflectionDisplayProfile.GetDisplayNumber' in desktop_preview
 assert 'bool SharesVerticalEdge(' in desktop_preview and 'bool SharesHorizontalEdge(' in desktop_preview
 assert 'sharedLeft ? 0 : unit, sharedTop ? 0 : unit' in desktop_preview
 assert 'sharedRight ? 0 : unit, sharedBottom ? 0 : unit' in desktop_preview
-assert 'double halfStroke = unit / 2;' in desktop_preview
+assert 'double gap = 5 * unit, halfStroke = unit / 2;' in desktop_preview
+assert 'monitor.X - left + gap + halfStroke' in desktop_preview
 assert 'CornerRadius = new CornerRadius(6 * unit)' in desktop_preview
 assert 'desktop.Children.Add(outline)' in desktop_preview
 assert 'public int MonitorCount => _bounds.Length' in desktop_preview
