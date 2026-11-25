@@ -6,6 +6,8 @@
 
 См. также: [GlassSettings-development.md](GlassSettings-development.md), [GlassSettings-visual-styles.md](GlassSettings-visual-styles.md).
 
+> **2026-11-25.** Текущая цепочка «solid bootstrap + cloak + reveal-fade» признана костылём и ставится под вопрос: план отказа от неё (порядок запуска и объявление backdrop как в WinUI Gallery, корневая механика серого кадра по исходникам WinUI) — в [GlassSettings-startup-window-plan.md](GlassSettings-startup-window-plan.md). После его реализации разделы «Solid bootstrap + DWM cloak → splash-first show», «StartupSplashWindow + hidden MainWindow» и «Single-window splash на Main» считать *superseded* (оставлены как анти-паттерны), пункты матрицы #9/#12/#13/#16 закрыты сменой порядка запуска, а не состоянием окна.
+
 ---
 
 ## Исходное поведение (до экспериментов)
