@@ -267,7 +267,19 @@ namespace TaskbarCompat
             }
             if (vts && watcher)
             {
-                vts->UnadviseVisualTreeChange(static_cast<IVisualTreeServiceCallback*>(watcher));
+                const HRESULT hrUnadvise =
+                    vts->UnadviseVisualTreeChange(static_cast<IVisualTreeServiceCallback*>(watcher));
+                if (FAILED(hrUnadvise))
+                {
+                    // Callback мог остаться в LVT. Раньше HRESULT игнорировался, и
+                    // FreeLibrary давал AV на vtable watcher (дамп explorer.exe.11524).
+                    // Теперь watcher учтён в g_objectCount: пока XAML держит ссылку,
+                    // DllCanUnloadNow=S_FALSE и residual reclaim оставит образ mapped.
+                    DebugLog(
+                        DBG_CRITICAL,
+                        L"[TaskbarCompat][TapSite] UnadviseVisualTreeChange hr=0x%08X — watcher может остаться в LVT, модуль не выгружаем",
+                        static_cast<unsigned>(hrUnadvise));
+                }
             }
             if (vts)
                 vts->Release();
@@ -802,11 +814,14 @@ namespace TaskbarCompat
 
         {
             std::lock_guard lock(g_sessionMx);
-            if (g_activeWatcher)
+            // IsTapShutdownRequested: Stop мог пройти, пока мы спали в ретраях Advise.
+            // Публиковать g_activeWatcher после ShutdownActiveWatcher нельзя — сессию
+            // уже никто не снимет, и LVT останется с callback в выгружаемом образе.
+            if (g_activeWatcher || IsTapShutdownRequested())
             {
                 // Не DebugLog — AV pipe при старте (как на отказе вторичной сессии).
                 SafeOutputDebugStringW(
-                    L"[TaskbarCompat][TapSite] race: active watcher during Advise — Unadvise\n");
+                    L"[TaskbarCompat][TapSite] race: active watcher/shutdown during Advise — Unadvise\n");
                 (void)vts3->UnadviseVisualTreeChange(
                     static_cast<IVisualTreeServiceCallback*>(watcher));
                 vts3->Release();

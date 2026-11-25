@@ -19,12 +19,13 @@ namespace TaskbarCompatCom
 
 STDAPI DllCanUnloadNow()
 {
-    // После корректного TaskbarCompat_Shutdown разрешаем COM выгрузить DLL,
-    // даже если оболочка ещё держит IUnknown на TAP-объекте (Unadvise + RestoreAll
-    // уже сделаны, дальше всё — нейтральные ноль-вызовы).
-    if (TaskbarCompatCom::g_shutdownDone.load(std::memory_order_acquire))
-        return S_OK;
-
+    // Честный COM-контракт: пока оболочка/XAML держит ссылку на любой наш объект
+    // (TAP или VTC-watcher), образ обязан оставаться mapped. g_shutdownDone больше
+    // не форсирует S_OK: «нейтральные ноль-вызовы» в unmapped образе невозможны —
+    // при неудавшемся UnadviseVisualTreeChange LVT продолжает держать watcher, и
+    // следующий SignalMutation зовёт его vtable (дамп explorer.exe.11524:
+    // AddElementToLVT+0x2f6, чтение [rax+18h] в <Unloaded_TaskbarCompat.dll>).
+    // Остаток модуля после Stop лучше AV — см. anyModuleKept в GlassCompat.
     if (TaskbarCompatCom::g_serverLocks.load(std::memory_order_acquire) != 0)
         return S_FALSE;
     if (TaskbarCompatCom::g_objectCount.load(std::memory_order_acquire) != 0)

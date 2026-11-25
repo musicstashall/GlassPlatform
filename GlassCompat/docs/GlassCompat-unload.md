@@ -176,6 +176,7 @@ INCONTEXT всё равно загружает `GlassCompat.dll` в процес
 | Откат H58 с path=2 | BlockList снова держит Compat после Stop |
 | `g_hookInstalled=false` **до** DetachAll в WinEventHook_Shutdown | Очередной WinEvent subclass'ит новое окно после снятия snapshot → stale WndProc → `FAST_FAIL_GUARD_ICALL_CHECK_FAILURE` в CTray::_MessageLoop (Explorer.exe) |
 | UICompat: нет COM drain перед FreeLibrary | COM callback ссылается на выгруженную UICompat.dll → `c0000005` Access Violation в ShellHost.exe |
+| TaskbarCompat: VTC-watcher не учтён в `g_objectCount` + `g_shutdownDone` форсировал `DllCanUnloadNow=S_OK` | XAML LVT держит callback на watcher → после FreeLibrary/residual reclaim `AddElementToLVT` читает vtable в `<Unloaded_TaskbarCompat.dll>` → `c0000005` в explorer.exe (дамп 11524, 25.11.2026). Фикс: watcher в `g_objectCount`, честный `DllCanUnloadNow`, `anyModuleKept` при residual STILL LOADED |
 | FreeLibrary Toolhelp-зомби GlassCore без полного teardown (H60/H61) | Core «уходит», затем AV `<unknown>` / hang HWiNFO |
 
 ## HWiNFO (связанный баг Core, не ломать Compat)
