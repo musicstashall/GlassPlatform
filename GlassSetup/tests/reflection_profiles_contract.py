@@ -74,6 +74,7 @@ assert 'expectedProfile != profile.Key' in service
 assert 'args.DisplayChanged' in dialog and 'var replacement = new ReflectionDesktopPreview()' in dialog
 assert 'CloseDismissed()' not in dialog
 assert 'old.Dispose()' in dialog and 'preview.Dispose()' in dialog
+assert 'body.Children.Move((uint)body.Children.IndexOf(replacement), (uint)index)' in dialog
 assert '!ReferenceEquals(treeAtStart, previewTree)' in dialog
 assert 'initialProfile = replacement.ProfileKey' in dialog
 assert 'ReflectionDisplayProfile.Capture().Key == initialProfile' in dialog

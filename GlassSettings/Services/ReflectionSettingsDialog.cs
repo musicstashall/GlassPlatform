@@ -322,10 +322,12 @@ public static class ReflectionSettingsDialog
                     var replacement = new ReflectionDesktopPreview();
                     replacement.SetSourceLabel(Path.GetFileNameWithoutExtension(source));
                     var old = preview;
+                    if (!body.Children.Contains(old)) throw new InvalidOperationException("Desktop preview left the dialog.");
                     int index = body.Children.IndexOf(old);
-                    if (index < 0) throw new InvalidOperationException("Desktop preview left the dialog.");
-                    body.Children.RemoveAt(index);
-                    body.Children.Insert(index, replacement);
+                    // Placement must not depend on a ready bitmap: the old preview is
+                    // already visible, so the swap happens inside the same layout pass.
+                    body.Children.Add(replacement);
+                    body.Children.Move((uint)body.Children.IndexOf(replacement), (uint)index);
                     preview = replacement;
                     old.Dispose();
                     previewTree = new object(); // Invalidate decodes still in flight for the old tree.

@@ -283,10 +283,10 @@ assert 'SharesVerticalEdge' not in desktop_preview and 'sharedLeft' not in deskt
 assert 'BorderThickness = new Thickness(unit)' in desktop_preview
 assert 'Width = width, Height = height, CornerRadius = new CornerRadius(8 * unit)' in desktop_preview
 assert 'double inset = Math.Max(8 * unit' in desktop_preview
-assert 'Canvas.SetLeft(frame, monitor.X - left + inset)' in desktop_preview
+assert 'Canvas.SetLeft(monitorFrame, monitor.X - left + inset)' in desktop_preview
 # the previous per-side stripe implementation could border the seam; it is gone
 assert 'strokeWidth, strokeHeight, strokeX, strokeY' not in desktop_preview
-assert 'desktop.Children.Add(frame)' in desktop_preview
+assert 'desktop.Children.Add(monitorFrame)' in desktop_preview
 assert 'desktop.Children.Add(numberHost)' in desktop_preview
 assert 'public int MonitorCount => _bounds.Length' in desktop_preview
 assert 'public string ProfileKey { get; }' in desktop_preview

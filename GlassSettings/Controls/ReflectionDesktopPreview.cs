@@ -141,13 +141,13 @@ internal sealed class ReflectionDesktopPreview : Grid, IDisposable
         {
             var monitor = bounds[i];
             double width = Math.Max(1, monitor.Width - inset * 2), height = Math.Max(1, monitor.Height - inset * 2);
-            var frame = new Border
+            var monitorFrame = new Border
             {
                 Width = width, Height = height, CornerRadius = new CornerRadius(8 * unit),
                 BorderThickness = new Thickness(unit), BorderBrush = stroke, IsHitTestVisible = false
             };
-            Canvas.SetLeft(frame, monitor.X - left + inset); Canvas.SetTop(frame, monitor.Y - top + inset);
-            desktop.Children.Add(frame);
+            Canvas.SetLeft(monitorFrame, monitor.X - left + inset); Canvas.SetTop(monitorFrame, monitor.Y - top + inset);
+            desktop.Children.Add(monitorFrame);
             var number = new Border
             {
                 CornerRadius = new CornerRadius(10 * unit),
