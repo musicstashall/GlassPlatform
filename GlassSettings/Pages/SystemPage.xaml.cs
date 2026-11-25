@@ -236,6 +236,7 @@ public sealed partial class SystemPage : Page
             (Core.Registry.UpdateCheckInterval)UpdateIntervalCombo.SelectedIndex);
 
         _ = ProductUpdateCoordinator.RefreshGlassFromNetworkAsync();
+        _ = ProductUpdateCoordinator.RefreshSecureUxThemeFromNetworkAsync();
         if (OpenGlassUiPolicy.IsFeatureExposedInUi())
             _ = ProductUpdateCoordinator.RefreshOpenGlassFromNetworkAsync();
     }
@@ -359,6 +360,19 @@ public sealed partial class SystemPage : Page
                 SettingsNoticeSeverity.Warning,
                 ProductUpdateCoordinator.FormatGlassSystemNotice(pendingGlass, installedGlass),
                 GlassSettingsResources.Get("System_OpenGlassUpdateAction"),
+                animate: !PageShell.PageNoticeStack.ActionNotice.IsVisuallyOpen);
+            return;
+        }
+
+        if (ProductUpdateCoordinator.ShouldShowSecureUxThemeNotice
+            && ProductUpdateCoordinator.GetPendingSecureUxTheme() is { } pendingSecureUxTheme)
+        {
+            await PageShell.PageNoticeStack.ShowActionNoticeAsync(
+                SettingsNoticeSeverity.Warning,
+                ProductUpdateCoordinator.FormatSecureUxThemeSystemNotice(
+                    pendingSecureUxTheme,
+                    SecureUxThemeMsiService.TryReadInstalledVersion() ?? "—"),
+                GlassSettingsResources.Get("System_SecureUxThemeUpdateAction"),
                 animate: !PageShell.PageNoticeStack.ActionNotice.IsVisuallyOpen);
             return;
         }

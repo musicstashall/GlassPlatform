@@ -1753,7 +1753,9 @@ public sealed partial class HomePage : Page
                     && ProductUpdateCoordinator.ShouldShowOpenGlassNotice
                     && ProductUpdateCoordinator.GetPendingOpenGlass() is not null)
                 || (ProductUpdateCoordinator.ShouldShowGlassNotice
-                    && ProductUpdateCoordinator.GetPendingGlass() is not null);
+                    && ProductUpdateCoordinator.GetPendingGlass() is not null)
+                || (ProductUpdateCoordinator.ShouldShowSecureUxThemeNotice
+                    && ProductUpdateCoordinator.GetPendingSecureUxTheme() is not null);
             if (!showUpdateWhilePending)
             {
                 SyncSummaryFooterFromSession();
@@ -1799,6 +1801,17 @@ public sealed partial class HomePage : Page
                 installedGlass = "—";
             updateMessage = ProductUpdateCoordinator.FormatGlassNotice(pendingGlassNotice, installedGlass);
             updateActionText = GlassSettingsResources.Get("System_OpenGlassUpdateAction");
+            if (!animateUpdate)
+                animateUpdate = !UpdateNoticeStrip.IsVisuallyOpen;
+        }
+        else if (ProductUpdateCoordinator.ShouldShowSecureUxThemeNotice
+            && ProductUpdateCoordinator.GetPendingSecureUxTheme() is { } pendingSecureUxTheme)
+        {
+            showUpdate = true;
+            updateMessage = ProductUpdateCoordinator.FormatSecureUxThemeNotice(
+                pendingSecureUxTheme,
+                SecureUxThemeMsiService.TryReadInstalledVersion() ?? "—");
+            updateActionText = GlassSettingsResources.Get("System_SecureUxThemeUpdateAction");
             if (!animateUpdate)
                 animateUpdate = !UpdateNoticeStrip.IsVisuallyOpen;
         }

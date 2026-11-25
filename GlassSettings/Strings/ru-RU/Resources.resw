@@ -665,6 +665,17 @@
   <data name="Home_GlassUpdateNotice" xml:space="preserve"><value>Доступна новая версия Glass {0}. Установлена: {1}.</value></data>
   <data name="Home_GlassUpdateSummary" xml:space="preserve"><value>Доступны обновления установленных продуктов Glass: {0}.</value></data>
   <data name="Home_GlassUpdateLinkSummary" xml:space="preserve"><value>Обновления: {0}</value></data>
+  <data name="GlassUpdate_Name_Bundle" xml:space="preserve"><value>GlassPlatform</value></data>
+  <data name="GlassUpdate_Name_Settings" xml:space="preserve"><value>GlassSettings</value></data>
+  <data name="GlassUpdate_Name_Resources" xml:space="preserve"><value>OpenGlass Resources</value></data>
+  <data name="GlassUpdate_ProductEntryFormat" xml:space="preserve"><value>{0} {1}</value></data>
+  <data name="Home_GlassBundleUpdateNotice" xml:space="preserve"><value>Доступна новая версия комплекта GlassPlatform {0}. Установлена: {1}.</value></data>
+  <data name="Home_GlassProductUpdateNotice" xml:space="preserve"><value>Доступна новая версия продукта {0} {1}. Установлена: {2}.</value></data>
+  <data name="Home_GlassProductUpdateSummary" xml:space="preserve"><value>Доступны новые версии продуктов: {0}.</value></data>
+  <data name="Home_GlassBundleUpdateLinkFormat" xml:space="preserve"><value>Новая версия комплекта {0}</value></data>
+  <data name="Home_GlassProductUpdateLinkFormat" xml:space="preserve"><value>Новая версия {0} {1}</value></data>
+  <data name="Home_SecureUxThemeUpdateNotice" xml:space="preserve"><value>Доступна новая версия SecureUxTheme {0}. Установлена: {1}.</value></data>
+  <data name="Home_SecureUxThemeUpdateLinkFormat" xml:space="preserve"><value>Новая версия SecureUxTheme {0}</value></data>
   <data name="Home_OpenGlassRepairNotice" xml:space="preserve"><value>Сборка Windows изменилась. OpenGlass нужно переустановить для текущего DWM. Версия канала: {0}.</value></data>
   <data name="Home_OpenGlassRepairLink" xml:space="preserve"><value>Переустановка {0}</value></data>
   <data name="Home_RowPopupWindows" xml:space="preserve"><value>Popup-окна</value></data>
@@ -782,6 +793,14 @@
   <data name="System_GlassUpdateTitle" xml:space="preserve"><value>Доступна новая версия Glass {0}. Установлена: {1}.</value></data>
   <data name="System_GlassUpdateSummary" xml:space="preserve"><value>Доступны обновления установленных продуктов Glass: {0}.</value></data>
   <data name="System_GlassUpdateSpoilerSummary" xml:space="preserve"><value>Доступны обновления: {0}</value></data>
+  <data name="System_GlassBundleUpdateTitle" xml:space="preserve"><value>Доступна новая версия комплекта GlassPlatform {0}. Установлена: {1}.</value></data>
+  <data name="System_GlassProductUpdateTitle" xml:space="preserve"><value>Доступна новая версия продукта {0} {1}. Установлена: {2}.</value></data>
+  <data name="System_GlassProductUpdateSummary" xml:space="preserve"><value>Доступны новые версии продуктов: {0}.</value></data>
+  <data name="System_GlassBundleUpdateSpoilerFormat" xml:space="preserve"><value>Доступна новая версия комплекта {0}</value></data>
+  <data name="System_GlassProductUpdateSpoilerFormat" xml:space="preserve"><value>Доступна новая версия {0} {1}</value></data>
+  <data name="System_SecureUxThemeUpdateTitle" xml:space="preserve"><value>Доступна новая версия SecureUxTheme {0}. Установлена: {1}.</value></data>
+  <data name="System_SecureUxThemeUpdateSpoilerFormat" xml:space="preserve"><value>Доступна новая версия SecureUxTheme {0}</value></data>
+  <data name="System_SecureUxThemeUpdateAction" xml:space="preserve"><value>Открыть страницу релиза</value></data>
   <data name="System_OpenGlassRepairTitle" xml:space="preserve"><value>Сборка Windows изменилась. OpenGlass нужно переустановить для текущего DWM. Версия канала: {0}.</value></data>
   <data name="System_OpenGlassRepairSpoiler" xml:space="preserve"><value>Нужна переустановка OpenGlass ({0})</value></data>
   <data name="System_OpenGlassUpdateMessage" xml:space="preserve"><value>Рекомендуется обновить библиотеку OpenGlass до последнего legacy-релиза.</value></data>
@@ -995,6 +1014,7 @@
   <data name="Themes_Empty" xml:space="preserve"><value>Темы не найдены</value></data>
   <data name="Themes_FindOnline" xml:space="preserve"><value>Найти другие темы в интернете</value></data>
   <data name="Themes_SecureUxThemeOnlineLink" xml:space="preserve"><value>SecureUxTheme в интернете</value></data>
+  <data name="Themes_SecureUxThemeOnlineUpdateFormat" xml:space="preserve"><value>SecureUxTheme в интернете — новая версия {0}</value></data>
   <data name="Themes_OtherLabel" xml:space="preserve"><value>Другое</value></data>
   <data name="Themes_PageSubtitle" xml:space="preserve"><value>Выберите тему оформления Windows</value></data>
   <data name="Themes_SectionDesc" xml:space="preserve"><value>Выберите сочетание обоев, звуков и цветов, чтобы сделать свой рабочий стол более личным</value></data>

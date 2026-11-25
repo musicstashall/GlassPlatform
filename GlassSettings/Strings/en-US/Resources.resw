@@ -659,6 +659,17 @@
   <data name="Home_GlassUpdateNotice" xml:space="preserve"><value>A new Glass version {0} is available. Installed: {1}.</value></data>
   <data name="Home_GlassUpdateSummary" xml:space="preserve"><value>Updates are available for the installed Glass products: {0}.</value></data>
   <data name="Home_GlassUpdateLinkSummary" xml:space="preserve"><value>Updates: {0}</value></data>
+  <data name="GlassUpdate_Name_Bundle" xml:space="preserve"><value>GlassPlatform</value></data>
+  <data name="GlassUpdate_Name_Settings" xml:space="preserve"><value>GlassSettings</value></data>
+  <data name="GlassUpdate_Name_Resources" xml:space="preserve"><value>OpenGlass Resources</value></data>
+  <data name="GlassUpdate_ProductEntryFormat" xml:space="preserve"><value>{0} {1}</value></data>
+  <data name="Home_GlassBundleUpdateNotice" xml:space="preserve"><value>A new GlassPlatform bundle version {0} is available. Installed: {1}.</value></data>
+  <data name="Home_GlassProductUpdateNotice" xml:space="preserve"><value>A new version of {0} {1} is available. Installed: {2}.</value></data>
+  <data name="Home_GlassProductUpdateSummary" xml:space="preserve"><value>New versions of these products are available: {0}.</value></data>
+  <data name="Home_GlassBundleUpdateLinkFormat" xml:space="preserve"><value>New bundle version {0}</value></data>
+  <data name="Home_GlassProductUpdateLinkFormat" xml:space="preserve"><value>New version of {0} {1}</value></data>
+  <data name="Home_SecureUxThemeUpdateNotice" xml:space="preserve"><value>A new SecureUxTheme version {0} is available. Installed: {1}.</value></data>
+  <data name="Home_SecureUxThemeUpdateLinkFormat" xml:space="preserve"><value>New SecureUxTheme version {0}</value></data>
   <data name="Home_OpenGlassRepairNotice" xml:space="preserve"><value>The Windows build changed. OpenGlass needs to be reinstalled for the current DWM. Channel version: {0}.</value></data>
   <data name="Home_OpenGlassRepairLink" xml:space="preserve"><value>Reinstall {0}</value></data>
   <data name="Home_RowPopupWindows" xml:space="preserve"><value>Popup windows</value></data>
@@ -777,6 +788,14 @@
   <data name="System_GlassUpdateTitle" xml:space="preserve"><value>A new Glass version {0} is available. Installed: {1}.</value></data>
   <data name="System_GlassUpdateSummary" xml:space="preserve"><value>Updates are available for the installed Glass products: {0}.</value></data>
   <data name="System_GlassUpdateSpoilerSummary" xml:space="preserve"><value>Updates available: {0}</value></data>
+  <data name="System_GlassBundleUpdateTitle" xml:space="preserve"><value>A new GlassPlatform bundle version {0} is available. Installed: {1}.</value></data>
+  <data name="System_GlassProductUpdateTitle" xml:space="preserve"><value>A new version of {0} {1} is available. Installed: {2}.</value></data>
+  <data name="System_GlassProductUpdateSummary" xml:space="preserve"><value>New versions of these products are available: {0}.</value></data>
+  <data name="System_GlassBundleUpdateSpoilerFormat" xml:space="preserve"><value>New bundle version {0} available</value></data>
+  <data name="System_GlassProductUpdateSpoilerFormat" xml:space="preserve"><value>New version of {0} {1} available</value></data>
+  <data name="System_SecureUxThemeUpdateTitle" xml:space="preserve"><value>A new SecureUxTheme version {0} is available. Installed: {1}.</value></data>
+  <data name="System_SecureUxThemeUpdateSpoilerFormat" xml:space="preserve"><value>New SecureUxTheme version {0} available</value></data>
+  <data name="System_SecureUxThemeUpdateAction" xml:space="preserve"><value>Open release page</value></data>
   <data name="System_OpenGlassRepairTitle" xml:space="preserve"><value>The Windows build changed. OpenGlass needs to be reinstalled for the current DWM. Channel version: {0}.</value></data>
   <data name="System_OpenGlassRepairSpoiler" xml:space="preserve"><value>OpenGlass needs to be reinstalled ({0})</value></data>
   <data name="System_OpenGlassUpdateMessage" xml:space="preserve"><value>Consider updating OpenGlass to the latest legacy release.</value></data>
@@ -990,6 +1009,7 @@
   <data name="Themes_Empty" xml:space="preserve"><value>No themes found</value></data>
   <data name="Themes_FindOnline" xml:space="preserve"><value>Find more themes online</value></data>
   <data name="Themes_SecureUxThemeOnlineLink" xml:space="preserve"><value>SecureUxTheme online</value></data>
+  <data name="Themes_SecureUxThemeOnlineUpdateFormat" xml:space="preserve"><value>SecureUxTheme online — new version {0}</value></data>
   <data name="Themes_OtherLabel" xml:space="preserve"><value>Other</value></data>
   <data name="Themes_PageSubtitle" xml:space="preserve"><value>Choose a Windows theme</value></data>
   <data name="Themes_SectionDesc" xml:space="preserve"><value>Choose a combination of wallpapers, sounds, and colors to personalize your desktop</value></data>

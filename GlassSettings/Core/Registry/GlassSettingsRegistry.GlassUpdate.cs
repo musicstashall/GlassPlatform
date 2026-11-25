@@ -74,6 +74,23 @@ public static partial class GlassSettingsRegistry
     public static string? ReadGlassUpdateDismissedOffers() =>
         ReadString(GlassUpdateDismissedOffersValue);
 
+    /// <summary>
+    /// Закрываем только видимые токены: скрытый обновлением комплекта продукт должен
+    /// появиться после установки комплекта, даже если комплект был закрыт крестиком.
+    /// </summary>
+    public static void WriteGlassUpdateDismissedOffers(IEnumerable<string> tokens)
+    {
+        var merged = new HashSet<string>(SplitOfferTokens(ReadGlassUpdateDismissedOffers()), StringComparer.OrdinalIgnoreCase);
+        foreach (var token in tokens)
+        {
+            if (!string.IsNullOrWhiteSpace(token))
+                merged.Add(token.Trim());
+        }
+
+        GlassRegistry.WriteString(SubKey, GlassUpdateDismissedOffersValue,
+            string.Join(';', merged.OrderBy(token => token, StringComparer.OrdinalIgnoreCase)));
+    }
+
     public static void WriteGlassUpdateNoticeDismissedVersion(string version) =>
         GlassRegistry.WriteString(SubKey, GlassUpdateNoticeDismissedVersionValue, version);
 
