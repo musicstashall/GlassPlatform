@@ -171,7 +171,13 @@ namespace
             auto active = ReadString(dwm.value, L"CustomThemeReflection");
             DWORD managed = 0, bytes = sizeof(managed);
             RegGetValueW(root.value, nullptr, L"Managed", RRF_RT_REG_DWORD, nullptr, &managed, &bytes);
-            if (!managed || _wcsicmp(active.c_str(), owned.c_str()))
+            // Adopt a ready canvas of the current topology when the last explicit
+            // selection was ours: after a topology change that happened while the
+            // platform was not observing, the applied value is empty or belongs to a
+            // previous profile. An external image is still never replaced.
+            const bool adopt = managed != 0
+                && (active.empty() || _wcsicmp(active.c_str(), owned.c_str()) != 0);
+            if (!adopt)
             {
                 DebugLog(DBG_IMPORTANT, L"[GlassSettings][ReflectionProfiles] skip unmanaged: Managed=%lu active=%ls owned=%ls",
                     managed, active.c_str(), owned.c_str());

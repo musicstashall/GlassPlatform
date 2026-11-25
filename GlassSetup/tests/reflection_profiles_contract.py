@@ -55,7 +55,8 @@ assert 'GetTickCount64() + 750' in native
 assert 'SetThreadDpiAwarenessContext' in native and 'GetDpiForMonitor' in native
 assert 'm.x -= left; m.y -= top;' in native
 assert 'm.dpiX, m.dpiY' in native and 'std::sort' in native
-assert 'if (!managed || _wcsicmp(active.c_str(), owned.c_str()))' in native
+assert 'const bool adopt = managed != 0' in native
+assert 'if (!adopt)' in native
 assert 'RegDeleteValueW(dwm.value, L"CustomThemeReflection")' in native
 assert 'ValidHash(candidate,' in native and 'integer(16) == DWORD(width)' in native
 assert 'FindWindowW(L"Dwm", nullptr)' in native and 'PostMessageW(window, WM_THEMECHANGED' in native
@@ -124,3 +125,19 @@ assert 'CaptureDwmKeySubset([name], DwmRegistryHive.Hkcu)' in snapshot
 assert 'ReconcileScopeDirtyFlags();' in session
 assert 'Save(' not in snapshot[snapshot.index('internal bool AcceptAutomaticReflectionBaseline'):snapshot.index('internal bool AcceptAutomaticReflectionBaseline') + 700]
 print('PASS: live dialog re-layout preserves draft, single reflection canvas and targeted automatic path baseline reconciliation')
+
+state = read('GlassSettings/Services/ReflectionRenderSettings.cs')
+assert 'public static State? ReadReadyProfile()' in state
+assert 'public static bool AdoptReadyProfile(string profile)' in state
+assert 'PlatformPaths.ReflectionAppliedDirectory' in state
+assert 'MarkManaged(state.Output, notify: false)' in state
+assert 'RestoreReadyReflectionProfile();' in page
+assert 'ReflectionRenderState.IsManagedOutput(active)' in page
+assert 'ReflectionDisplayProfile.PublicationMutex' in page
+print('PASS: startup restores a verified ready canvas for the current topology without replacing external selections')
+
+native = read('GlassSettings/Native/ReflectionProfilesNative.cpp')
+assert 'const bool adopt = managed != 0' in native
+assert '(active.empty() || _wcsicmp(active.c_str(), owned.c_str()) != 0)' in native
+assert '_wcsicmp(active.c_str(), output.c_str())' in native
+print('PASS: platform startup adopts the ready canvas only when the last selection was managed')

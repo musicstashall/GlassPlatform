@@ -356,6 +356,10 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         LoadReflectionImages();
         LoadMaterialImages();
         LoadAtlasImages();
+        // A topology change can happen while neither the platform nor this page runs.
+        // Then the applied value points at a canvas of a previous profile, so restore
+        // the ready canvas published for the current one before reading the selection.
+        RestoreReadyReflectionProfile();
         Reload();
         _lastPivotIndex = ActivePivot.SelectedIndex;
         DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, UpdateHeroLayout);
@@ -429,6 +433,46 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
 
         if (e.WallpaperChanged)
             ScheduleWallpaperLayerRefresh();
+    }
+
+    /// <summary>
+    /// Startup/open path: adopt the ready canvas of the current topology when the
+    /// applied value is our own managed output of a different profile. External or
+    /// default selections are left alone, and nothing is generated here.
+    /// </summary>
+    private void RestoreReadyReflectionProfile()
+    {
+        if (_hive != DwmRegistryHive.Hkcu) return;
+        var active = DwmRegistryStore.ReadString(_hive, ReflectionRegistryKey);
+        if (!ReflectionRenderState.IsManagedOutput(active)) return;
+        var ready = ReflectionRenderState.ReadReadyProfile();
+        if (ready is null || SamePath(ready.Output, active)) return;
+        try
+        {
+            using var publication = new Mutex(false, ReflectionDisplayProfile.PublicationMutex);
+            bool held;
+            try { held = publication.WaitOne(TimeSpan.FromSeconds(10)); }
+            catch (AbandonedMutexException) { held = true; }
+            if (!held) return;
+            try
+            {
+                string profile = ReflectionDisplayProfile.Capture().Key;
+                if (ReflectionRenderState.AdoptReadyProfile(profile))
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        $"[ReflectionConfigure] startup: restored ready profile={profile}");
+                    // Match a normal selection: the session baseline follows the
+                    // value we just restored, so no unsaved edit is implied.
+                    SettingsSession.Current.SyncScopeBaseline(
+                        DwmThemeScopeCatalog.ReflectionCollectionScope());
+                }
+            }
+            finally { publication.ReleaseMutex(); }
+        }
+        catch (Exception error)
+        {
+            System.Diagnostics.Trace.TraceWarning("Reflection profile restore: {0}", error);
+        }
     }
 
     private async Task RebindReflectionToDisplayAsync()
