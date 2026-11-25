@@ -133,6 +133,11 @@ void XamlVisualTreeWatcher::PrimeExplorerIslandsAttachPulse() noexcept
 
 XamlVisualTreeWatcher::XamlVisualTreeWatcher(IXamlDiagnostics* diagnostics) noexcept
 {
+    // COM-ссылка LVT на watcher обязана быть видна DllCanUnloadNow и
+    // ExplorerCompat_DebugComState: иначе XAML может продолжить вызывать vtable
+    // после выгрузки ExplorerCompat (тот же UAF-контракт, что у TaskbarCompat).
+    GlassExplorerCom::g_objectCount.fetch_add(1, std::memory_order_relaxed);
+
     m_xamlDiagnostics = diagnostics;
     if (m_xamlDiagnostics)
         m_xamlDiagnostics->AddRef();
@@ -171,7 +176,10 @@ ULONG STDMETHODCALLTYPE XamlVisualTreeWatcher::Release() noexcept
 {
     const ULONG c = m_ref.fetch_sub(1, std::memory_order_acq_rel) - 1;
     if (c == 0)
+    {
+        GlassExplorerCom::g_objectCount.fetch_sub(1, std::memory_order_relaxed);
         delete this;
+    }
     return c;
 }
 

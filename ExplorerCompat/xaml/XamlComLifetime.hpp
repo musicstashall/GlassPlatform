@@ -7,7 +7,8 @@ namespace GlassExplorerCom
 {
     extern std::atomic<long> g_objectCount;
     extern std::atomic<long> g_serverLocks;
-    // После корректного завершения XAML Diagnostics разрешаем DllCanUnloadNow=S_OK,
-    // даже если WinUI удерживает IUnknown на TAP-объекте (все коллбэки нейтрализованы).
+    // Гейт новой работы после ExplorerCompat_StopXamlDiagnostics (SetSite/ретраи).
+    // DllCanUnloadNow его не учитывает: живая ссылка, включая LVT-watcher,
+    // обязана удерживать образ mapped до финального Release.
     extern std::atomic<bool> g_shutdownDone;
 }

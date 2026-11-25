@@ -8,8 +8,8 @@ namespace UICompatCom
     extern std::atomic<long> g_objectCount;
     extern std::atomic<long> g_serverLocks;
 
-    // После корректного UICompat_Shutdown разрешаем COM выгрузить DLL,
-    // даже если WinUI/UWP оболочка удерживает IUnknown на TAP-объекте
-    // (все коллбэки нейтрализованы Unadvise + RestoreAll).
+    // Гейт новой работы после UICompat_StopXamlDiagnostics (SetSite/ретраи).
+    // DllCanUnloadNow его не учитывает: живая ссылка, включая LVT-watcher,
+    // обязана удерживать образ mapped до финального Release.
     extern std::atomic<bool> g_shutdownDone;
 }
