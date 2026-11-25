@@ -17,7 +17,11 @@ const {pathToFileURL}=require('node:url');
   await page.goto(pathToFileURL(path.resolve(__dirname,'../res/slideshow.html')).href);
   const detail=page.locator('#error-detail'),menu=page.getByRole('menu'),command=page.getByRole('menuitem');
   for(const [locale,appMode,caption] of [['ru','setup','Копировать'],['en','unins','Copy']]){
-   await page.evaluate(({locale,appMode})=>window.receive({data:{type:'state',page:'error',locale,appMode,errorReason:'Test error detail\nSecond line'}}),{locale,appMode});
+   const resourceCaption=`${caption} · ${appMode}`;
+   await page.evaluate(({locale,appMode,resourceCaption})=>{
+    window.receive({data:{type:'init',locale,appMode,ui:{errorCopy:resourceCaption}}});
+    window.receive({data:{type:'state',page:'error',errorReason:'Test error detail\nSecond line'}});
+   },{locale,appMode,resourceCaption});
    await detail.waitFor({state:'visible'});
    assert.equal(await detail.evaluate(e=>getComputedStyle(e).userSelect),'text');
    await detail.evaluate(e=>{
@@ -33,7 +37,7 @@ const {pathToFileURL}=require('node:url');
    await detail.click({button:'right',position:{x:10,y:6}});
    await menu.waitFor({state:'visible'});
    assert.equal(await command.count(),1);
-   assert.equal(await command.textContent(),caption);
+   assert.equal(await command.textContent(),resourceCaption);
    await command.click();
    assert.deepEqual(await page.evaluate(()=>window.copies.splice(0)),['Test error','Test error']);
    assert.equal(await menu.isVisible(),false);

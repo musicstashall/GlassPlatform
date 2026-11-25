@@ -8,7 +8,7 @@
 
 namespace WizardUi {
 namespace {
-LRESULT CALLBACK ErrorEditProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l, UINT_PTR id, DWORD_PTR russian) noexcept {
+LRESULT CALLBACK ErrorEditProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l, UINT_PTR id, DWORD_PTR caption) noexcept {
     if (msg == WM_NCDESTROY) RemoveWindowSubclass(hwnd, ErrorEditProc, id);
     if (msg == WM_CONTEXTMENU) {
         DWORD start = 0, end = 0;
@@ -20,7 +20,7 @@ LRESULT CALLBACK ErrorEditProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l, UINT_PTR
         }
         if (HMENU menu = CreatePopupMenu()) {
             AppendMenuW(menu, MF_STRING | (start == end ? MF_GRAYED : MF_ENABLED), 1,
-                russian ? L"Копировать" : L"Copy");
+                reinterpret_cast<const wchar_t*>(caption));
             if (TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
                 point.x, point.y, 0, hwnd, nullptr) == 1) SendMessageW(hwnd, WM_COPY, 0, 0);
             DestroyMenu(menu);
@@ -81,11 +81,27 @@ void DrawLoadingSpinner(HDC dc, UINT dpi, bool animate) noexcept {
     draw(RGB(193,180,255), -90 + phase * 360, 268);
 }
 
-void ErrorDetails::Create(HWND parent, HINSTANCE instance, bool russian) noexcept {
+std::wstring LoadText(HINSTANCE instance, LANGID language, UINT id) {
+    // Явно выбираем язык мастера, а не язык потока или системный порядок поиска.
+    const auto block = MAKEINTRESOURCEW((id >> 4) + 1);
+    HRSRC resource = FindResourceExW(instance, RT_STRING, block, language);
+    if (!resource) resource = FindResourceExW(instance, RT_STRING, block,
+        MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US));
+    if (!resource) return {};
+    const auto data = static_cast<const WORD*>(LockResource(LoadResource(instance, resource)));
+    if (!data) return {};
+    const WORD* entry = data;
+    for (UINT i = 0; i < (id & 15); ++i) entry += 1 + *entry;
+    return std::wstring(reinterpret_cast<const wchar_t*>(entry + 1), *entry);
+}
+
+void ErrorDetails::Create(HWND parent, HINSTANCE instance, LANGID language) {
+    if (edit_) return;
+    copyCaption_ = LoadText(instance, language, IDS_COPY);
     edit_ = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_TABSTOP | WS_VSCROLL |
         ES_LEFT | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | ES_NOHIDESEL,
         0, 0, 0, 0, parent, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_ERROR_DETAILS)), instance, nullptr);
-    if (edit_ && !SetWindowSubclass(edit_, ErrorEditProc, 1, russian)) {
+    if (edit_ && !SetWindowSubclass(edit_, ErrorEditProc, 1, reinterpret_cast<DWORD_PTR>(copyCaption_.c_str()))) {
         DestroyWindow(edit_);
         edit_ = nullptr;
     }

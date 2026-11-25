@@ -55,6 +55,7 @@ LANGID gLanguage=MAKELANGID(LANG_ENGLISH,SUBLANG_ENGLISH_US);
 
 bool IsRu() noexcept { return PRIMARYLANGID(gLanguage)==LANG_RUSSIAN; }
 const wchar_t* T(const wchar_t* ru, const wchar_t* en) noexcept { return IsRu()?ru:en; }
+std::wstring Text(UINT id) { return WizardUi::LoadText(gInstance,gLanguage,id); }
 std::wstring Q(const std::wstring& text) { return L"\""+WizardTheme::JsonEscape(text)+L"\""; }
 
 void LogLine(const std::wstring& line) noexcept {
@@ -476,14 +477,14 @@ private:
         gate_=CreateEventW(nullptr,TRUE,FALSE,nullptr);
         back_=Button(T(L"Выбрать всё",L"Select all"),kSelectAll);
         next_=Button(T(L"Удалить",L"Remove"),IDC_NEXT);
-        cancel_=Button(T(L"Отмена",L"Cancel"),IDC_CANCEL);
-        check_[0]=Button(L"Glass Platform x64",IDC_COMPONENT64,BS_AUTOCHECKBOX);
-        check_[1]=Button(L"Glass Platform x86",IDC_COMPONENT32,BS_AUTOCHECKBOX);
-        check_[2]=Button(L"GlassSettings x64",IDC_COMPONENT_SETTINGS,BS_AUTOCHECKBOX);
-        check_[6]=Button(L"GlassSettings x86",kSettings32,BS_AUTOCHECKBOX);
-        check_[3]=Button(L"OpenGlass",IDC_COMPONENT_OG,BS_AUTOCHECKBOX);
+        cancel_=Button(Text(IDS_CANCEL).c_str(),IDC_CANCEL);
+        check_[0]=Button(Text(IDS_COMP_P64_TITLE).c_str(),IDC_COMPONENT64,BS_AUTOCHECKBOX);
+        check_[1]=Button(Text(IDS_COMP_P32_TITLE).c_str(),IDC_COMPONENT32,BS_AUTOCHECKBOX);
+        check_[2]=Button(Text(IDS_COMP_GS64_TITLE).c_str(),IDC_COMPONENT_SETTINGS,BS_AUTOCHECKBOX);
+        check_[6]=Button(Text(IDS_COMP_GS32_TITLE).c_str(),kSettings32,BS_AUTOCHECKBOX);
+        check_[3]=Button(Text(IDS_COMP_OG_TITLE).c_str(),IDC_COMPONENT_OG,BS_AUTOCHECKBOX);
         check_[4]=Button(T(L"Удалить настройки и пользовательские данные",L"Remove settings and user data"),IDC_UNINS_SETTINGS_CLEANUP,BS_AUTOCHECKBOX);
-        check_[5]=Button(L"SecureUxTheme",IDC_UNINS_SECUREUXTHEME,BS_AUTOCHECKBOX);
+        check_[5]=Button(Text(IDS_COMP_SUT_TITLE).c_str(),IDC_UNINS_SECUREUXTHEME,BS_AUTOCHECKBOX);
         webHost_=CreateWindowExW(WS_EX_CONTROLPARENT,L"STATIC",L"",WS_CHILD|WS_CLIPCHILDREN|WS_CLIPSIBLINGS,
             0,0,0,0,window,reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_WEBHOST)),gInstance,nullptr);
         errorDetails_.Create(window,gInstance,IsRu());
@@ -581,7 +582,7 @@ private:
         std::wstring json=L"[";
         const bool os64=GlassInstallUtil::IsOs64Bit();
         const auto preview=SelectionPreview();
-        auto add=[&](const wchar_t* id,const wchar_t* title,const wchar_t* detail,bool checked,bool available,bool locked) {
+        auto add=[&](const wchar_t* id,const std::wstring& title,const std::wstring& detail,bool checked,bool available,bool locked) {
             if (json.size()>1) json+=L",";
             const std::wstring badge=locked?T(L"ЗАВИСИМОСТЬ",L"DEPENDENT"):T(L"УСТАНОВЛЕНО",L"INSTALLED");
             // Строка «что будет выполнено» — по фактическим действиям удаления;
@@ -590,7 +591,9 @@ private:
             std::wstring reasons=L"[";
             if (locked) reasons+=Q(T(L"удалится вместе с основной платформой",L"removed together with the core platform"));
             reasons+=L"]";
-            json+=L"{\"id\":"+Q(id)+L",\"title\":"+Q(title)+L",\"description\":"+Q((std::wstring(id)==L"x64"||std::wstring(id)==L"x86")?GlassProductUiPolicy::PlatformDescription(detail,std::wstring(id)==L"x64",os64,IsRu()):std::wstring(detail))+
+            const std::wstring productId(id);
+            const bool platform64=productId==L"x64";
+            json+=L"{\"id\":"+Q(id)+L",\"title\":"+Q(title)+L",\"description\":"+Q((platform64||productId==L"x86")?GlassProductUiPolicy::PlatformDescription(detail,platform64,os64,IsRu()):detail)+
                 L",\"warning\":"+Q(GlassProductUiPolicy::WarningText(preview.rows[GlassProductUiPolicy::Index(id)].warnings,IsRu(),GlassInstallUtil::IsOs64Bit()))+
                 L",\"badge\":"+Q(badge)+L",\"state\":"+Q(state)+L",\"reasons\":"+reasons+
                 L",\"installedPackageVersion\":"+Q(InstalledMsiVersion(id))+
@@ -598,11 +601,11 @@ private:
                 L",\"checked\":"+(checked?L"true":L"false")+
                 L",\"locked\":"+((locked || page_==Page::Cleanup)?L"true":L"false")+L",\"hidden\":"+(available?L"false":L"true")+L"}";
         };
-        add(L"x64",L"Glass Platform x64",T(L"Оформление 64-битных приложений",L"Styling for 64-bit applications"),selected_.x64,installed_.x64,false);
-        add(L"x86",L"Glass Platform x86",T(L"Оформление 32-битных приложений",L"Styling for 32-bit applications"),selected_.x86,installed_.x86,false);
-        add(L"settings64",L"GlassSettings x64",T(L"Программа настроек оформления, 64-битная версия",L"Styling settings app, 64-bit version"),selected_.settings64,installed_.settings64,false);
-        add(L"settings32",L"GlassSettings x86",T(L"Программа настроек оформления, 32-битная версия",L"Styling settings app, 32-bit version"),selected_.settings32,installed_.settings32,false);
-        add(L"openglass",L"OpenGlass",T(L"Классические стеклянные рамки окон в стиле Aero Glass",L"Classic Aero Glass–style glass window frames"),selected_.openGlass,installed_.openGlass,false);
+        add(L"x64",Text(IDS_COMP_P64_TITLE),Text(IDS_COMP_P64_DESC),selected_.x64,installed_.x64,false);
+        add(L"x86",Text(IDS_COMP_P32_TITLE),Text(IDS_COMP_P32_DESC),selected_.x86,installed_.x86,false);
+        add(L"settings64",Text(IDS_COMP_GS64_TITLE),T(L"Программа настроек оформления, 64-битная версия",L"Styling settings app, 64-bit version"),selected_.settings64,installed_.settings64,false);
+        add(L"settings32",Text(IDS_COMP_GS32_TITLE),T(L"Программа настроек оформления, 32-битная версия",L"Styling settings app, 32-bit version"),selected_.settings32,installed_.settings32,false);
+        add(L"openglass",Text(IDS_COMP_OG_TITLE),Text(IDS_COMP_OG_DESC),selected_.openGlass,installed_.openGlass,false);
         if(installed_.secureUxTheme){
             const bool active=SecureUxThemeManaged();
             const bool pending=secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::ActivationPending||secureUxThemeState_==GlassInstallUtil::SecureUxThemeState::DeactivationPending;
@@ -618,7 +621,7 @@ private:
                 T(L"Установлен, сейчас не используется",L"Installed, not in use right now");
             const std::wstring reason=dependent?T(L"удалится вместе с GlassSettings",L"removed with GlassSettings"):
                 T(L"можно удалить отдельно",L"can be removed separately");
-            json+=L",{\"id\":\"secureUxTheme\",\"title\":\"SecureUxTheme\",\"warning\":"+Q(GlassProductUiPolicy::WarningText(preview.rows[4].warnings,IsRu(),GlassInstallUtil::IsOs64Bit()))+L",\"description\":"+
+            json+=L",{\"id\":\"secureUxTheme\",\"title\":"+Q(Text(IDS_COMP_SUT_TITLE))+L",\"warning\":"+Q(GlassProductUiPolicy::WarningText(preview.rows[4].warnings,IsRu(),GlassInstallUtil::IsOs64Bit()))+L",\"description\":"+
                 Q(T(L"Позволяет Windows использовать сторонние темы оформления. Установлен в системную папку Windows.",L"Lets Windows use third-party visual styles. Installed in the Windows system folder."))+
                 L",\"badge\":"+Q(badge)+L",\"badgeTone\":"+Q(external?L"repair":pending?L"update":L"keep")+
                 L",\"state\":"+Q(state)+L",\"reasons\":"+(reason.empty()?L"[]":L"["+Q(reason)+L"]")+
@@ -650,7 +653,8 @@ private:
     void SyncWeb() {
         if (!webReady_ || !bridgeReady_) return;
         if (webState_.NeedsInit()) {
-            const std::wstring ui=L"{\"brand\":\"GlassPlatform\",\"compTag\":"+Q(T(L"ВЫБОРОЧНОЕ УДАЛЕНИЕ",L"SELECTIVE UNINSTALL"))+
+            const std::wstring ui=L"{\"brand\":"+Q(Text(IDS_BRAND))+
+                L",\"compTag\":"+Q(T(L"ВЫБОРОЧНОЕ УДАЛЕНИЕ",L"SELECTIVE UNINSTALL"))+
                 L",\"compTitle\":"+Q(T(L"Выберите продукты для удаления",L"Select products to remove"))+
                 L",\"compIntro\":"+Q(T(L"Будут удалены только отмеченные продукты.",L"Only selected products will be removed."))+
                 L",\"uninsTag\":"+Q(T(L"УДАЛЕНИЕ КОМПОНЕНТОВ",L"UNINSTALLING COMPONENTS"))+
@@ -669,10 +673,11 @@ private:
                 L",\"cancelledTag\":"+Q(T(L"УДАЛЕНИЕ ОТМЕНЕНО",L"UNINSTALL CANCELLED"))+
                 L",\"cancelledTitle\":"+Q(T(L"Удаление отменено",L"Uninstall cancelled"))+
                 L",\"cancelledBody\":"+Q(T(L"Ничего не удалено.",L"Nothing was removed."))+
-                L",\"errorTag\":"+Q(T(L"ОШИБКА",L"ERROR"))+
+                L",\"errorTag\":"+Q(Text(IDS_ERROR_TAG))+
                 L",\"errorTitle\":"+Q(T(L"Удаление не завершено",L"Uninstall did not finish"))+
                 L",\"errorBody\":"+Q(T(L"Подробности приведены ниже.",L"Details are shown below."))+
-                L",\"errorDetails\":"+Q(T(L"ДЕТАЛИ",L"DETAILS"))+
+                L",\"errorDetails\":"+Q(Text(IDS_ERROR_DETAILS))+
+                L",\"errorCopy\":"+Q(Text(IDS_COPY))+
                 L",\"errorNote\":"+Q(T(L"Журнал: %WINDIR%\\Temp\\GlassUninsLogs-*\\GlassUnins.log",L"Log: %WINDIR%\\Temp\\GlassUninsLogs-*\\GlassUnins.log"))+L"}";
             const std::wstring init=L"{\"type\":\"init\",\"appMode\":\"unins\",\"locale\":"+Q(IsRu()?L"ru":L"en")+L",\"ui\":"+ui+L"}";
             if (!webState_.SendInit(web_,init)) return;
@@ -685,7 +690,7 @@ private:
             L",\"finishWarnings\":"+finishWarnings+L",\"components\":"+ComponentsJson()+L",\"componentsWarning\":"+Q(Warning())+
             L",\"status\":"+Q(status)+L",\"errorReason\":"+Q(error)+L",\"holdReport\":"+Q(report)+
             L",\"monitorRisk\":"+(monitorUnknown_.load()?L"true":L"false")+
-            L",\"monitorRiskTitle\":"+Q(T(L"Не удалось проверить, освобождены ли модули Glass",L"Couldn't confirm that Glass modules are released"))+
+            L",\"monitorRiskTitle\":"+Q(Text(IDS_NATIVE_RISK_TITLE))+
             L",\"monitorRiskBody\":"+Q(report)+
             L",\"unlockActive\":false,\"progress\":"+std::to_wstring(progress)+L"}";
         webState_.SendState(web_,std::move(json));
@@ -698,10 +703,12 @@ private:
         const bool busy=page==Page::Stopping || page==Page::Removing;
         WizardTheme::ApplyDarkWindowChrome(window);
         WizardTheme::SetSystemCloseEnabled(window,!(page==Page::Removing));
-        SetWindowTextW(back_,page==Page::UnlockModules?T(L"Продолжить на свой риск",L"Continue at risk"):page==Page::Cleanup?T(L"Назад",L"Back"):T(L"Выбрать всё",L"Select all"));
-        SetWindowTextW(next_,(select || page==Page::Cleanup)?T(L"Удалить",L"Remove"):
-            page==Page::UnlockModules?T(L"Повторить",L"Retry"):
-            page==Page::UnlockProcesses?T(L"Разблокировать",L"Unlock"):T(L"Закрыть",L"Close"));
+        const std::wstring backText=page==Page::UnlockModules?Text(IDS_CONTINUE_RISK):page==Page::Cleanup?Text(IDS_BACK):T(L"Выбрать всё",L"Select all");
+        const std::wstring nextText=(select || page==Page::Cleanup)?T(L"Удалить",L"Remove"):
+            page==Page::UnlockModules?Text(IDS_HOLD_RETRY):
+            page==Page::UnlockProcesses?Text(IDS_UNLOCK):T(L"Закрыть",L"Close");
+        SetWindowTextW(back_,backText.c_str());
+        SetWindowTextW(next_,nextText.c_str());
         ShowWindow(back_,(page==Page::UnlockModules || page==Page::Cleanup || (select&&!webReady_))?SW_SHOWNA:SW_HIDE);
         ShowWindow(next_,!busy?SW_SHOWNA:SW_HIDE);
         ShowWindow(cancel_,!terminal && page!=Page::Removing?SW_SHOWNA:SW_HIDE);
@@ -1562,16 +1569,16 @@ private:
         { std::lock_guard<std::mutex> lock(dataMutex_); status=status_; error=error_; report=holdReport_; progress=progress_; }
         if (!webReady_ && !webFailed_) {
             // Загрузка HTML-контента: тот же индикатор, что и в установщике.
-            DrawTextBlock(dc,L"GlassPlatform",Box(48,32,400,28),font_,RGB(245,244,252));
+            DrawTextBlock(dc,Text(IDS_BRAND),Box(48,32,400,28),font_,RGB(245,244,252));
             WizardUi::DrawLoadingSpinner(dc,dpi_,true);
             EndPaint(window,&ps);
             return;
         }
         if (!webReady_) {
-            DrawTextBlock(dc,L"GlassPlatform",Box(48,32,400,28),font_,RGB(245,244,252));
-            const wchar_t* title=page_==Page::Cleanup?T(L"Очистка данных (по желанию)",L"Optional data cleanup"):page_==Page::Select?T(L"Выберите продукты для удаления",L"Select products to remove"):
+            DrawTextBlock(dc,Text(IDS_BRAND),Box(48,32,400,28),font_,RGB(245,244,252));
+            const std::wstring title=page_==Page::Cleanup?T(L"Очистка данных (по желанию)",L"Optional data cleanup"):page_==Page::Select?T(L"Выберите продукты для удаления",L"Select products to remove"):
                 page_==Page::UnlockModules?T(L"Модули Glass заняты программами",L"Glass modules are in use by applications"):
-                page_==Page::UnlockProcesses?T(L"Процессы удерживают модули",L"Processes are holding modules"):
+                page_==Page::UnlockProcesses?Text(IDS_KILL_TITLE):
                 page_==Page::Cancelled?T(L"Удаление отменено",L"Uninstall cancelled"):
                 page_==Page::Complete?T(L"Удаление завершено",L"Uninstall complete"):
                 page_==Page::Error?T(L"Удаление не завершено",L"Uninstall did not finish"):

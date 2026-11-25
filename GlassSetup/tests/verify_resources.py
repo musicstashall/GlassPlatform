@@ -25,8 +25,12 @@ header = read("res/resource.h")
 assert read("res/resource.h.txt") == header, "resource.h.txt is out of sync"
 ids = dict(re.findall(r"#define\s+(\w+)\s+(\d+)", header))
 assert len(ids.values()) == len(set(ids.values())), "duplicate resource/control IDs"
-rc = read("res/GlassSetup.rc") + "\n" + read("res/ProductStrings.rcinc")
+setup_rc = read("res/GlassSetup.rc")
+shared_strings = read("res/ProductStrings.rcinc")
+rc = setup_rc + "\n" + shared_strings
 unins_rc = read("GlassUnins/GlassUnins.rc")
+assert '#include "ProductStrings.rcinc"' in setup_rc
+assert '#include "../res/ProductStrings.rcinc"' in unins_rc
 setup = read("src/main.cpp")
 # Project items do not import C++ declarations. Each UI translation unit must
 # include the policy headers itself, before using their namespaces.
@@ -120,6 +124,15 @@ for source in (setup, unins):
     assert "AddWebResourceRequestedFilter" not in source
 assert 'id="error-copy-command"' in ui and 'role="menuitem"' in ui and 'user-select:text' in ui
 assert 'ES_READONLY' in window_shell and 'WM_COPY' in window_shell
+assert 'LoadText(instance, language, IDS_COPY)' in window_shell
+for source in (setup, unins):
+    assert 'WizardUi::LoadText(gInstance,gLanguage,id)' in source
+    assert r'\"errorCopy\"' in source and 'Text(IDS_COPY)' in source
+for name in ('IDS_COPY', 'IDS_ERROR_TAG', 'IDS_ERROR_DETAILS', 'IDS_NATIVE_RISK_TITLE',
+             'IDS_HOLD_RETRY', 'IDS_CONTINUE_RISK', 'IDS_COMP_GS64_TITLE', 'IDS_COMP_GS32_TITLE'):
+    assert len(re.findall(r'^\s*' + name + r'\s+"', shared_strings, re.MULTILINE)) == 2, name
+    assert f'Text({name})' in unins, name
+assert 'hostUi.errorCopy' in ui
 
 # Validate the manifests/project files as XML, including elevation and DPI.
 ns = {"asmv3": "urn:schemas-microsoft-com:asm.v3",

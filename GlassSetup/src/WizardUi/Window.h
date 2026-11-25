@@ -17,15 +17,17 @@ void LayoutFooter(HWND parent, UINT dpi, int contentHeight, FooterAction back, F
 class WebHost;
 void LayoutWebSurface(HWND parent, HWND host, WebHost& web, RECT rect, bool redraw) noexcept;
 void DrawLoadingSpinner(HDC dc, UINT dpi, bool animate) noexcept;
+std::wstring LoadText(HINSTANCE instance, LANGID language, UINT id);
 
 class ErrorDetails final {
 public:
-    void Create(HWND parent, HINSTANCE instance, bool russian) noexcept;
+    void Create(HWND parent, HINSTANCE instance, LANGID language);
     HWND Get() const noexcept { return edit_; }
     void Update(bool visible, const std::wstring& text);
 
 private:
     HWND edit_ = nullptr;
+    std::wstring copyCaption_;
     std::wstring text_;
 };
 

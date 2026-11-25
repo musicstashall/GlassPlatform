@@ -1,7 +1,23 @@
-// Shared by Setup and Unins. Keep the leading space when concatenating.
+// Общие RU/EN-ресурсы Setup и Unins. Сохранять ведущий пробел в суффиксе.
 LANGUAGE LANG_RUSSIAN, SUBLANG_DEFAULT
 STRINGTABLE
 BEGIN
+  IDS_BRAND "GlassPlatform"
+  IDS_BACK "Назад"
+  IDS_CANCEL "Отмена"
+  IDS_ERROR_TAG "ОШИБКА"
+  IDS_ERROR_DETAILS "ДЕТАЛИ"
+  IDS_COPY "Копировать"
+  IDS_HOLD_RETRY "Повторить"
+  IDS_KILL_TITLE "Процессы удерживают модули"
+  IDS_UNLOCK "Разблокировать"
+  IDS_COMP_P64_TITLE "Glass Platform x64"
+  IDS_COMP_P64_DESC "Оформление 64-битных приложений"
+  IDS_COMP_P32_TITLE "Glass Platform x86"
+  IDS_COMP_P32_DESC "Оформление 32-битных приложений"
+  IDS_COMP_OG_TITLE "OpenGlass"
+  IDS_COMP_OG_DESC "Классические стеклянные рамки окон в стиле Aero Glass."
+  IDS_COMP_SUT_TITLE "SecureUxTheme"
   IDS_APPLY "Применить"
   IDS_INSTALL_TITLE "Установка GlassPlatform"
   IDS_MAINTENANCE_TITLE "Обслуживание GlassPlatform"
@@ -16,6 +32,22 @@ END
 LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 STRINGTABLE
 BEGIN
+  IDS_BRAND "GlassPlatform"
+  IDS_BACK "Back"
+  IDS_CANCEL "Cancel"
+  IDS_ERROR_TAG "ERROR"
+  IDS_ERROR_DETAILS "DETAILS"
+  IDS_COPY "Copy"
+  IDS_HOLD_RETRY "Retry"
+  IDS_KILL_TITLE "Processes are holding modules"
+  IDS_UNLOCK "Unlock"
+  IDS_COMP_P64_TITLE "Glass Platform x64"
+  IDS_COMP_P64_DESC "Styling for 64-bit applications"
+  IDS_COMP_P32_TITLE "Glass Platform x86"
+  IDS_COMP_P32_DESC "Styling for 32-bit applications"
+  IDS_COMP_OG_TITLE "OpenGlass"
+  IDS_COMP_OG_DESC "Classic Aero Glass-style glass window frames."
+  IDS_COMP_SUT_TITLE "SecureUxTheme"
   IDS_APPLY "Apply"
   IDS_INSTALL_TITLE "Install GlassPlatform"
   IDS_MAINTENANCE_TITLE "Maintain GlassPlatform"

@@ -110,19 +110,7 @@ bool gWindowClassRegistered = false;
 HWND gRootWindow = nullptr;
 LANGID gLanguage = MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US);
 
-// Explicit language lookup: never rely on the OS's resource fallback order.
-std::wstring Text(UINT id) {
-    HRSRC resource = FindResourceExW(gInstance, RT_STRING,
-        MAKEINTRESOURCEW((id >> 4) + 1), gLanguage);
-    if (!resource) resource = FindResourceExW(gInstance, RT_STRING,
-        MAKEINTRESOURCEW((id >> 4) + 1), MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US));
-    if (!resource) return L"";
-    const auto data = static_cast<const WORD*>(LockResource(LoadResource(gInstance, resource)));
-    if (!data) return L"";
-    const WORD* entry = data;
-    for (UINT i = 0; i < (id & 15); ++i) entry += 1 + *entry;
-    return std::wstring(reinterpret_cast<const wchar_t*>(entry + 1), *entry);
-}
+std::wstring Text(UINT id) { return WizardUi::LoadText(gInstance,gLanguage,id); }
 struct Bytes { const BYTE* data = nullptr; DWORD size = 0; };
 Bytes Resource(UINT id, LANGID lang = MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL)) {
     HRSRC res = FindResourceExW(gInstance, RT_RCDATA, MAKEINTRESOURCEW(id), lang);
@@ -1483,7 +1471,7 @@ private:
         // A hidden native parent prevents the asynchronously created WebView
         // from ever appearing above Welcome during its first initialization.
         webHost_ = Control(L"STATIC",L"",WS_CLIPCHILDREN | WS_CLIPSIBLINGS,IDC_WEBHOST,WS_EX_CONTROLPARENT);
-        errorDetails_.Create(window,gInstance,PRIMARYLANGID(gLanguage)==LANG_RUSSIAN);
+        errorDetails_.Create(window,gInstance,gLanguage);
         SetWindowTheme(eula_,L"",nullptr);
         SendMessageW(window,DM_SETDEFID,IDC_NEXT,0);
         CreateFonts();
@@ -2542,6 +2530,7 @@ private:
                 L",\"errorTitle\":"+JsStringLiteral(Text(IDS_ERROR_TITLE))+
                 L",\"errorBody\":"+JsStringLiteral(Text(IDS_ERROR_BODY))+
                 L",\"errorDetails\":"+JsStringLiteral(Text(IDS_ERROR_DETAILS))+
+                L",\"errorCopy\":"+JsStringLiteral(Text(IDS_COPY))+
                 L",\"errorNote\":"+JsStringLiteral(Text(IDS_ERROR_LOG_HINT))+
                 L",\"compTag\":"+JsStringLiteral(Text(IDS_COMP_TAG))+
                 L",\"compTitle\":"+JsStringLiteral(Text(IDS_COMP_TITLE))+

@@ -964,32 +964,30 @@ This does not grant Modify authorization: trusted cached controller, signer and
 shell/ticket/handoff validation still run. The existing Change link need not be
 rewritten; rebuild/publish Setup and let its verified controller/cache update run.
 
-Setup now detects WebView runtime availability even for duplicate launches and
-queues UI-STA initialization before all startup terminal branches. Error and
-AlreadyRunning wait on WebView when initialization is expected (native loading
-placeholder, not permanent native error); an actual WebView failure still exposes
-usable native controls.
-GlassUnins also initializes WebView for its duplicate-launch Error page instead
-of deliberately skipping it, and detects failure to post the initialization.
+Both executables compile the shared `WizardUi` WebView2 host and embed the same
+`slideshow.html`. An ordinary duplicate Setup launch activates the existing window
+and exits before creating a second wizard. GlassUnins still initializes WebView
+for its duplicate-launch Error page and falls back to native UI if initialization
+cannot be posted.
 
-Page coverage audit:
-- Setup: all 23 Page enum values have explicit mappings. Welcome, Checking,
-  Conflicts, Downgrade, VersionInvalid, License, Components, Certificate,
-  FullCleanup, Installing, ModulesBusy, ProcessesStuck,
-  ConfirmCancel, Cancelling, Cancelled, Launching, Complete and Error have WebView
-  states. Installing preserves its dynamic unlock routing.
-- A missing WebView2 runtime stays on the loading indicator while the bootstrapper
-  runs in the background. Installation failure opens the final Error page.
-  Successful runtime installation initializes WebView.
-  Absence/environment/controller/navigation failure and debug --demo-native
-  remain intentional native fallback, not missing business-page coverage.
-- GlassUnins: all 10 Page values mapped: Select, Cleanup, SettingsRisk, Stopping,
+Current page coverage:
+- Setup: all 17 `Page` values are mapped: Welcome, Checking, Conflicts, License,
+  Components, Certificate, FullCleanup, Installing, SettingsBusy, ModulesBusy,
+  ProcessesStuck, ConfirmCancel, Cancelling, Cancelled, Launching, Complete and
+  Error. Installing can select different HTML modes according to the unlock phase.
+- GlassUnins: all 9 `Page` values are mapped: Select, Cleanup, Stopping,
   UnlockModules, UnlockProcesses, Removing, Cancelled, Complete and Error.
-- All 23 supported HTML modes are recognized; production DOM smoke visits each
-  mode in RU/EN for Setup/GlassUnins without JS errors. Welcome asset loading is
-  intentionally asynchronous. Enum routing and early-branch ordering are checked
-  separately. These checks do NOT prove Windows rendering, focus, DPI/accessibility
-  or live WebView2 initialization; actual Windows acceptance is still required.
+  Neither wizard has a separate GlassSettings removal risk page. The plan shows
+  architecture-specific warnings when a matching GlassSettings would be missing.
+- Both wizards show a loading indicator and switch to native UI if WebView2
+  initialization fails. On ordinary startup without WebView2 Runtime, Setup runs
+  the bootstrapper in the background and displays the final Error page if it
+  fails. GlassUnins does not install the runtime and uses native UI immediately
+  if it is missing. Debug `--demo-native` is a separate Setup preview.
+- The shared HTML recognizes 21 modes; `webview_all_pages_dom_test.cjs` exercises
+  them in RU/EN with a mock host. `webview_page_coverage.py` checks C++ page routing
+  and startup ordering separately. These checks do not establish Windows rendering,
+  focus, DPI/accessibility or live WebView2 initialization.
 
 Regression: actual stale-ARP guard covers official present/absent, inventory
 failure, receipt, root failure and retired MSI; official Change adapter test;
