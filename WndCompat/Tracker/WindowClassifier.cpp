@@ -206,13 +206,7 @@ bool WindowClassifier::IsSpecialWindow(const std::wstring& cls, ControlKind& out
         outKind = ControlKind::Atl_ListBox;
         return true;
     }
-    // TPopupListbox — выпадающий список VCL (TInplaceEditList/TValueListEditor и др.),
-    // обрабатывается по пути ComboLBox.
-    if (Equals(cls, L"TPopupListbox"))
-    {
-        outKind = ControlKind::ComboLBox;
-        return true;
-    }
+
 
     return false;
 }
@@ -408,8 +402,7 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
         return ControlKind::RichEdit50W;
 
     // ── ComboLBox (popup — классифицируется через IsSpecialWindow; только нативный класс)
-    // TPopupListbox — VCL выпадающий список, тот же путь ComboLBox.
-    if (Equals(cls, L"ComboLBox") || Equals(cls, L"TPopupListbox"))
+    if (Equals(cls, L"ComboLBox"))
         return ControlKind::ComboLBox;
 
     // ── Internet Explorer / WebBrowser (Trident) ─────────────────────────────
@@ -424,7 +417,9 @@ ControlKind WindowClassifier::GetControlKind(const std::wstring& cls)
         // TFileListBox/TDirectoryListBox — тоже TCustomListBox, рисуют строку
         // сами (owner-draw: значок + имя), поэтому идут тем же маршрутом.
         Equals(cls, L"TFileListBox") ||
-        Equals(cls, L"TDirectoryListBox"))
+        Equals(cls, L"TDirectoryListBox") ||
+        // TPopupListbox — VCL dropdown list (TInplaceEditList/TValueListEditor), TCustomListBox.
+        Equals(cls, L"TPopupListbox"))
         return ControlKind::ListBox;
 
     // ── ComboBox ─────────────────────────────────────────────────────────────
