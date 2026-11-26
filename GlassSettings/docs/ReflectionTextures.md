@@ -56,9 +56,11 @@ DiamondLattice 6×6, PlainWeave 4×4, Herringbone 8×8, MicroGrid 4×4.
 сказано иное; RGB #000000): LinenWeave 364×368, CanvasWeave 200×181, JuteWeave
 305×300, CausticCells 256×256 (альфа пропорциональна яркости светлых стенок),
 OrchardLines 350×363, PlasterGrain 797×800 и StuccoMist 800×800 (дефицит яркости
-×2.2), WormMaze 250×250, FineWorms 114×125, InkDots 400×399, CoralMaze 480×478,
-FastFoodLines 750×750, SilverBasket 574×574, StripeBasket 416×416, SilkHerring
-360×300 (последние четыре — дефицит яркости без порога: полутоновое переплетение).
+×2.2), WormMaze 125×125, FineWorms 114×125, InkDots 400×399, CoralMaze 480×478,
+FastFoodLines 375×375, SilverBasket 144×144, StripeBasket 208×208, SilkHerring
+216×180, ParquetLines 298×298, OutlineSquares 472×422, ScratchLinen 626×626,
+WavyNet 534×534 (штриховая графика и полутоновые переплетения — дефицит яркости
+от 255 без порога).
 
 Методы построения и проверки плиток (правила):
 
