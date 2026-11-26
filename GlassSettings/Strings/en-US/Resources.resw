@@ -334,6 +334,9 @@
   <data name="Dwm_OpacityModeDesc" xml:space="preserve"><value>Opacity mode and value</value></data>
   <data name="Dwm_PivotActive" xml:space="preserve"><value>Active window</value></data>
   <data name="Dwm_PivotInactive" xml:space="preserve"><value>Inactive window</value></data>
+  <data name="Dwm_ReflectionCanvasMissing" xml:space="preserve"><value>This display configuration has no ready reflection canvas, so OpenGlass shows the system default reflection. The canvas can be rebuilt from the recipe stored for this configuration.</value></data>
+  <data name="Dwm_ReflectionCanvasUnavailable" xml:space="preserve"><value>This display configuration has no reflection canvas and the recipe source image is unavailable. OpenGlass uses the system default reflection.</value></data>
+  <data name="Dwm_ReflectionCanvasGenerate" xml:space="preserve"><value>Generate canvas</value></data>
   <data name="Dwm_ReflectionEmpty" xml:space="preserve"><value>No GlassReflection images found.</value></data>
   <data name="Dwm_ReflectionImage" xml:space="preserve"><value>Reflection</value></data>
   <data name="Dwm_ReflectionImageDesc" xml:space="preserve"><value>GlassReflection resources</value></data>

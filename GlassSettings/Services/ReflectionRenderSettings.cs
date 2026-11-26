@@ -16,6 +16,8 @@ public sealed record ReflectionRenderSettings(int ScalePercent = 100, int Opacit
 public static class ReflectionRenderState
 {
     public const string RegistryPath = @"Software\StanislavKa\GlassPlatform\GlassSettings\Textured";
+    private const string AppliedKey = @"Software\Microsoft\Windows\DWM";
+    private const string AppliedValueName = "CustomThemeReflection";
     public sealed record State(int Version, bool Ready, string Source, string Output, int Width, int Height,
         string SourceHash, string OutputHash, ReflectionRenderSettings Settings, string Profile = "");
 
@@ -86,6 +88,31 @@ public static class ReflectionRenderState
         catch { return null; }
     }
 
+    /// <summary>
+    /// Recipe of the current profile regardless of readiness: source, settings and the
+    /// canvas it produced. Used when the canvas itself is missing so it can be rebuilt.
+    /// A record of another profile or of another version is not returned.
+    /// </summary>
+    public static State? ReadProfileRecord()
+    {
+        try
+        {
+            var snapshot = ReflectionDisplayProfile.Capture();
+            string profile = snapshot.Key;
+            using var root = OpenRoot();
+            using var key = root.OpenSubKey(RegistryPath + @"\Profiles\" + profile);
+            var state = key?.GetValue("State") is string text ? JsonSerializer.Deserialize<State>(text) : null;
+            if (state is not { Version: 2 } || state.Settings is null || state.Profile != profile
+                || state.Width != snapshot.Width || state.Height != snapshot.Height) return null;
+            return state;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Recipe points at a source that still exists and can be rendered again.</summary>
+    public static bool CanRegenerate(State? record) =>
+        record is not null && !string.IsNullOrWhiteSpace(record.Source) && File.Exists(record.Source);
+
     public static ReflectionRenderSettings Settings => (Read()?.Settings ?? new()).Normalize();
 
     public static void Invalidate(string? profile = null) => Write(new(2, false, "", "", 0, 0, "", "", new(),
@@ -95,17 +122,6 @@ public static class ReflectionRenderState
         string outputHash, ReflectionRenderSettings settings, string? profile = null) =>
         Write(new(2, true, source, output, width, height, sourceHash, outputHash, settings.Normalize(),
             profile ?? ReflectionDisplayProfile.Capture().Key));
-
-    public static bool IsManaged()
-    {
-        try
-        {
-            using var root = OpenRoot();
-            using var key = root.OpenSubKey(RegistryPath);
-            return key?.GetValue("Managed") is int managed && managed == 1;
-        }
-        catch { return false; }
-    }
 
     public static bool IsManagedOutput(string? output)
     {
@@ -131,14 +147,15 @@ public static class ReflectionRenderState
     }
 
     /// <summary>
-    /// Adopts the ready canvas published for the current topology: writes it as the
-    /// applied value and re-asserts ownership. Only our own published PNG is used.
-    /// Returns true when the applied value actually changed.
+    /// Writes the verified ready canvas of the current profile as the applied value and
+    /// re-asserts ownership. Only our own published PNG is used. Returns true when the
+    /// applied value actually changed.
     /// </summary>
-    public static bool AdoptReadyProfile(string profile)
+    public static bool AdoptReadyProfile()
     {
+        var snapshot = ReflectionDisplayProfile.Capture();
         var state = ReadReadyProfile();
-        if (state is null || state.Profile != profile) return false;
+        if (state is null || state.Profile != snapshot.Key) return false;
         // Published canvases live in ProgramData; a record pointing elsewhere is foreign.
         if (!ReflectionProfilePolicy.IsPublishedCanvas(state.Output) || !File.Exists(state.Output)) return false;
         try
@@ -149,12 +166,8 @@ public static class ReflectionRenderState
         catch { return false; }
         try
         {
-            using var dwm = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\DWM", writable: true);
-            if (dwm is null) return false;
-            bool changed = !string.Equals(dwm.GetValue("CustomThemeReflection") as string ?? "", state.Output,
-                StringComparison.OrdinalIgnoreCase);
-            if (changed) dwm.SetValue("CustomThemeReflection", state.Output, RegistryValueKind.String);
-            // Ownership after the value: Read() must resolve the profile it now points at.
+            // Value first, ownership after: Read() must resolve the profile it points at.
+            var changed = ApplyAppliedValue(state.Output);
             using var root = OpenRoot();
             using var key = root.CreateSubKey(RegistryPath, writable: true);
             key.SetValue("ManagedOutput", state.Output, RegistryValueKind.String);
@@ -165,29 +178,41 @@ public static class ReflectionRenderState
     }
 
     /// <summary>
-    /// This profile has no canvas but an ours-looking value is applied (e.g. a canvas
-    /// of a previous topology). Drop it so OpenGlass falls back to its own reflection
-    /// instead of showing a picture that belongs to another display configuration.
-    /// The published PNG stays on disk; the recipe record is untouched.
+    /// Nothing of ours exists for the current profile: drop the applied value so
+    /// OpenGlass falls back to its own default reflection, as if no texture was ever
+    /// selected. The published PNGs and the recipe records stay on disk.
     /// </summary>
-    public static bool ClearStaleProfileCanvas(string? active)
+    public static bool ClearAppliedProfile(string? active)
     {
-        // Only a published canvas may be dropped; an external selection stays.
-        if (string.IsNullOrWhiteSpace(active) || !ReflectionProfilePolicy.IsPublishedCanvas(active)) return false;
+        if (string.IsNullOrWhiteSpace(active)) return false;
         try
         {
-            using var dwm = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\DWM", writable: true);
-            if (dwm is null) return false;
-            if (!string.Equals(dwm.GetValue("CustomThemeReflection") as string ?? "", active,
-                    StringComparison.OrdinalIgnoreCase)) return false;
-            dwm.DeleteValue("CustomThemeReflection", throwOnMissingValue: false);
+            // Same end state as removing the selection on the page. The baseline is not
+            // adopted here; the page syncs the reflection scope after the change.
+            var changed = ApplyAppliedValue(null);
             using var root = OpenRoot();
-            using var key = root.OpenSubKey(RegistryPath, writable: true);
-            key?.SetValue("ManagedOutput", "", RegistryValueKind.String);
-            key?.SetValue("Managed", 0, RegistryValueKind.DWord);
-            return true;
+            using var key = root.CreateSubKey(RegistryPath, writable: true);
+            key.SetValue("ManagedOutput", "", RegistryValueKind.String);
+            key.SetValue("Managed", 0, RegistryValueKind.DWord);
+            return changed;
         }
         catch { return false; }
+    }
+
+    /// <summary>
+    /// Writes or removes the applied value. Callers notify OpenGlass and resync the
+    /// session baseline; this method only performs the registry mutation.
+    /// Returns true when the applied value actually changed.
+    /// </summary>
+    private static bool ApplyAppliedValue(string? output)
+    {
+        using var dwm = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(AppliedKey, writable: true);
+        if (dwm is null) return false;
+        var current = dwm.GetValue(AppliedValueName) as string ?? "";
+        if (string.Equals(current, output ?? "", StringComparison.OrdinalIgnoreCase)) return false;
+        if (string.IsNullOrWhiteSpace(output)) dwm.DeleteValue(AppliedValueName, throwOnMissingValue: false);
+        else dwm.SetValue(AppliedValueName, output, RegistryValueKind.String);
+        return true;
     }
 
     public static void ReleaseManagement()

@@ -45,7 +45,7 @@ assert 'ReflectionRenderState.IsManagedOutput(active)' in page
 assert 'ReflectionProfilePolicy.IsPublishedCanvas(active)' in page
 assert 'ReadForOutput(_currentReflectionPath)' in page
 assert 'state.Output, output, StringComparison.OrdinalIgnoreCase' in state
-assert 'skip unmanaged:' in native and 'selection=%ls action=%d active=%ls output=%ls' in native
+assert 'synchronised:' in native and 'reconcile action=%d active=%ls output=%ls recipe=%d' in native
 assert 'WM_THEMECHANGED posted=%d error=%lu' in native
 assert '_wcsicmp(path, target.c_str())' in host
 assert 'ReflectionProfileHost::OnMessage(msg);' in entry  # sent as well as posted messages
@@ -109,7 +109,7 @@ print('PASS: canonical identity specification: enumeration/origin invariant, geo
 print('NOTE: Windows compilation, optional loader, HKCU/DWM, mixed-DPI and hot-plug require Windows testing')
 
 assert 'SettingsSession.Current.AcceptAutomaticReflectionBaseline(baselineAtSignal, path)' in page
-assert 'StillSelected, activeAtSignal,' in page and 'automaticDisplayTransfer: true);' in page
+assert 'StillSelected, activeAtSignal);' in page
 assert 'if (canApply is not null' in page
 snapshot = read('GlassSettings/Core/Snapshot/SettingsSnapshot.cs')
 session = read('GlassSettings/Services/SettingsSession.cs')
@@ -130,14 +130,17 @@ print('PASS: live dialog re-layout preserves draft, single reflection canvas and
 
 state = read('GlassSettings/Services/ReflectionRenderSettings.cs')
 assert 'public static State? ReadReadyProfile()' in state
-assert 'public static bool AdoptReadyProfile(string profile)' in state
+assert 'public static bool AdoptReadyProfile()' in state
+assert 'public static State? ReadProfileRecord()' in state
+assert 'public static bool CanRegenerate(State? record)' in state
+assert 'public static bool ClearAppliedProfile(string? active)' in state
+assert 'private static bool ApplyAppliedValue(string? output)' in state
 assert 'ReflectionProfilePolicy.IsPublishedCanvas(state.Output)' in state
 assert 'key.SetValue("ManagedOutput", state.Output, RegistryValueKind.String);' in state
-assert 'public static bool ClearStaleProfileCanvas(string? active)' in state
-assert "if (string.IsNullOrWhiteSpace(active) || !ReflectionProfilePolicy.IsPublishedCanvas(active)) return false;" in state
+assert 'ClearStaleProfileCanvas' not in state and 'IsManaged()' not in state
 assert 'MarkManaged(string output, bool notify)' not in state
-assert 'RestoreReadyReflectionProfile();' in page
-assert 'ReflectionRenderState.IsManagedOutput(active)' in page
+assert 'await SynchronizeReflectionProfileAsync();' in page
+assert 'RestoreReadyReflectionProfile' not in page
 assert 'ReflectionProfilePolicy.IsPublishedCanvas(active)' in page
 assert 'ReflectionDisplayProfile.PublicationMutex' in page
 print('PASS: startup restores a verified ready canvas for the current topology without replacing external selections')
@@ -150,25 +153,23 @@ print('PASS: native reconcile adopts/clears through the shared decision table')
 # One shared decision table: the ABI header is the single source of the rules.
 api = read('GlassShared/include/ReflectionProfileApi.h')
 policy = read('GlassSettings/Services/ReflectionProfilePolicy.cs')
-assert 'inline Decision Decide(bool managed, bool activeEmpty, bool activeWasOurs,' in api
-assert 'if (!readyProfile && activeWasOurs)' in api and 'if (!readyProfile && activeWasOurs)' in policy
-assert 'if (!readyProfile && (managed || activeWasOurs))' not in api
-assert 'enum class Action' in api and 'Action::Clear' in api
+assert 'inline Decision Decide(bool activeEmpty, bool activeWasOurs, bool activeMatchesProfile,' in api
+assert 'if (readyProfile) return { activeMatchesProfile ? Action::None : Action::Adopt };' in api
+assert 'if (!activeEmpty && activeWasOurs) return { recipeProfile ? Action::Regenerate : Action::Clear };' in api
+assert 'if (!activeEmpty && activeWasOurs)' in policy
+assert 'enum class Action' in api and 'Action::Clear' in api and 'Regenerate' in api and 'Regenerate' in policy
 assert 'public static ReflectionProfileDecision Decide(' in policy
 assert 'Console' not in policy and 'OpenSubKey' not in policy
-assert 'ReflectionProfilePolicy.DecideForRegistry(active, ready is not null)' in page
-assert 'ReflectionRenderState.ClearStaleProfileCanvas(active)' in page
+assert 'ReflectionProfilePolicy.DecideForRegistry(\n                active, ready?.Output, record is not null && ReflectionRenderState.CanRegenerate(record));' in page
+assert '_ => ReflectionRenderState.ClearAppliedProfile(active)' in page
 assert 'LiveReloadScheduler.NotifyThemeChangedNow();' in page
-assert 'const auto decision = Decide(managed != 0, active.empty(), InsidePublishedDirectory(active), !output.empty());' in native
-assert 'decision.action == Action::Clear' in native and 'decision.action == Action::None' in native
+assert 'const auto decision = Decide(active.empty(), InsidePublishedDirectory(active), matches,\n                !output.empty(), recipe);' in native
+assert 'decision.action == Action::Clear || decision.action == Action::Regenerate' in native and 'decision.action == Action::None' in native
 assert 'WriteDword(root.value, L"Managed", 0);' in native
 assert 'WriteDword(root.value, L"Managed", 1);' in native
 assert native.index('WriteString(dwm.value, L"CustomThemeReflection", output);') < native.index('WriteDword(root.value, L"Managed", 1);')
-assert 'automaticDisplayTransfer: true' in page
-assert 'if (automaticDisplayTransfer && ReflectionRenderState.ReadReadyProfile() is null)' in page
-assert 'clearedStaleCanvas = ReflectionRenderState.ClearStaleProfileCanvas(activeAtSignal);' in page
-page_transfer = page.index('if (automaticDisplayTransfer && ReflectionRenderState.ReadReadyProfile() is null)')
-assert page.index('clearedStaleCanvas = ReflectionRenderState.ClearStaleProfileCanvas(activeAtSignal);', page_transfer) < page.index('TrySelectCustomImage(ReflectionRegistryKey, path', page_transfer)
+assert 'automaticDisplayTransfer' not in page  # one rule for startup, hot-plug and Apply
+assert page.index('Preferences') if False else True
 print('PASS: shared ABI decision table drives adopt/clear identically in GS and the platform helper')
 
 # Both implementations must reach the same action for every registry state.
@@ -181,43 +182,87 @@ def translate(condition):
 
 def decision_branches(text):
     body = text[text.index('Decide('):]
+    body = body[body.index('{'):body.index('\n    }\n')]
+    body = ' '.join(body.split())
     branches = []
-    for match in re.finditer(r'if \((.*?)\)\s*\n?\s*(?=\{|return)', body, re.S):
-        condition = ' '.join(match.group(1).split())
-        if condition != 'activeEmpty' and 'readyProfile' not in condition and 'activeWasOurs' not in condition:
+    start = 0
+    while (found := body.find('if (', start)) >= 0:
+        depth, index = 0, found + 3
+        while index < len(body):
+            if body[index] == '(': depth += 1
+            elif body[index] == ')':
+                depth -= 1
+                if depth == 0: break
+            index += 1
+        condition = body[found + 4:index]
+        tail = body[index:body.index(';', index)]
+        start = index
+        if 'readyProfile' not in condition and 'activeWasOurs' not in condition:
             continue
-        tail = body[match.end():match.end() + 160]
-        action = ('Adopt' if 'Adopt' in tail.split(';')[0] else
-                  'Clear' if 'Clear' in tail.split(';')[0] else None)
-        branches.append((condition, action))
+        branches.append((condition, tail))
     return branches
 
 api_branches, policy_branches = decision_branches(api), decision_branches(policy)
+assert len(api_branches) == 2 and len(policy_branches) == 2, (api_branches, policy_branches)
 assert [c for c, _ in api_branches] == [c for c, _ in policy_branches], (api_branches, policy_branches)
-assert [a for _, a in api_branches] == [a for _, a in policy_branches], (api_branches, policy_branches)
 
+def action_of(tail, scope):
+    # Read the returned action from the source text, ternary included.
+    text = tail.replace('ReflectionProfileAction.', '').replace('Action::', '')
+    text = text.replace('return', '').replace('new', '').strip(' (){};')
+    condition, separator, rest = text.partition('?')
+    if separator:
+        yes, _, no = rest.partition(':')
+        return action_of(yes if eval(translate(condition), {}, scope) else no, scope)
+    for action in ('Regenerate', 'Adopt', 'Clear', 'None'):
+        if text.startswith(action):
+            return action
+    raise AssertionError(f'no action in {tail!r}')
+
+# States: activeEmpty, activeWasOurs, activeMatchesProfile, readyProfile, recipeProfile.
 def decide(branches):
-    def run(managed, activeEmpty, activeWasOurs, readyProfile):
-        scope = dict(managed=managed, activeEmpty=activeEmpty,
-                     activeWasOurs=activeWasOurs, readyProfile=readyProfile)
-        for condition, action in branches:
-            if condition == 'activeEmpty':
-                if activeEmpty: return 'Adopt' if managed and readyProfile else 'None'
-            elif eval(translate(condition), {}, scope):
-                return action
+    def run(activeEmpty, activeWasOurs, activeMatchesProfile, readyProfile, recipeProfile):
+        scope = dict(activeEmpty=activeEmpty, activeWasOurs=activeWasOurs,
+                     activeMatchesProfile=activeMatchesProfile, readyProfile=readyProfile,
+                     recipeProfile=recipeProfile)
+        for condition, tail in branches:
+            if eval(translate(condition), {}, scope):
+                return action_of(tail, scope)
         return 'None'
     return run
 
 decide_api, decide_policy = decide(api_branches), decide(policy_branches)
-states = list(itertools.product((False, True), repeat=4))
-assert all(decide_api(*s) == decide_policy(*s) for s in states)
+states = list(itertools.product((False, True), repeat=5))
+assert all(decide_api(*s) == decide_policy(*s) for s in states), [
+    (s, decide_api(*s), decide_policy(*s)) for s in states if decide_api(*s) != decide_policy(*s)]
 results = {s: decide_api(*s) for s in states}
 
-assert results[(True, False, False, False)] == 'None'    # Managed, but nothing we published
-assert results[(False, False, True, False)] == 'Clear'   # published canvas, profile has none
-assert results[(False, False, True, True)] == 'Adopt'    # published canvas, ready profile
-assert results[(True, False, False, True)] == 'Adopt'    # managed, ready profile
-assert results[(False, True, True, True)] == 'None'      # empty and unmanaged: no adoption
-assert results[(True, True, False, True)] == 'Adopt'     # empty, managed, ready
-assert results[(True, False, False, False)] != 'Clear'   # never clear a foreign value
-print('PASS: both Decide implementations agree on all 16 states (adopt/clear included)')
+def state(activeEmpty=False, ours=False, matches=False, ready=False, recipe=False):
+    return results[(activeEmpty, ours, matches, ready, recipe)]
+
+# A canvas of this profile is the target state of OpenGlass.
+assert state(ready=True, matches=True) == 'None'      # already in sync
+assert state(ready=True) == 'Adopt'                   # another profile's canvas applied
+assert state(ready=True, ours=True) == 'Adopt'
+assert state(ready=True, recipe=True) == 'Adopt'      # canvas wins over regeneration
+# No canvas: our applied canvas is rebuilt from the recipe, otherwise dropped.
+assert state(ours=True, recipe=True) == 'Regenerate'
+assert state(ours=True) == 'Clear'
+assert state(ours=True, activeEmpty=True) == 'None'    # nothing applied, nothing to drop
+# A foreign selection is only replaced by a real canvas of this profile.
+assert state() == 'None'
+assert state(recipe=True) == 'None'                    # never generate over a foreign image
+assert state(activeEmpty=True, recipe=True) == 'None'  # nothing applied: no generation
+print('PASS: both Decide implementations agree on all 32 states (adopt/regenerate/clear)')
+
+# The page must state the reconciled result, not leave the user guessing.
+xaml = read('GlassSettings/Pages/Dwm/DwmThemeDetailPage.xaml')
+strings = read('GlassSettings/Strings/ru-RU/Resources.resw') + read('GlassSettings/Strings/en-US/Resources.resw')
+assert 'x:Name="ReflectionSyncBanner"' in xaml and 'Click="ReflectionSyncBannerButton_OnClick"' in xaml
+assert 'Dwm_ReflectionCanvasMissing' in strings and 'Dwm_ReflectionCanvasUnavailable' in strings
+assert 'Dwm_ReflectionCanvasGenerate' in strings
+assert 'private void UpdateReflectionSyncBanner()' in page
+assert 'await ReflectionTextureService.PrepareAsync(record.Source, record.Settings, profile);' in page
+assert 'private async Task<bool> RegenerateProfileCanvasAsync(ReflectionRenderState.State? record, string profile)' in page
+assert 'ReflectionTextureService.PrepareAsync(record.Source, record.Settings, profile);' in page
+print('PASS: page reports the profile canvas state and can rebuild it from the stored recipe')

@@ -201,6 +201,7 @@ namespace
             // Same ABI decision table as GlassSettings: never a second rule set.
             const auto published = PublishedDirectory();
             std::wstring output;
+            bool recipe = false;
             Key profile;
             auto subkey = std::wstring(L"Profiles\\") + current.key;
             if (!RegOpenKeyExW(root.value, subkey.c_str(), 0, KEY_READ, &profile.value))
@@ -212,22 +213,31 @@ namespace
                 if (ready && InsidePublishedDirectory(candidate)
                     && name.find(current.key) != std::wstring::npos
                     && ValidHash(candidate, ReadString(profile.value, L"OutputHash"), current.width, current.height)) output = candidate;
+                // A recipe that can be rendered again: source present and belonging to
+                // this profile. Generation itself belongs to GS (SVG/PNG pipeline).
+                auto source = ReadString(profile.value, L"Source");
+                recipe = !source.empty() && GetFileAttributesW(source.c_str()) != INVALID_FILE_ATTRIBUTES
+                    && SafeFile(source);
             }
-            const auto decision = Decide(managed != 0, active.empty(), InsidePublishedDirectory(active), !output.empty());
+            const bool matches = !output.empty() && _wcsicmp(active.c_str(), output.c_str()) == 0;
+            const auto decision = Decide(active.empty(), InsidePublishedDirectory(active), matches,
+                !output.empty(), recipe);
             if (decision.action == Action::None)
             {
-                DebugLog(DBG_IMPORTANT, L"[GlassSettings][ReflectionProfiles] skip unmanaged: Managed=%lu active=%ls owned=%ls ready=%d",
-                    managed, active.c_str(), owned.c_str(), output.empty() ? 0 : 1);
+                DebugLog(DBG_IMPORTANT, L"[GlassSettings][ReflectionProfiles] synchronised: Managed=%lu active=%ls owned=%ls ready=%d recipe=%d",
+                    managed, active.c_str(), owned.c_str(), output.empty() ? 0 : 1, recipe ? 1 : 0);
                 lastKey = current.key; result = S_FALSE;
             }
             else
             {
-                DebugLog(DBG_IMPORTANT, L"[GlassSettings][ReflectionProfiles] selection=%ls action=%d active=%ls output=%ls",
-                    decision.action == Action::Clear ? L"clear stale profile canvas" : L"verified cached profile",
-                    static_cast<int>(decision.action), active.c_str(), output.c_str());
+                DebugLog(DBG_IMPORTANT, L"[GlassSettings][ReflectionProfiles] reconcile action=%d active=%ls output=%ls recipe=%d",
+                    static_cast<int>(decision.action), active.c_str(), output.c_str(), recipe ? 1 : 0);
                 Snapshot check{}; check.size = sizeof(check);
                 if (FAILED(CaptureSnapshot(&check)) || wcscmp(current.key, check.key)) throw static_cast<DWORD>(ERROR_RETRY);
-                if (decision.action == Action::Clear)
+                // Regenerate needs the Settings render pipeline; never guess a canvas
+                // here. Drop our stale value instead and let OpenGlass use its default
+                // until GS rebuilds the canvas for this profile.
+                if (decision.action == Action::Clear || decision.action == Action::Regenerate)
                 {
                     auto error = RegDeleteValueW(dwm.value, L"CustomThemeReflection");
                     if (error && error != ERROR_FILE_NOT_FOUND) throw static_cast<DWORD>(error);
@@ -237,8 +247,8 @@ namespace
                     HWND window = FindWindowW(L"Dwm", nullptr);
                     const BOOL posted = window ? PostMessageW(window, WM_THEMECHANGED, 0, 0) : FALSE;
                     DebugLog(posted ? DBG_IMPORTANT : DBG_WARNING,
-                        L"[GlassSettings][ReflectionProfiles] cleared; Dwm=%p WM_THEMECHANGED posted=%d",
-                        window, posted);
+                        L"[GlassSettings][ReflectionProfiles] cleared action=%d; Dwm=%p WM_THEMECHANGED posted=%d",
+                        static_cast<int>(decision.action), window, posted);
                 }
                 else
                 {

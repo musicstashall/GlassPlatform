@@ -3,13 +3,16 @@ namespace GlassSettings.Services;
 /// <summary>Какое действие выполнить для применённого значения отражения.</summary>
 internal enum ReflectionProfileAction
 {
-    /// <summary>Чужой выбор: значение не трогаем.</summary>
+    /// <summary>Применённое значение уже совпадает с полотном текущего профиля.</summary>
     None,
 
     /// <summary>Применить готовое полотно текущего профиля.</summary>
     Adopt,
 
-    /// <summary>Нашего полотна для профиля нет: снять устаревшее значение.</summary>
+    /// <summary>Рецепт есть, полотна нет: построить полотно и применить его.</summary>
+    Regenerate,
+
+    /// <summary>Для профиля ничего нет: снять значение, OpenGlass использует своё отражение.</summary>
     Clear
 }
 
@@ -24,25 +27,30 @@ internal readonly record struct ReflectionProfileDecision(ReflectionProfileActio
 /// </summary>
 internal static class ReflectionProfilePolicy
 {
-    /// <param name="managed">HKCU Textured\Managed == 1.</param>
     /// <param name="activeEmpty">CustomThemeReflection отсутствует или пуст.</param>
     /// <param name="activeWasOurs">значение указывает на опубликованное полотно
-    /// (ProgramData\OpenGlass\Presets\Textured): доказывает прежнее владение, даже
-    /// если флаг Managed сброшен или платформа ни разу не запускалась.</param>
+    /// (ProgramData\OpenGlass\Presets\Textured); любой другой путь — чужое
+    /// изображение, его нельзя ни перезаписывать, ни удалять.</param>
+    /// <param name="activeMatchesProfile">применено уже полотно, записанное для
+    /// текущего профиля: синхронизировать нечего.</param>
     /// <param name="readyProfile">для текущего профиля есть проверенное полотно.</param>
+    /// <param name="recipeProfile">для текущего профиля есть рецепт, который можно
+    /// отрендерить заново.</param>
     public static ReflectionProfileDecision Decide(
-        bool managed, bool activeEmpty, bool activeWasOurs, bool readyProfile)
+        bool activeEmpty, bool activeWasOurs, bool activeMatchesProfile,
+        bool readyProfile, bool recipeProfile)
     {
-        if (activeEmpty)
-            return new(managed && readyProfile ? ReflectionProfileAction.Adopt : ReflectionProfileAction.None);
-        if (readyProfile && (managed || activeWasOurs))
-            return new(ReflectionProfileAction.Adopt);
-        // Усыновлять нечего: значение доказуемо указывает на наше опубликованное
-        // полотно, значит это полотно другой топологии — снимаем его, чтобы не
-        // показывать картинку прежней конфигурации. Одного флага Managed мало:
-        // удалять можно только путь, который опубликовали мы.
-        if (!readyProfile && activeWasOurs)
-            return new(ReflectionProfileAction.Clear);
+        // Целевое состояние OG — проверенное полотно текущего профиля. Оно пишется
+        // всегда, кроме случая, когда уже применено: неважно, что стоит сейчас —
+        // полотно другого профиля или изображение, которого GS не знает.
+        if (readyProfile)
+            return new(activeMatchesProfile ? ReflectionProfileAction.None : ReflectionProfileAction.Adopt);
+        // Полотна для профиля нет. Наше применённое полотно оставлять нельзя:
+        // строим заново по рецепту, а если рецепта нет — снимаем значение, чтобы OG
+        // вернулся к своему отражению по умолчанию.
+        if (!activeEmpty && activeWasOurs)
+            return new(recipeProfile ? ReflectionProfileAction.Regenerate : ReflectionProfileAction.Clear);
+        // Ничего не применено или чужое изображение, и применить нечего — не трогаем.
         return new(ReflectionProfileAction.None);
     }
 
@@ -62,7 +70,20 @@ internal static class ReflectionProfilePolicy
     }
 
     /// <summary>Входные данные политики для текущего состояния реестра.</summary>
-    public static ReflectionProfileDecision DecideForRegistry(string? active, bool readyProfile) =>
-        Decide(ReflectionRenderState.IsManaged(), string.IsNullOrWhiteSpace(active),
-            IsPublishedCanvas(active), readyProfile);
+    public static ReflectionProfileDecision DecideForRegistry(
+        string? active, string? readyOutput, bool recipeProfile)
+    {
+        var matches = false;
+        if (!string.IsNullOrWhiteSpace(active) && !string.IsNullOrWhiteSpace(readyOutput))
+        {
+            try
+            {
+                matches = string.Equals(Path.GetFullPath(active), Path.GetFullPath(readyOutput),
+                    StringComparison.OrdinalIgnoreCase);
+            }
+            catch { matches = string.Equals(active, readyOutput, StringComparison.OrdinalIgnoreCase); }
+        }
+        return Decide(string.IsNullOrWhiteSpace(active), IsPublishedCanvas(active), matches,
+            !string.IsNullOrWhiteSpace(readyOutput), recipeProfile);
+    }
 }
