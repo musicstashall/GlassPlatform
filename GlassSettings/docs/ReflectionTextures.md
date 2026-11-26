@@ -45,7 +45,12 @@
 DragonScale, MicroChevron, CircuitMaze, CrossStitch, TwillWeave. CircuitMaze
 имеет согласованное мягкое периодическое сглаживание. Позднее добавлены бесшовные
 ячейки HexComb, CarbonWeave, PinDot, RippleRows, OffsetBricks, DiamondLattice
-(альфа 42–168, суперсемплинг с нормализацией диапазона, RGB #000000). Периодические проверки
+(альфа 42–168, суперсемплинг с нормализацией диапазона, RGB #000000), затем
+уточнены до меньшего периода мотива, и дополнены набором LinenWeave,
+MicroAsterisk, PlainWeave, Herringbone, MicroGrid. LinenWeave получена из
+предоставленного образца ткани: измеренный шаг нитей ≈3,44×3,71 px пересемплирован
+до целых 3 px, повторяющийся сегмент свёрнут по модулю ячейки 12×12 усреднением
+повторов, яркость отображена в альфу 42–168. Периодические проверки
 сами по себе не доказывают визуальную бесшовность в OpenGlass.
 
 Подготовка исходных 01/02 (не путать с масштабом пользователя):
@@ -64,7 +69,8 @@ DragonScale, MicroChevron, CircuitMaze, CrossStitch, TwillWeave. CircuitMaze
 ### Векторные рисунки
 
 Самостоятельные единые SVG-источники: SilkWave, FoldedVeil, CornerGlow, PrismGlints,
-LiquidCaustics, AuroraCurtain, IceFracture, NebulaDrift. Это реальные векторы без встроенных растровых изображений;
+LiquidCaustics, AuroraCurtain, IceFracture, NebulaDrift, VortexSwirl, TopoContours,
+WaveInterference, CathedralRose. Это реальные векторы без встроенных растровых изображений;
 геометрия и прозрачность взяты из утверждённых исходников без изменения. `viewBox` и
 `preserveAspectRatio` определяют растеризацию; текущие композиции используют
 1920×1080 и `none` для заполнения холста. У градиентов добавленных композиций
