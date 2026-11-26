@@ -39,6 +39,12 @@ namespace
             reinterpret_cast<const BYTE*>(value.c_str()), static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t)));
         if (error) throw error;
     }
+    void WriteDword(HKEY key, const wchar_t* name, DWORD value)
+    {
+        const auto error = RegSetValueExW(key, name, 0, REG_DWORD,
+            reinterpret_cast<const BYTE*>(&value), sizeof(value));
+        if (error) throw error;
+    }
     bool SafeFile(const std::wstring& path)
     {
         auto current = path;
@@ -51,6 +57,27 @@ namespace
             current.resize(slash);
         }
         return true;
+    }
+    // Directory GlassSettings publishes canvases into; also proves earlier ownership.
+    std::wstring PublishedDirectory()
+    {
+        std::wstring directory;
+        PWSTR programData = nullptr;
+        if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_ProgramData, 0, nullptr, &programData)))
+        {
+            directory = std::wstring(programData) + L"\\OpenGlass\\Presets\\Textured";
+            CoTaskMemFree(programData);
+        }
+        return directory;
+    }
+    bool InsidePublishedDirectory(const std::wstring& path)
+    {
+        const auto directory = PublishedDirectory();
+        if (directory.empty() || path.size() <= directory.size() + 1) return false;
+        if (_wcsnicmp(path.c_str(), directory.c_str(), directory.size()) != 0) return false;
+        if (path[directory.size()] != L'\\') return false;
+        const auto name = path.substr(directory.size() + 1);
+        return name.find_first_of(L"\\/:") == std::wstring::npos && name.find(L"..") == std::wstring::npos;
     }
     bool ValidHash(const std::wstring& path, const std::wstring& expected, LONG width, LONG height)
     {
@@ -171,58 +198,75 @@ namespace
             auto active = ReadString(dwm.value, L"CustomThemeReflection");
             DWORD managed = 0, bytes = sizeof(managed);
             RegGetValueW(root.value, nullptr, L"Managed", RRF_RT_REG_DWORD, nullptr, &managed, &bytes);
-            // Adopt a ready canvas of the current topology when the last explicit
-            // selection was ours: after a topology change that happened while the
-            // platform was not observing, the applied value is empty or belongs to a
-            // previous profile. An external image is still never replaced.
-            const bool adopt = managed != 0
-                && (active.empty() || _wcsicmp(active.c_str(), owned.c_str()) != 0);
-            if (!adopt)
+            // Same ABI decision table as GlassSettings: never a second rule set.
+            const auto published = PublishedDirectory();
+            std::wstring output;
+            bool recipe = false;
+            Key profile;
+            auto subkey = std::wstring(L"Profiles\\") + current.key;
+            if (!RegOpenKeyExW(root.value, subkey.c_str(), 0, KEY_READ, &profile.value))
             {
-                DebugLog(DBG_IMPORTANT, L"[GlassSettings][ReflectionProfiles] skip unmanaged: Managed=%lu active=%ls owned=%ls",
-                    managed, active.c_str(), owned.c_str());
+                DWORD ready = 0; bytes = sizeof(ready);
+                RegGetValueW(profile.value, nullptr, L"Ready", RRF_RT_REG_DWORD, nullptr, &ready, &bytes);
+                auto candidate = ReadString(profile.value, L"Output");
+                auto name = candidate.size() > published.size() + 1 ? candidate.substr(published.size() + 1) : L"";
+                if (ready && InsidePublishedDirectory(candidate)
+                    && name.find(current.key) != std::wstring::npos
+                    && ValidHash(candidate, ReadString(profile.value, L"OutputHash"), current.width, current.height)) output = candidate;
+                // A recipe that can be rendered again: source present and belonging to
+                // this profile. Generation itself belongs to GS (SVG/PNG pipeline).
+                auto source = ReadString(profile.value, L"Source");
+                recipe = !source.empty() && GetFileAttributesW(source.c_str()) != INVALID_FILE_ATTRIBUTES
+                    && SafeFile(source);
+            }
+            const bool matches = !output.empty() && _wcsicmp(active.c_str(), output.c_str()) == 0;
+            const auto decision = Decide(active.empty(), InsidePublishedDirectory(active), matches,
+                !output.empty(), recipe);
+            if (decision.action == Action::None)
+            {
+                DebugLog(DBG_IMPORTANT, L"[GlassSettings][ReflectionProfiles] synchronised: Managed=%lu active=%ls owned=%ls ready=%d recipe=%d",
+                    managed, active.c_str(), owned.c_str(), output.empty() ? 0 : 1, recipe ? 1 : 0);
                 lastKey = current.key; result = S_FALSE;
             }
             else
             {
-                Key profile;
-                auto subkey = std::wstring(L"Profiles\\") + current.key;
-                std::wstring output;
-                if (!RegOpenKeyExW(root.value, subkey.c_str(), 0, KEY_READ, &profile.value))
-                {
-                    DWORD ready = 0; bytes = sizeof(ready);
-                    RegGetValueW(profile.value, nullptr, L"Ready", RRF_RT_REG_DWORD, nullptr, &ready, &bytes);
-                    auto candidate = ReadString(profile.value, L"Output");
-                    PWSTR programData = nullptr;
-                    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_ProgramData, 0, nullptr, &programData)))
-                    {
-                        std::wstring prefix = std::wstring(programData) + L"\\OpenGlass\\Presets\\Textured\\";
-                        CoTaskMemFree(programData);
-                        auto name = candidate.size() > prefix.size() ? candidate.substr(prefix.size()) : L"";
-                        if (ready && _wcsnicmp(candidate.c_str(), prefix.c_str(), prefix.size()) == 0
-                            && name.find_first_of(L"\\/:") == std::wstring::npos && name.find(L"..") == std::wstring::npos
-                            && name.find(current.key) != std::wstring::npos && ValidHash(candidate, ReadString(profile.value, L"OutputHash"), current.width, current.height)) output = candidate;
-                    }
-                }
-                DebugLog(DBG_IMPORTANT, L"[GlassSettings][ReflectionProfiles] selection=%ls active=%ls output=%ls",
-                    output.empty() ? L"default (profile missing/not ready/invalid PNG)" : L"verified cached profile", active.c_str(), output.c_str());
+                DebugLog(DBG_IMPORTANT, L"[GlassSettings][ReflectionProfiles] reconcile action=%d active=%ls output=%ls recipe=%d",
+                    static_cast<int>(decision.action), active.c_str(), output.c_str(), recipe ? 1 : 0);
                 Snapshot check{}; check.size = sizeof(check);
                 if (FAILED(CaptureSnapshot(&check)) || wcscmp(current.key, check.key)) throw static_cast<DWORD>(ERROR_RETRY);
-                if (_wcsicmp(active.c_str(), output.c_str()))
+                // Regenerate needs the Settings render pipeline; never guess a canvas
+                // here. Drop our stale value instead and let OpenGlass use its default
+                // until GS rebuilds the canvas for this profile.
+                if (decision.action == Action::Clear || decision.action == Action::Regenerate)
                 {
-                    if (output.empty())
-                    {
-                        auto error = RegDeleteValueW(dwm.value, L"CustomThemeReflection");
-                        if (error && error != ERROR_FILE_NOT_FOUND) throw static_cast<DWORD>(error);
-                    }
-                    else WriteString(dwm.value, L"CustomThemeReflection", output);
-                    WriteString(root.value, L"ManagedOutput", output);
-                    // Match GS reflection reload: address the Dwm window, never restart OG.
+                    auto error = RegDeleteValueW(dwm.value, L"CustomThemeReflection");
+                    if (error && error != ERROR_FILE_NOT_FOUND) throw static_cast<DWORD>(error);
+                    // Same end state as GS ClearStaleProfileCanvas: nothing is ours now.
+                    WriteString(root.value, L"ManagedOutput", L"");
+                    WriteDword(root.value, L"Managed", 0);
                     HWND window = FindWindowW(L"Dwm", nullptr);
                     const BOOL posted = window ? PostMessageW(window, WM_THEMECHANGED, 0, 0) : FALSE;
                     DebugLog(posted ? DBG_IMPORTANT : DBG_WARNING,
-                        L"[GlassSettings][ReflectionProfiles] applied; Dwm=%p WM_THEMECHANGED posted=%d error=%lu",
-                        window, posted, posted ? ERROR_SUCCESS : (window ? GetLastError() : ERROR_NOT_FOUND));
+                        L"[GlassSettings][ReflectionProfiles] cleared action=%d; Dwm=%p WM_THEMECHANGED posted=%d",
+                        static_cast<int>(decision.action), window, posted);
+                }
+                else
+                {
+                    // Adopt: the ready canvas of the current profile becomes applied.
+                    if (_wcsicmp(active.c_str(), output.c_str()))
+                    {
+                        WriteString(dwm.value, L"CustomThemeReflection", output);
+                        // Match GS reflection reload: address the Dwm window, never restart OG.
+                        HWND window = FindWindowW(L"Dwm", nullptr);
+                        const BOOL posted = window ? PostMessageW(window, WM_THEMECHANGED, 0, 0) : FALSE;
+                        DebugLog(posted ? DBG_IMPORTANT : DBG_WARNING,
+                            L"[GlassSettings][ReflectionProfiles] applied; Dwm=%p WM_THEMECHANGED posted=%d error=%lu",
+                            window, posted, posted ? ERROR_SUCCESS : (window ? GetLastError() : ERROR_NOT_FOUND));
+                    }
+                    // Ownership after the value, as GS AdoptReadyProfile does: the next
+                    // Read() resolves the profile the applied value now points at.
+                    WriteString(root.value, L"ManagedOutput", output);
+                    WriteDword(root.value, L"Managed", 1);
                 }
                 lastKey = current.key; result = S_OK;
             }

@@ -187,6 +187,41 @@
                 </Border>
             </Grid>
 
+            <!-- Состояние синхронизации с OpenGlass -->
+            <Border
+                x:Name="ReflectionSyncBanner"
+                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Padding="16,12"
+                Visibility="Collapsed">
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <FontIcon
+                        Grid.Column="0"
+                        VerticalAlignment="Center"
+                        FontSize="18"
+                        Glyph="&#xE7BA;"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <TextBlock
+                        x:Name="ReflectionSyncBannerText"
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        TextWrapping="Wrap"
+                        Style="{StaticResource BodyTextBlockStyle}" />
+                    <Button
+                        x:Name="ReflectionSyncBannerButton"
+                        Grid.Column="2"
+                        Click="ReflectionSyncBannerButton_OnClick"
+                        Visibility="Collapsed" />
+                </Grid>
+            </Border>
+
             <!-- Информационный блок -->
             <ctrl:SettingsInfoBlock
                 x:Name="ReflectionInfoBlock"

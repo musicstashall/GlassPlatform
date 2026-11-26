@@ -76,6 +76,8 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
     private int _themeReloadGeneration;
     private int _displayReflectionRevision;
     private string? _pendingDisplayReflectionSource;
+    private bool _reflectionCanvasMissing;
+    private string? _reflectionRecipeSource;
     private ReflectionRenderState.State? _lastAppliedReflectionRecipe;
     private string? _lastThemeFilePath;
     private DwmRegistryHive _hive = DwmRegistryHive.Hkcu;
@@ -234,6 +236,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         EmptyText.Text = GlassSettingsResources.Get("Dwm_ReflectionEmpty");
         MaterialEmptyText.Text = GlassSettingsResources.Get("Dwm_MaterialEmpty");
         AtlasEmptyText.Text = GlassSettingsResources.Get("Dwm_AtlasEmpty");
+        UpdateReflectionSyncBanner();
         ReflectionInfoBlock.Title = GlassSettingsResources.Get("Dwm_ReflectionInfoTitle");
         ReflectionInfoBlock.Message = GlassSettingsResources.Get("Dwm_ReflectionInfoMessage");
         AdvancedExpander.Title = GlassSettingsResources.Get("Dwm_AdvancedColorizationTitle");
@@ -350,16 +353,16 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         _exportAtlasLabel.Text = GlassSettingsResources.Get("Dwm_ExportAtlasButton");
     }
 
-    private void OnLoaded(object sender, RoutedEventArgs e)
+    private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         SettingsSession.Current.DirtyChanged += Session_OnDirtyChanged;
         LoadReflectionImages();
         LoadMaterialImages();
         LoadAtlasImages();
         // A topology change can happen while neither the platform nor this page runs.
-        // Then the applied value points at a canvas of a previous profile, so restore
-        // the ready canvas published for the current one before reading the selection.
-        RestoreReadyReflectionProfile();
+        // Reconcile the applied value with the record of the current profile before the
+        // selection is read, so the gallery shows what OpenGlass actually uses.
+        await SynchronizeReflectionProfileAsync();
         Reload();
         _lastPivotIndex = ActivePivot.SelectedIndex;
         DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, UpdateHeroLayout);
@@ -436,43 +439,77 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
     }
 
     /// <summary>
-    /// Startup/open path: adopt the ready canvas of the current topology when the
-    /// applied value is our own managed output of a different profile. External or
-    /// default selections are left alone, and nothing is generated here.
+    /// Keeps OpenGlass on the image GlassSettings knows about. The applied value is
+    /// reconciled with the record of the current display profile using the same ABI
+    /// decision table as the optional platform helper: re-apply the profile canvas,
+    /// rebuild it from the stored recipe when the canvas is missing, or remove the
+    /// value so OpenGlass falls back to its default reflection. An image that is not
+    /// one of our published canvases is never overwritten.
     /// </summary>
-    private void RestoreReadyReflectionProfile()
+    private async Task SynchronizeReflectionProfileAsync()
     {
         if (_hive != DwmRegistryHive.Hkcu) return;
-        var active = DwmRegistryStore.ReadString(_hive, ReflectionRegistryKey);
-        if (!ReflectionRenderState.IsManagedOutput(active)) return;
-        var ready = ReflectionRenderState.ReadReadyProfile();
-        if (ready is null || SamePath(ready.Output, active)) return;
         try
         {
-            using var publication = new Mutex(false, ReflectionDisplayProfile.PublicationMutex);
-            bool held;
-            try { held = publication.WaitOne(TimeSpan.FromSeconds(10)); }
-            catch (AbandonedMutexException) { held = true; }
-            if (!held) return;
-            try
+            var active = DwmRegistryStore.ReadString(_hive, ReflectionRegistryKey);
+            var ready = ReflectionRenderState.ReadReadyProfile();
+            var record = ReflectionRenderState.ReadProfileRecord();
+            var decision = ReflectionProfilePolicy.DecideForRegistry(
+                active, ready?.Output, record is not null && ReflectionRenderState.CanRegenerate(record));
+            if (decision.Action == ReflectionProfileAction.None) return;
+
+            string profile = ReflectionDisplayProfile.Capture().Key;
+            bool changed;
+            using (var publication = new Mutex(false, ReflectionDisplayProfile.PublicationMutex))
             {
-                string profile = ReflectionDisplayProfile.Capture().Key;
-                if (ReflectionRenderState.AdoptReadyProfile(profile))
+                bool held;
+                try { held = publication.WaitOne(TimeSpan.FromSeconds(10)); }
+                catch (AbandonedMutexException) { held = true; }
+                if (!held) return;
+                try
                 {
-                    System.Diagnostics.Debug.WriteLine(
-                        $"[ReflectionConfigure] startup: restored ready profile={profile}");
-                    // Match a normal selection: the session baseline follows the
-                    // value we just restored, so no unsaved edit is implied.
-                    SettingsSession.Current.SyncScopeBaseline(
-                        DwmThemeScopeCatalog.ReflectionCollectionScope());
+                    changed = decision.Action switch
+                    {
+                        ReflectionProfileAction.Adopt => ReflectionRenderState.AdoptReadyProfile(),
+                        ReflectionProfileAction.Regenerate => await RegenerateProfileCanvasAsync(record, profile),
+                        _ => ReflectionRenderState.ClearAppliedProfile(active)
+                    };
                 }
+                finally { publication.ReleaseMutex(); }
             }
-            finally { publication.ReleaseMutex(); }
+            if (!changed) return;
+            System.Diagnostics.Debug.WriteLine(
+                $"[ReflectionConfigure] synchronize: {decision.Action} profile={profile}");
+            // A running OpenGlass must re-read immediately: the value changed under it.
+            Core.Platform.LiveReloadScheduler.NotifyThemeChangedNow();
+            // The value we wrote is not an unsaved edit: the baseline follows it.
+            SettingsSession.Current.SyncScopeBaseline(DwmThemeScopeCatalog.ReflectionCollectionScope());
         }
         catch (Exception error)
         {
-            System.Diagnostics.Trace.TraceWarning("Reflection profile restore: {0}", error);
+            System.Diagnostics.Trace.TraceWarning("Reflection profile synchronize: {0}", error);
         }
+    }
+
+    /// <summary>
+    /// The profile has a recipe but no canvas: build the canvas again from the stored
+    /// source and settings, then apply it. Returns false when the recipe cannot be
+    /// rendered any more; the decision table then falls back to removing the value.
+    /// </summary>
+    private async Task<bool> RegenerateProfileCanvasAsync(ReflectionRenderState.State? record, string profile)
+    {
+        if (record is null) return false;
+        try
+        {
+            await ReflectionTextureService.PrepareAsync(record.Source, record.Settings, profile);
+        }
+        catch (Exception error)
+        {
+            System.Diagnostics.Trace.TraceWarning("Reflection canvas regeneration failed: {0}", error);
+            return ReflectionRenderState.ClearAppliedProfile(
+                DwmRegistryStore.ReadString(_hive, ReflectionRegistryKey));
+        }
+        return ReflectionRenderState.AdoptReadyProfile();
     }
 
     private async Task RebindReflectionToDisplayAsync()
@@ -480,7 +517,11 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         if (_hive != DwmRegistryHive.Hkcu) { Reload(); return; }
         int revision = ++_displayReflectionRevision;
         var activeAtSignal = DwmRegistryStore.ReadString(_hive, ReflectionRegistryKey);
-        if (!ReflectionRenderState.IsManagedOutput(activeAtSignal)) { Reload(); return; }
+        // Ownership by the shared rule: a published canvas or a ready record is ours,
+        // so the recipe is transferred instead of being dropped on a hot-plug.
+        if (!ReflectionRenderState.IsManagedOutput(activeAtSignal)
+            && !ReflectionProfilePolicy.IsPublishedCanvas(activeAtSignal)
+            && ReflectionRenderState.ReadReadyProfile() is null) { Reload(); return; }
         var previous = ReflectionRenderState.ReadForOutput(_currentReflectionPath) ?? _lastAppliedReflectionRecipe;
         if (previous is null) { Reload(); return; }
         string? selectedPath = _currentReflectionPath;
@@ -497,11 +538,15 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
                 var active = NormalizePath(DwmRegistryStore.ReadString(_hive, ReflectionRegistryKey));
                 // Host may already have restored this profile, or selected default
                 // while GS builds the missing canvas. Never replace an external image.
-                return ReflectionRenderState.IsManagedOutput(active)
+                return (ReflectionRenderState.IsManagedOutput(active)
+                        || ReflectionProfilePolicy.IsPublishedCanvas(active))
                     && (SamePath(active, selectedPath) || (matching is not null && SamePath(active, matching.Output))
                         || string.IsNullOrWhiteSpace(active));
             }
             await ApplyReflectionSourceAsync(recipe.Source, recipe.Settings, profile, StillSelected, activeAtSignal);
+            // Whatever the transfer produced, the applied value must end up matching
+            // the record of this profile - the same table, not a second hot-plug rule.
+            await SynchronizeReflectionProfileAsync();
         }
         catch (Exception error)
         {
@@ -818,6 +863,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
     private void Reload()
     {
         _loading = true;
+        UpdateReflectionSyncBanner();
         _currentReflectionPath = NormalizePath(DwmRegistryStore.ReadStringForPage(_hive, ReflectionRegistryKey));
         var appliedRecipe = ReflectionRenderState.ReadForOutput(_currentReflectionPath);
         if (appliedRecipe is not null) _lastAppliedReflectionRecipe = appliedRecipe;
@@ -890,6 +936,65 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         _materialOpacitySlider.Value = Math.Clamp(opt ?? DwmDefaults.DefaultWhenKeyAbsent(MaterialOpacityKey), 0u, 100u);
         _materialOpacitySlider.IsEnabled = MaterialCollectionExpander.IsGateOn;
         SettingsSliderCommit.SyncCommittedValue(_materialOpacitySlider, _materialOpacitySlider.Value);
+    }
+
+    /// <summary>
+    /// Explains the state the reconciliation left OpenGlass in: which canvas is
+    /// applied for this display profile, or that the profile has a recipe but no
+    /// canvas yet and it can be generated right here.
+    /// </summary>
+    private void UpdateReflectionSyncBanner()
+    {
+        var record = _hive == DwmRegistryHive.Hkcu ? ReflectionRenderState.ReadProfileRecord() : null;
+        _reflectionCanvasMissing = record is not null && ReflectionRenderState.ReadReadyProfile() is null;
+        _reflectionRecipeSource = _reflectionCanvasMissing && ReflectionRenderState.CanRegenerate(record)
+            ? record!.Source
+            : null;
+        if (!_reflectionCanvasMissing)
+        {
+            ReflectionSyncBanner.Visibility = Visibility.Collapsed;
+            return;
+        }
+        ReflectionSyncBanner.Visibility = Visibility.Visible;
+        ReflectionSyncBannerText.Text = _reflectionRecipeSource is null
+            ? GlassSettingsResources.Get("Dwm_ReflectionCanvasUnavailable")
+            : GlassSettingsResources.Get("Dwm_ReflectionCanvasMissing");
+        ReflectionSyncBannerButton.Content = GlassSettingsResources.Get("Dwm_ReflectionCanvasGenerate");
+        ReflectionSyncBannerButton.Visibility = _reflectionRecipeSource is null ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private async void ReflectionSyncBannerButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_reflectionRecipeSource is null) return;
+        ReflectionSyncBannerButton.IsEnabled = false;
+        try
+        {
+            string profile = ReflectionDisplayProfile.Capture().Key;
+            var record = ReflectionRenderState.ReadProfileRecord();
+            if (record is null) return;
+            await ReflectionTextureService.PrepareAsync(record.Source, record.Settings, profile);
+            await SynchronizeReflectionProfileAsync();
+            Reload();
+        }
+        catch (Exception error)
+        {
+            System.Diagnostics.Trace.TraceWarning("Reflection canvas generation failed: {0}", error);
+            await HostedConfirmationDialogService.ConfirmAsync(new HostedConfirmationSpec
+            {
+                Title = GlassSettingsResources.Get("Dialog_ReflectionPrepareFailedTitle"),
+                Body = HostedConfirmationDialogService.CreateBody(
+                    GlassSettingsResources.Format("Dialog_ReflectionPrepareFailedBody",
+                        GlassSettings.Core.Platform.PlatformPaths.ReflectionAppliedDirectory,
+                        error.Message)),
+                Footer = HostedConfirmationDialogService.CreateFooter(
+                    GlassSettingsResources.Get("Dialog_Understood"))
+            });
+        }
+        finally
+        {
+            ReflectionSyncBannerButton.IsEnabled = true;
+            UpdateReflectionSyncBanner();
+        }
     }
 
     private void UpdateReflectionTileSelection()

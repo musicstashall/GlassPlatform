@@ -337,6 +337,9 @@
   <data name="Dwm_OpacityModeDesc" xml:space="preserve"><value>Режим и значение непрозрачности</value></data>
   <data name="Dwm_PivotActive" xml:space="preserve"><value>Активное окно</value></data>
   <data name="Dwm_PivotInactive" xml:space="preserve"><value>Неактивное окно</value></data>
+  <data name="Dwm_ReflectionCanvasMissing" xml:space="preserve"><value>Для этой конфигурации экранов нет готового полотна отражения. OpenGlass сейчас показывает системное отражение по умолчанию. Полотно можно построить заново по сохранённому рецепту этой конфигурации.</value></data>
+  <data name="Dwm_ReflectionCanvasUnavailable" xml:space="preserve"><value>Для этой конфигурации экранов нет полотна отражения, а исходное изображение рецепта недоступно. OpenGlass использует системное отражение по умолчанию.</value></data>
+  <data name="Dwm_ReflectionCanvasGenerate" xml:space="preserve"><value>Сгенерировать полотно</value></data>
   <data name="Dwm_ReflectionEmpty" xml:space="preserve"><value>Изображения GlassReflection не найдены.</value></data>
   <data name="Dwm_ReflectionImage" xml:space="preserve"><value>Отражение</value></data>
   <data name="Dwm_ReflectionImageDesc" xml:space="preserve"><value>Ресурсы GlassReflection</value></data>
