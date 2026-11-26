@@ -37,38 +37,116 @@ public static class ReflectionPixelEffects
         }
     }
 
+    /// <summary>Per-axis resampling weights: whole-source-block area average when
+    /// shrinking (a 2-tap bilinear subsamples fine weave into tile-periodic moire),
+    /// wrapped bilinear when enlarging. Weights sum to one and wrap toroidally, so a
+    /// periodic tile stays periodic at any scale and repeated copies stay seamless.</summary>
+    private sealed record AxisSamples(int[] Starts, int[] Counts, int[] Indices, double[] Weights);
+
+    private static AxisSamples BuildAxis(int src, int dst)
+    {
+        double ratio = (double)src / dst;
+        var starts = new int[dst];
+        var counts = new int[dst];
+        var indices = new List<int>();
+        var weights = new List<double>();
+        for (int i = 0; i < dst; i++)
+        {
+            starts[i] = indices.Count;
+            if (ratio > 1)
+            {
+                double a = i * ratio, b = (i + 1) * ratio;
+                for (int s = (int)Math.Floor(a); s <= (int)Math.Floor(b - 1e-9); s++)
+                {
+                    double overlap = Math.Min(b, s + 1) - Math.Max(a, s);
+                    if (overlap <= 0) continue;
+                    indices.Add(((s % src) + src) % src);
+                    weights.Add(overlap / ratio);
+                    counts[i]++;
+                }
+            }
+            else
+            {
+                double p = (i + 0.5) * ratio - 0.5;
+                int first = (int)Math.Floor(p);
+                double f = p - first;
+                for (int d = 0; d < 2; d++)
+                {
+                    double weight = d == 0 ? 1 - f : f;
+                    if (weight <= 0) continue;
+                    indices.Add((((first + d) % src) + src) % src);
+                    weights.Add(weight);
+                    counts[i]++;
+                }
+            }
+        }
+        return new AxisSamples(starts, counts, indices.ToArray(), weights.ToArray());
+    }
+
+    private static void Accumulate(byte[] source, int stride, int baseIndex, int column,
+        AxisSamples axis, byte[] target, int targetOffset)
+    {
+        double alpha = 0, b = 0, g = 0, r = 0;
+        int start = axis.Starts[column], count = axis.Counts[column];
+        for (int k = 0; k < count; k++)
+        {
+            int index = (baseIndex + axis.Indices[start + k] * stride) * 4;
+            double a = source[index + 3] * axis.Weights[start + k];
+            alpha += a; b += source[index] * a; g += source[index + 1] * a; r += source[index + 2] * a;
+        }
+        if (alpha > 0)
+        {
+            target[targetOffset] = (byte)Math.Clamp((int)Math.Round(b / alpha), 0, 255);
+            target[targetOffset + 1] = (byte)Math.Clamp((int)Math.Round(g / alpha), 0, 255);
+            target[targetOffset + 2] = (byte)Math.Clamp((int)Math.Round(r / alpha), 0, 255);
+            target[targetOffset + 3] = (byte)Math.Clamp((int)Math.Round(alpha), 0, 255);
+        }
+    }
+
     public static byte[] Resize(byte[] source, int sw, int sh, int width, int height, double zoom = 0)
     {
         if (zoom == 0 && sw == width && sh == height) return source;
         var result = new byte[checked(width * height * 4)];
+        if (zoom > 0)
+        {
+            for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+            {
+                double sx = (x + .5 - width / 2.0) / zoom + sw / 2.0 - .5;
+                double sy = (y + .5 - height / 2.0) / zoom + sh / 2.0 - .5;
+                int ix = (int)Math.Floor(sx), iy = (int)Math.Floor(sy);
+                double fx = sx - ix, fy = sy - iy, alpha = 0;
+                double b = 0, g = 0, r = 0;
+                for (int dy = 0; dy < 2; dy++)
+                for (int dx = 0; dx < 2; dx++)
+                {
+                    int px = ix + dx, py = iy + dy;
+                    if (px < 0 || py < 0 || px >= sw || py >= sh) continue;
+                    int index = (py * sw + px) * 4;
+                    double weight = (dx == 0 ? 1 - fx : fx) * (dy == 0 ? 1 - fy : fy);
+                    double a = source[index + 3] * weight;
+                    alpha += a; b += source[index] * a; g += source[index + 1] * a; r += source[index + 2] * a;
+                }
+                int target = (y * width + x) * 4;
+                if (alpha > 0)
+                {
+                    result[target] = (byte)Math.Clamp((int)Math.Round(b / alpha), 0, 255);
+                    result[target + 1] = (byte)Math.Clamp((int)Math.Round(g / alpha), 0, 255);
+                    result[target + 2] = (byte)Math.Clamp((int)Math.Round(r / alpha), 0, 255);
+                    result[target + 3] = (byte)Math.Clamp((int)Math.Round(alpha), 0, 255);
+                }
+            }
+            return result;
+        }
+        var axisX = BuildAxis(sw, width);
+        var axisY = BuildAxis(sh, height);
+        var intermediate = new byte[checked(width * sh * 4)];
+        for (int y = 0; y < sh; y++)
+        for (int x = 0; x < width; x++)
+            Accumulate(source, 1, y * sw, x, axisX, intermediate, (y * width + x) * 4);
         for (int y = 0; y < height; y++)
         for (int x = 0; x < width; x++)
-        {
-            double sx = zoom > 0 ? (x + .5 - width / 2.0) / zoom + sw / 2.0 - .5 : (x + .5) * sw / width - .5;
-            double sy = zoom > 0 ? (y + .5 - height / 2.0) / zoom + sh / 2.0 - .5 : (y + .5) * sh / height - .5;
-            int ix = (int)Math.Floor(sx), iy = (int)Math.Floor(sy);
-            double fx = sx - ix, fy = sy - iy, alpha = 0;
-            double b = 0, g = 0, r = 0;
-            for (int dy = 0; dy < 2; dy++)
-            for (int dx = 0; dx < 2; dx++)
-            {
-                int px = ix + dx, py = iy + dy;
-                if (zoom > 0 && (px < 0 || py < 0 || px >= sw || py >= sh)) continue;
-                px = (px % sw + sw) % sw; py = (py % sh + sh) % sh;
-                int index = (py * sw + px) * 4;
-                double weight = (dx == 0 ? 1 - fx : fx) * (dy == 0 ? 1 - fy : fy);
-                double a = source[index + 3] * weight;
-                alpha += a; b += source[index] * a; g += source[index + 1] * a; r += source[index + 2] * a;
-            }
-            int target = (y * width + x) * 4;
-            if (alpha > 0)
-            {
-                result[target] = (byte)Math.Clamp((int)Math.Round(b / alpha), 0, 255);
-                result[target + 1] = (byte)Math.Clamp((int)Math.Round(g / alpha), 0, 255);
-                result[target + 2] = (byte)Math.Clamp((int)Math.Round(r / alpha), 0, 255);
-                result[target + 3] = (byte)Math.Clamp((int)Math.Round(alpha), 0, 255);
-            }
-        }
+            Accumulate(intermediate, width, x, y, axisY, result, (y * width + x) * 4);
         return result;
     }
 
