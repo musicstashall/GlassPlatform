@@ -291,11 +291,14 @@ C:\Program Files\GlassPlatform\OpenGlass\Resources (если native Program File
 `UPSTREAMOPENGLASSROOT` — отдельное read-only discovery свойство зависимости,
 не directory payload. Каталог MSI строится независимо от него от
 `ProgramFiles64Folder`. `PlatformPaths.OpenGlassResourcesRoot` и
-`OpenGlassResourcesDirectory` используют тот же native Program Files из HKLM64,
-включая x86 Settings на x64 Windows. ThemeImageCatalog ищет встроенные дополнения
-только в этом корне; внешние DLL/Host/GUI продолжают разрешаться по официальному
-Inno InstallLocation. Указанные пользователем custom asset paths не меняются.
-При недоступном системном пути Settings не подставляет внешний OG/AppBase.
+`OpenGlassResourcesDirectory` разрешаются относительно GlassSettings.exe:
+`OpenGlass\` в родительской папке его каталога (в MSI-раскладке —
+`ProgramFiles64Folder\GlassPlatform\OpenGlass` рядом с `GlassSettings\`);
+реестр для этого корня не читается, отсутствующий каталог означает пустой
+встроенный каталог, а не подстановку чужого пути. ThemeImageCatalog ищет
+встроенные дополнения только в этом корне; внешние DLL/Host/GUI продолжают
+разрешаться по официальному Inno InstallLocation. Указанные пользователем
+custom asset paths не меняются.
 
 Проверка `openglass_resources_contract.py`: XML дерево MSI/независимость
 upstream search от destination и source wiring Settings/ThemeImageCatalog.

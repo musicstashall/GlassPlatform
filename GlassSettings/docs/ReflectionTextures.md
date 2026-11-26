@@ -3,6 +3,10 @@
 Актуальная реализация GlassSettings. Исходники находятся в
 `OpenGlass/Resources/GlassReflection`, поставляются пакетом OpenGlass Resources;
 пользовательский PNG для OpenGlass формируется отдельно в ProgramData.
+Встроенный каталог дополнений GlassSettings ищет относительно себя: `OpenGlass\`
+в родительской папке каталога GlassSettings.exe (MSI-раскладка —
+`ProgramFiles64Folder\GlassPlatform\OpenGlass` рядом с `GlassSettings\`);
+реестр для этого корня не читается, отсутствующий каталог даёт пустую коллекцию.
 
 Как GS удерживает OpenGlass на своём изображении (одна таблица решений для
 старта, hot-plug и Apply) — раздел
