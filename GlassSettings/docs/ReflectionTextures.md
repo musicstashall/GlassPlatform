@@ -64,8 +64,7 @@ DragonScale, MicroChevron, CircuitMaze, CrossStitch, TwillWeave. CircuitMaze
 ### Векторные рисунки
 
 Самостоятельные единые SVG-источники: SilkWave, FoldedVeil, CornerGlow, PrismGlints,
-LiquidCaustics, AuroraCurtain, FrameBevel, GlassRain, HorizonHaze, IceFracture,
-NebulaDrift. Это реальные векторы без встроенных растровых изображений;
+LiquidCaustics, AuroraCurtain, IceFracture, NebulaDrift. Это реальные векторы без встроенных растровых изображений;
 геометрия и прозрачность взяты из утверждённых исходников без изменения. `viewBox` и
 `preserveAspectRatio` определяют растеризацию; текущие композиции используют
 1920×1080 и `none` для заполнения холста. У градиентов добавленных композиций
