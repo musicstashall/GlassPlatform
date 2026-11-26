@@ -436,17 +436,18 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
     }
 
     /// <summary>
-    /// Startup/open path: adopt the ready canvas of the current topology when the
-    /// applied value is our own managed output of a different profile. External or
-    /// default selections are left alone, and nothing is generated here.
+    /// Startup/open path. Uses the same ABI decision table as the optional platform
+    /// helper, so GS behaves identically with or without the platform installed:
+    /// adopt the ready canvas of the current profile, or clear our stale canvas when
+    /// this profile has none. A foreign selection is never touched.
     /// </summary>
     private void RestoreReadyReflectionProfile()
     {
         if (_hive != DwmRegistryHive.Hkcu) return;
         var active = DwmRegistryStore.ReadString(_hive, ReflectionRegistryKey);
-        if (!ReflectionRenderState.IsManagedOutput(active)) return;
         var ready = ReflectionRenderState.ReadReadyProfile();
-        if (ready is null || SamePath(ready.Output, active)) return;
+        var decision = ReflectionProfilePolicy.DecideForRegistry(active, ready is not null);
+        if (decision.Action == ReflectionProfileAction.None) return;
         try
         {
             using var publication = new Mutex(false, ReflectionDisplayProfile.PublicationMutex);
@@ -457,15 +458,18 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
             try
             {
                 string profile = ReflectionDisplayProfile.Capture().Key;
-                if (ReflectionRenderState.AdoptReadyProfile(profile))
-                {
-                    System.Diagnostics.Debug.WriteLine(
-                        $"[ReflectionConfigure] startup: restored ready profile={profile}");
-                    // Match a normal selection: the session baseline follows the
-                    // value we just restored, so no unsaved edit is implied.
-                    SettingsSession.Current.SyncScopeBaseline(
-                        DwmThemeScopeCatalog.ReflectionCollectionScope());
-                }
+                bool changed = decision.Action == ReflectionProfileAction.Adopt
+                    ? ReflectionRenderState.AdoptReadyProfile(profile)
+                    : ReflectionRenderState.ClearStaleProfileCanvas(active);
+                if (!changed) return;
+                System.Diagnostics.Debug.WriteLine(
+                    $"[ReflectionConfigure] startup: {decision.Action} profile={profile}");
+                // Live OpenGlass must re-read immediately; the value changed under it.
+                Core.Platform.LiveReloadScheduler.NotifyThemeChangedNow();
+                // Match a normal selection: the baseline follows the value we just
+                // changed, so neither action looks like an unsaved edit.
+                SettingsSession.Current.SyncScopeBaseline(
+                    DwmThemeScopeCatalog.ReflectionCollectionScope());
             }
             finally { publication.ReleaseMutex(); }
         }
@@ -480,7 +484,12 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         if (_hive != DwmRegistryHive.Hkcu) { Reload(); return; }
         int revision = ++_displayReflectionRevision;
         var activeAtSignal = DwmRegistryStore.ReadString(_hive, ReflectionRegistryKey);
-        if (!ReflectionRenderState.IsManagedOutput(activeAtSignal)) { Reload(); return; }
+        // Same ownership rule as startup: a published canvas is ours even if the
+        // Managed flag was reset, so the recipe is transferred instead of dropped.
+        // A ready canvas of this topology is enough, even without the Managed flag.
+        if (!ReflectionRenderState.IsManagedOutput(activeAtSignal)
+            && !ReflectionProfilePolicy.IsPublishedCanvas(activeAtSignal)
+            && ReflectionRenderState.ReadReadyProfile() is null) { Reload(); return; }
         var previous = ReflectionRenderState.ReadForOutput(_currentReflectionPath) ?? _lastAppliedReflectionRecipe;
         if (previous is null) { Reload(); return; }
         string? selectedPath = _currentReflectionPath;
@@ -497,11 +506,13 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
                 var active = NormalizePath(DwmRegistryStore.ReadString(_hive, ReflectionRegistryKey));
                 // Host may already have restored this profile, or selected default
                 // while GS builds the missing canvas. Never replace an external image.
-                return ReflectionRenderState.IsManagedOutput(active)
+                return (ReflectionRenderState.IsManagedOutput(active)
+                        || ReflectionProfilePolicy.IsPublishedCanvas(active))
                     && (SamePath(active, selectedPath) || (matching is not null && SamePath(active, matching.Output))
                         || string.IsNullOrWhiteSpace(active));
             }
-            await ApplyReflectionSourceAsync(recipe.Source, recipe.Settings, profile, StillSelected, activeAtSignal);
+            await ApplyReflectionSourceAsync(recipe.Source, recipe.Settings, profile, StillSelected, activeAtSignal,
+                automaticDisplayTransfer: true);
         }
         catch (Exception error)
         {
@@ -1221,7 +1232,8 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
     }
 
     private async Task ApplyReflectionSourceAsync(string source, ReflectionRenderSettings? settings = null,
-        string? expectedProfile = null, Func<bool>? canApply = null, string? baselineAtSignal = null)
+        string? expectedProfile = null, Func<bool>? canApply = null, string? baselineAtSignal = null,
+        bool automaticDisplayTransfer = false)
     {
         if (canApply is null)
         {
@@ -1230,6 +1242,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
             _lastAppliedReflectionRecipe = null;
         }
         Exception? preparationError = null;
+        bool clearedStaleCanvas = false;
         await PageShell.Operations.RunSequenceAsync(async seq =>
         {
             await seq.RegistryMutationAsync(async () =>
@@ -1240,6 +1253,16 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
                 try
                 {
                     path = await ReflectionTextureService.PrepareAsync(source, settings, expectedProfile);
+                    // Same decision table as startup and the platform helper, applied to
+                    // an automatic display transfer: the recipe must have published a
+                    // verified canvas for this topology before it replaces the applied
+                    // value. Otherwise the canvas of the previous topology is cleared
+                    // instead of staying applied. Manual Apply keeps the user's choice.
+                    if (automaticDisplayTransfer && ReflectionRenderState.ReadReadyProfile() is null)
+                    {
+                        clearedStaleCanvas = ReflectionRenderState.ClearStaleProfileCanvas(activeAtSignal);
+                        return;
+                    }
                     TrySelectCustomImage(ReflectionRegistryKey, path, refreshNotice: false, canApply: canApply);
                     // Only the display-change rebind passes canApply; manual tile or
                     // Configure Apply selections stay unsaved as before.
@@ -1256,6 +1279,9 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
             });
             await seq.NoticeSyncAsync(() => PageShell.RefreshSessionNoticeProgrammatic());
         });
+        if (clearedStaleCanvas)
+            System.Diagnostics.Debug.WriteLine(
+                "[ReflectionConfigure] automatic transfer: cleared stale profile canvas");
         if (preparationError is not null)
             await HostedConfirmationDialogService.ConfirmAsync(new HostedConfirmationSpec
             {

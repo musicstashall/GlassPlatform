@@ -96,6 +96,17 @@ public static class ReflectionRenderState
         Write(new(2, true, source, output, width, height, sourceHash, outputHash, settings.Normalize(),
             profile ?? ReflectionDisplayProfile.Capture().Key));
 
+    public static bool IsManaged()
+    {
+        try
+        {
+            using var root = OpenRoot();
+            using var key = root.OpenSubKey(RegistryPath);
+            return key?.GetValue("Managed") is int managed && managed == 1;
+        }
+        catch { return false; }
+    }
+
     public static bool IsManagedOutput(string? output)
     {
         try
@@ -108,9 +119,7 @@ public static class ReflectionRenderState
         catch { return false; }
     }
 
-    public static void MarkManaged(string output) => MarkManaged(output, notify: true);
-
-    private static void MarkManaged(string output, bool notify)
+    public static void MarkManaged(string output)
     {
         var state = Read();
         if (state is null || !string.Equals(state.Output, output, StringComparison.OrdinalIgnoreCase)) return;
@@ -118,23 +127,20 @@ public static class ReflectionRenderState
         using var key = root.CreateSubKey(RegistryPath, writable: true);
         key.SetValue("ManagedOutput", output, RegistryValueKind.String);
         key.SetValue("Managed", 1, RegistryValueKind.DWord);
-        if (notify)
-            _ = PostMessage(new IntPtr(0xFFFF), RegisterWindowMessage("GlassPlatform.ReflectionProfileChanged.V1"), IntPtr.Zero, IntPtr.Zero);
+        _ = PostMessage(new IntPtr(0xFFFF), RegisterWindowMessage("GlassPlatform.ReflectionProfileChanged.V1"), IntPtr.Zero, IntPtr.Zero);
     }
 
     /// <summary>
-    /// Restores a ready canvas published for the current topology when the platform
-    /// starts after a display change that happened while it was not observing.
-    /// Only our own published PNG is restored; other values are never replaced.
+    /// Adopts the ready canvas published for the current topology: writes it as the
+    /// applied value and re-asserts ownership. Only our own published PNG is used.
+    /// Returns true when the applied value actually changed.
     /// </summary>
     public static bool AdoptReadyProfile(string profile)
     {
         var state = ReadReadyProfile();
-        if (state is null || state.Profile != profile || !File.Exists(state.Output)) return false;
+        if (state is null || state.Profile != profile) return false;
         // Published canvases live in ProgramData; a record pointing elsewhere is foreign.
-        if (!string.Equals(Path.GetDirectoryName(state.Output),
-                GlassSettings.Core.Platform.PlatformPaths.ReflectionAppliedDirectory,
-                StringComparison.OrdinalIgnoreCase)) return false;
+        if (!ReflectionProfilePolicy.IsPublishedCanvas(state.Output) || !File.Exists(state.Output)) return false;
         try
         {
             using var image = File.OpenRead(state.Output);
@@ -143,17 +149,42 @@ public static class ReflectionRenderState
         catch { return false; }
         try
         {
-            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\DWM", writable: true);
-            if (key is null) return false;
-            if (string.Equals(key.GetValue("CustomThemeReflection") as string ?? "", state.Output,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                // Already active: only re-assert ownership so the host may reuse it.
-                MarkManaged(state.Output, notify: false);
-                return false;
-            }
-            key.SetValue("CustomThemeReflection", state.Output, RegistryValueKind.String);
-            MarkManaged(state.Output, notify: false);
+            using var dwm = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\DWM", writable: true);
+            if (dwm is null) return false;
+            bool changed = !string.Equals(dwm.GetValue("CustomThemeReflection") as string ?? "", state.Output,
+                StringComparison.OrdinalIgnoreCase);
+            if (changed) dwm.SetValue("CustomThemeReflection", state.Output, RegistryValueKind.String);
+            // Ownership after the value: Read() must resolve the profile it now points at.
+            using var root = OpenRoot();
+            using var key = root.CreateSubKey(RegistryPath, writable: true);
+            key.SetValue("ManagedOutput", state.Output, RegistryValueKind.String);
+            key.SetValue("Managed", 1, RegistryValueKind.DWord);
+            return changed;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// This profile has no canvas but an ours-looking value is applied (e.g. a canvas
+    /// of a previous topology). Drop it so OpenGlass falls back to its own reflection
+    /// instead of showing a picture that belongs to another display configuration.
+    /// The published PNG stays on disk; the recipe record is untouched.
+    /// </summary>
+    public static bool ClearStaleProfileCanvas(string? active)
+    {
+        // Only a published canvas may be dropped; an external selection stays.
+        if (string.IsNullOrWhiteSpace(active) || !ReflectionProfilePolicy.IsPublishedCanvas(active)) return false;
+        try
+        {
+            using var dwm = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\DWM", writable: true);
+            if (dwm is null) return false;
+            if (!string.Equals(dwm.GetValue("CustomThemeReflection") as string ?? "", active,
+                    StringComparison.OrdinalIgnoreCase)) return false;
+            dwm.DeleteValue("CustomThemeReflection", throwOnMissingValue: false);
+            using var root = OpenRoot();
+            using var key = root.OpenSubKey(RegistryPath, writable: true);
+            key?.SetValue("ManagedOutput", "", RegistryValueKind.String);
+            key?.SetValue("Managed", 0, RegistryValueKind.DWord);
             return true;
         }
         catch { return false; }

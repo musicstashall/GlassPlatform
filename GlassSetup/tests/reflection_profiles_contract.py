@@ -42,9 +42,10 @@ assert 'missing V1 exports path=%ls capture=%d signal=%d tick=%d' in host
 assert 'RebindReflectionToDisplayAsync' in page and 'var recipe = matching ?? previous;' in page
 assert '_pendingDisplayReflectionSource' in page and 'canApply: canApply' in page
 assert 'ReflectionRenderState.IsManagedOutput(active)' in page
+assert 'ReflectionProfilePolicy.IsPublishedCanvas(active)' in page
 assert 'ReadForOutput(_currentReflectionPath)' in page
 assert 'state.Output, output, StringComparison.OrdinalIgnoreCase' in state
-assert 'skip unmanaged:' in native and 'selection=%ls active=%ls output=%ls' in native
+assert 'skip unmanaged:' in native and 'selection=%ls action=%d active=%ls output=%ls' in native
 assert 'WM_THEMECHANGED posted=%d error=%lu' in native
 assert '_wcsicmp(path, target.c_str())' in host
 assert 'ReflectionProfileHost::OnMessage(msg);' in entry  # sent as well as posted messages
@@ -55,8 +56,6 @@ assert 'GetTickCount64() + 750' in native
 assert 'SetThreadDpiAwarenessContext' in native and 'GetDpiForMonitor' in native
 assert 'm.x -= left; m.y -= top;' in native
 assert 'm.dpiX, m.dpiY' in native and 'std::sort' in native
-assert 'const bool adopt = managed != 0' in native
-assert 'if (!adopt)' in native
 assert 'RegDeleteValueW(dwm.value, L"CustomThemeReflection")' in native
 assert 'ValidHash(candidate,' in native and 'integer(16) == DWORD(width)' in native
 assert 'FindWindowW(L"Dwm", nullptr)' in native and 'PostMessageW(window, WM_THEMECHANGED' in native
@@ -110,7 +109,7 @@ print('PASS: canonical identity specification: enumeration/origin invariant, geo
 print('NOTE: Windows compilation, optional loader, HKCU/DWM, mixed-DPI and hot-plug require Windows testing')
 
 assert 'SettingsSession.Current.AcceptAutomaticReflectionBaseline(baselineAtSignal, path)' in page
-assert 'StillSelected, activeAtSignal);' in page
+assert 'StillSelected, activeAtSignal,' in page and 'automaticDisplayTransfer: true);' in page
 assert 'if (canApply is not null' in page
 snapshot = read('GlassSettings/Core/Snapshot/SettingsSnapshot.cs')
 session = read('GlassSettings/Services/SettingsSession.cs')
@@ -132,15 +131,93 @@ print('PASS: live dialog re-layout preserves draft, single reflection canvas and
 state = read('GlassSettings/Services/ReflectionRenderSettings.cs')
 assert 'public static State? ReadReadyProfile()' in state
 assert 'public static bool AdoptReadyProfile(string profile)' in state
-assert 'PlatformPaths.ReflectionAppliedDirectory' in state
-assert 'MarkManaged(state.Output, notify: false)' in state
+assert 'ReflectionProfilePolicy.IsPublishedCanvas(state.Output)' in state
+assert 'key.SetValue("ManagedOutput", state.Output, RegistryValueKind.String);' in state
+assert 'public static bool ClearStaleProfileCanvas(string? active)' in state
+assert "if (string.IsNullOrWhiteSpace(active) || !ReflectionProfilePolicy.IsPublishedCanvas(active)) return false;" in state
+assert 'MarkManaged(string output, bool notify)' not in state
 assert 'RestoreReadyReflectionProfile();' in page
 assert 'ReflectionRenderState.IsManagedOutput(active)' in page
+assert 'ReflectionProfilePolicy.IsPublishedCanvas(active)' in page
 assert 'ReflectionDisplayProfile.PublicationMutex' in page
 print('PASS: startup restores a verified ready canvas for the current topology without replacing external selections')
 
 native = read('GlassSettings/Native/ReflectionProfilesNative.cpp')
-assert 'const bool adopt = managed != 0' in native
-assert '(active.empty() || _wcsicmp(active.c_str(), owned.c_str()) != 0)' in native
+assert 'InsidePublishedDirectory(active)' in native
 assert '_wcsicmp(active.c_str(), output.c_str())' in native
-print('PASS: platform startup adopts the ready canvas only when the last selection was managed')
+print('PASS: native reconcile adopts/clears through the shared decision table')
+
+# One shared decision table: the ABI header is the single source of the rules.
+api = read('GlassShared/include/ReflectionProfileApi.h')
+policy = read('GlassSettings/Services/ReflectionProfilePolicy.cs')
+assert 'inline Decision Decide(bool managed, bool activeEmpty, bool activeWasOurs,' in api
+assert 'if (!readyProfile && activeWasOurs)' in api and 'if (!readyProfile && activeWasOurs)' in policy
+assert 'if (!readyProfile && (managed || activeWasOurs))' not in api
+assert 'enum class Action' in api and 'Action::Clear' in api
+assert 'public static ReflectionProfileDecision Decide(' in policy
+assert 'Console' not in policy and 'OpenSubKey' not in policy
+assert 'ReflectionProfilePolicy.DecideForRegistry(active, ready is not null)' in page
+assert 'ReflectionRenderState.ClearStaleProfileCanvas(active)' in page
+assert 'LiveReloadScheduler.NotifyThemeChangedNow();' in page
+assert 'const auto decision = Decide(managed != 0, active.empty(), InsidePublishedDirectory(active), !output.empty());' in native
+assert 'decision.action == Action::Clear' in native and 'decision.action == Action::None' in native
+assert 'WriteDword(root.value, L"Managed", 0);' in native
+assert 'WriteDword(root.value, L"Managed", 1);' in native
+assert native.index('WriteString(dwm.value, L"CustomThemeReflection", output);') < native.index('WriteDword(root.value, L"Managed", 1);')
+assert 'automaticDisplayTransfer: true' in page
+assert 'if (automaticDisplayTransfer && ReflectionRenderState.ReadReadyProfile() is null)' in page
+assert 'clearedStaleCanvas = ReflectionRenderState.ClearStaleProfileCanvas(activeAtSignal);' in page
+page_transfer = page.index('if (automaticDisplayTransfer && ReflectionRenderState.ReadReadyProfile() is null)')
+assert page.index('clearedStaleCanvas = ReflectionRenderState.ClearStaleProfileCanvas(activeAtSignal);', page_transfer) < page.index('TrySelectCustomImage(ReflectionRegistryKey, path', page_transfer)
+print('PASS: shared ABI decision table drives adopt/clear identically in GS and the platform helper')
+
+# Both implementations must reach the same action for every registry state.
+import itertools, re
+
+def translate(condition):
+    # C++/C# operators into Python for the reviewed condition text.
+    return condition.replace('!', ' not ').replace('&&', ' and ').replace('||', ' or ')
+
+
+def decision_branches(text):
+    body = text[text.index('Decide('):]
+    branches = []
+    for match in re.finditer(r'if \((.*?)\)\s*\n?\s*(?=\{|return)', body, re.S):
+        condition = ' '.join(match.group(1).split())
+        if condition != 'activeEmpty' and 'readyProfile' not in condition and 'activeWasOurs' not in condition:
+            continue
+        tail = body[match.end():match.end() + 160]
+        action = ('Adopt' if 'Adopt' in tail.split(';')[0] else
+                  'Clear' if 'Clear' in tail.split(';')[0] else None)
+        branches.append((condition, action))
+    return branches
+
+api_branches, policy_branches = decision_branches(api), decision_branches(policy)
+assert [c for c, _ in api_branches] == [c for c, _ in policy_branches], (api_branches, policy_branches)
+assert [a for _, a in api_branches] == [a for _, a in policy_branches], (api_branches, policy_branches)
+
+def decide(branches):
+    def run(managed, activeEmpty, activeWasOurs, readyProfile):
+        scope = dict(managed=managed, activeEmpty=activeEmpty,
+                     activeWasOurs=activeWasOurs, readyProfile=readyProfile)
+        for condition, action in branches:
+            if condition == 'activeEmpty':
+                if activeEmpty: return 'Adopt' if managed and readyProfile else 'None'
+            elif eval(translate(condition), {}, scope):
+                return action
+        return 'None'
+    return run
+
+decide_api, decide_policy = decide(api_branches), decide(policy_branches)
+states = list(itertools.product((False, True), repeat=4))
+assert all(decide_api(*s) == decide_policy(*s) for s in states)
+results = {s: decide_api(*s) for s in states}
+
+assert results[(True, False, False, False)] == 'None'    # Managed, but nothing we published
+assert results[(False, False, True, False)] == 'Clear'   # published canvas, profile has none
+assert results[(False, False, True, True)] == 'Adopt'    # published canvas, ready profile
+assert results[(True, False, False, True)] == 'Adopt'    # managed, ready profile
+assert results[(False, True, True, True)] == 'None'      # empty and unmanaged: no adoption
+assert results[(True, True, False, True)] == 'Adopt'     # empty, managed, ready
+assert results[(True, False, False, False)] != 'Clear'   # never clear a foreign value
+print('PASS: both Decide implementations agree on all 16 states (adopt/clear included)')
