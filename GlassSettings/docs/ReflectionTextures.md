@@ -59,7 +59,7 @@ OrchardLines 350×363, PlasterGrain 797×800 и StuccoMist 800×800 (дефиц�
 ×2.2), WormMaze 125×125, FineWorms 114×125, InkDots 400×399, CoralMaze 480×478,
 FastFoodLines 375×375, SilverBasket 144×144, StripeBasket 208×208, SilkHerring
 216×180, ParquetLines 298×298, OutlineSquares 472×422, ScratchLinen 313×313,
-WavyNet 267×267, CrossLinen 512×512, ScratchGrid 978×977, SatinWaves 690×690,
+WavyNet 267×267, CrossLinen 512×512, ScratchGrid 489×488, SatinWaves 690×690,
 LiquidMetal 256×246 (штриховая графика и полутоновые переплетения — дефицит яркости
 от 255 без порога; SatinWaves — гладкий рельеф, LiquidMetal — тёмный металлический
 вихрь без порога).
@@ -114,10 +114,13 @@ LiquidMetal 256×246 (штриховая графика и полутоновы�
 
 Самостоятельные единые SVG-источники: SilkWave, FoldedVeil, CornerGlow, PrismGlints,
 LiquidCaustics, AuroraCurtain, IceFracture, NebulaDrift, VortexSwirl, TopoContours,
-WaveInterference, StarField, PentaStars. Это реальные векторы без встроенных растровых изображений;
+WaveInterference, StarField, PentaStars, DotWaveHalftone. Это реальные векторы без встроенных растровых изображений;
 StarField составлен из четырёхлучевых бликов с радиальным ядром, PentaStars —
 отдельный рисунок с пятиконечными звёздами: три большие с сиянием и тёмной
-сердцевиной плюс малые с плоской альфой и разным поворотом.
+сердцевиной плюс малые с плоской альфой и разным поворотом; DotWaveHalftone — полутоновое поле
+точек вдоль изогнутых волновых гребней со сгущением к гребню и редким фоном точек
+(по мотиву изображения пользователя; водяные знаки и надписи образца не
+воспроизводятся), все точки — субпути одного path поверх радиального сияния.
 Геометрия и прозрачность прежних рисунков взяты из утверждённых исходников без изменения. `viewBox` и
 `preserveAspectRatio` определяют растеризацию; текущие композиции используют
 1920×1080 и `none` для заполнения холста. У градиентов добавленных композиций
