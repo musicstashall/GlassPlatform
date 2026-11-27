@@ -5,6 +5,7 @@
 #include "InstallSupport/GlassReleaseClient.h"
 #include "InstallSupport/GlassSetupSourceLayout.h"
 #include "InstallSupport/GlassMaintenanceCache.h"
+#include "InstallSupport/GlassDownloadCache.h"
 #include <thread>
 #include <memory>
 #include <vector>
@@ -83,11 +84,27 @@ public:
                         else if(i<4||i==6) {
                             const auto product=static_cast<GlassPackageCatalog::Product>(i==6?5:i);
                             current->ok=GlassPackageAcquisition::Prepare(product,catalog,current->directory,current->cancel,current->error);
-                            if(current->ok)current->path=current->directory+L"\\"+GlassReleaseClient::Wide(GlassPackageCatalog::kFiles[static_cast<std::size_t>(product)]);
+                            const auto name=GlassReleaseClient::Wide(GlassPackageCatalog::kFiles[static_cast<std::size_t>(product)]);
+                            if(current->ok)current->path=current->directory+L"\\"+name;
+                            // Скачанный и проверенный по SHA-256 пакет — в кэш загрузок для следующего запуска.
+                            const auto& asset=catalog.products[static_cast<std::size_t>(product)];
+                            if(current->ok&&current->network.load()&&!current->cancel.load()&&asset) {
+                                const auto& p=asset->version.parts;
+                                char version[64]{};
+                                sprintf_s(version,"%u.%u.%u.%u",p[0],p[1],p[2],p[3]);
+                                if(!GlassDownloadCache::Store(static_cast<unsigned>(i),name,current->path,version,asset->sha256))
+                                    InstallLog::LineFormat(L"Download cache: store failed index=%u",static_cast<unsigned>(i));
+                            }
                         } else {
                             GlassSecureUxPackage::Package package;
                             current->ok=GlassSecureUxPackage::Prepare(current->directory,current->cancel,package,current->error);
                             current->path=package.path;
+                            if(current->ok&&current->network.load()&&!current->cancel.load()&&!package.path.empty()&&!package.version.empty()) {
+                                const auto slash=package.path.find_last_of(L"\\/");
+                                const auto name=slash==std::wstring::npos?package.path:package.path.substr(slash+1);
+                                if(!GlassDownloadCache::Store(5,name,package.path,GlassDownloadCache::Detail::Narrow(package.version),{}))
+                                    InstallLog::LineFormat(L"Download cache: store failed index=5");
+                            }
                         }
                         if(current->ok&&!current->network.load()&&!current->path.empty()) {
                             std::error_code ec;const auto size=std::filesystem::file_size(current->path,ec);

@@ -453,6 +453,8 @@ inline bool CollectAfterRemoval() {
         }
         if(!CollectSourceFolder(folder))ok=false;
     }
+    // Кэш загрузок установщика (GlassDownloadCache) после удаления продуктов не нужен.
+    if(!RemoveFlat(root+L"\\Downloads"))ok=false;
     return ok;
 }
 

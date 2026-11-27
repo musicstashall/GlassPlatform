@@ -3,6 +3,7 @@
 #include "InstallSupport/GlassOpenGlassInstall.h"
 #include "InstallSupport/GlassOpenGlassService.h"
 #include "InstallSupport/GlassMaintenanceCache.h"
+#include "InstallSupport/GlassDownloadCache.h"
 #include "InstallSupport/GlassPackageAcquisition.h"
 #include "InstallEngine.h"
 #include "InstallSupport/GlassMaintenanceLifetime.h"
@@ -778,6 +779,9 @@ DWORD WINAPI InstallEngine::WorkerThread(LPVOID p) noexcept {
         if(!GlassMaintenanceCache::CollectAfterRemoval())
             InstallLog::Line(L"Product source cleanup incomplete; registered/unknown sources retained; removal result preserved");
     }
+    // Кэш загрузок нужен только до успешной установки: дальше источник — Current.
+    if(self->succeeded_&&!GlassDownloadCache::Clear())
+        InstallLog::Line(L"Download cache cleanup failed; stale entries are rejected by version on next start");
     if(!self->tempDir_.empty()) {
         if(RemoveDirectoryTree(self->tempDir_))self->tempDir_.clear();
         else InstallLog::LineFormat(L"Staging cleanup incomplete; destructor will retry: %s",self->tempDir_.c_str());

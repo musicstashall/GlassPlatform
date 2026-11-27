@@ -13,6 +13,7 @@
     <ClInclude Include="src\InstallSupport\GlassPackageAcquisition.h" />
     <ClCompile Include="src\InstallSupport\GlassPackageAcquisition.cpp" />
     <ClInclude Include="src\InstallSupport\GlassPackageCatalog.h" />
+    <ClInclude Include="src\InstallSupport\GlassDownloadCache.h" />
     <Filter Include="src"><UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier></Filter>
     <Filter Include="src\InstallSupport"><UniqueIdentifier>{BD4925A4-C5E2-4FDB-A577-DBB59DA45E11}</UniqueIdentifier></Filter>
     <Filter Include="res"><UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier></Filter>

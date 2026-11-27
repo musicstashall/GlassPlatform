@@ -158,6 +158,7 @@
     <ClInclude Include="src\InstallSupport\GlassOpenGlassService.h" />
     <ClInclude Include="src\InstallSupport\GlassPackageAcquisition.h" />
     <ClInclude Include="src\InstallSupport\GlassPackageCatalog.h" />
+    <ClInclude Include="src\InstallSupport\GlassDownloadCache.h" />
     <ClInclude Include="src\InstallSupport\GlassOpenGlassRelease.h" />
     <ClInclude Include="src\InstallSupport\GlassMaintenanceLaunch.h" />
     <ClInclude Include="src\InstallSupport\GlassUserDataCleanup.h" />

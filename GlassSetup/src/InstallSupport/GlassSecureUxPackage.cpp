@@ -3,6 +3,7 @@
 #include "GlassSecureUxRelease.h"
 #include "GlassReleaseClient.h"
 #include "GlassMaintenanceCache.h"
+#include "GlassDownloadCache.h"
 #include <SecureUxThemeInventory.h>
 #include "GlassInstallMsi.h"
 #include "GlassRegisteredMsi.h"
@@ -90,8 +91,10 @@ std::vector<std::wstring> CandidatePaths(const Asset& asset) {
     auto directory=module.substr(0,slash+1);
     if(!GlassSetupSourceLayout::directory.empty())directory=GlassSetupSourceLayout::directory+L"\\";
     const auto name=Wide(asset.name);
+    // Последний — кэш загрузок прошлых запусков: принимается только по точному SHA-256 ассета.
     return {directory+L"packages\\"+name,directory+name,
-        GlassMaintenanceCache::CurrentFile(name.c_str()),GlassSetupSourceLayout::Prepared(5)};
+        GlassMaintenanceCache::CurrentFile(name.c_str()),GlassSetupSourceLayout::Prepared(5),
+        GlassDownloadCache::Path(name)};
 }
 // Paths are classified by the same original-root enumerator, not by a
 // UI pathname heuristic. Equal versions still require independent hash checks.
