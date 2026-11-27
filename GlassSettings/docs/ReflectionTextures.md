@@ -57,16 +57,20 @@ DiamondLattice 6×6, PlainWeave 4×4, Herringbone 8×8, MicroGrid 4×4.
 305×300, CausticCells 256×256 (альфа пропорциональна яркости светлых стенок),
 OrchardLines 350×363, PlasterGrain 797×800 и StuccoMist 800×800 (дефицит яркости
 ×2.2), WormMaze 125×125, FineWorms 114×125, InkDots 400×399, CoralMaze 480×478,
-FastFoodLines 375×375, SilverBasket 144×144, StripeBasket 208×208, SilkHerring
-216×180, ParquetLines 298×298, OutlineSquares 472×422, ScratchLinen 313×313,
+FastFoodLines 375×375, SilverBasket 21×21, StripeBasket 208×208, SilkHerring
+216×180, ParquetLines 149×149, OutlineSquares 472×422, ScratchLinen 313×313,
 WavyNet 267×267, CrossLinen 512×512, ScratchGrid 489×488, SatinWaves 690×690,
 LiquidMetal 256×246, BranchLines 560×626, FeatherSwirl 375×409, LeafHatch 208×208,
 BlossomWhirl 208×208 (штриховая графика и полутоновые переплетения — дефицит яркости
 от 255 без порога, маска прозрачности по белому, цвет один чёрный; SatinWaves —
-гладкий рельеф, LiquidMetal — тёмный металлический вихрь: дефицит яркости ниже
-порога (160 с gain 2.25 и 72 с gain 4.0) — светлые зоны прозрачны, чем белее, тем
-прозрачнее, цвет только чёрный; LeafHatch и BlossomWhirl — вырезанный уникальный
-повторяющийся сектор 208×208 точного повтора 2×2 с подбором фазы по стыку).
+гладкий рельеф, LiquidMetal — металлический вихрь: оригинал переведён в монохром,
+уровни растянуты по перцентилям 0.5/99.5 и выровнены гаммой так, что медиана лежит
+на 128 (баланс чёрного и белого), затем маска прозрачности по белому —
+alpha = 255 − яркость, без порога, цвет только чёрный; LeafHatch, BlossomWhirl,
+ParquetLines и SilverBasket — вырезанный уникальный повторяющийся сектор: точный
+период 2×2 (208 px), 149 px и 82 px источника соответственно, SilverBasket — один
+период 82 px, ужатый до 21 px; StripeBasket имеет диагональную решётку повторов
+(104, ±104), минимальный прямоугольный тайл которой 208×208 — меньше не режется).
 
 Методы построения и проверки плиток (правила):
 
