@@ -161,9 +161,13 @@ public sealed partial class StylizationLayeredPreview : UserControl
         if (reflectionGateOn)
         {
             reflectionPath = NormalizeCustom(DwmRegistryStore.ReadEffectiveString(ReflectionRegistryKey));
+            // Дефолтное отражение подставляется только когда выбора нет: иначе на время
+            // чтения полотна профиля показывался бы чужой (системный) рисунок.
             reflection = reflectionPath is not null
-                ? ThemeImageCatalog.CreateImageSource(reflectionPath)
-                : ThemeImageCatalog.TryGetDefaultReflectionImage();
+                ? ReflectionImageCache.TryGet(reflectionPath)
+                : ThemeImageCatalog.TryGetCachedDefaultReflectionImage();
+            if (reflectionPath is not null && reflection is null)
+                _ = ApplyReflectionSourceAsync(reflectionPath, generation);
         }
 
         SetReflectionTextureLayer(reflection);
@@ -177,8 +181,9 @@ public sealed partial class StylizationLayeredPreview : UserControl
         {
             materialPath = NormalizeCustom(DwmRegistryStore.ReadEffectiveString(MaterialRegistryKey));
             material = materialPath is not null
-                ? ThemeImageCatalog.CreateImageSource(materialPath)
+                ? await ReflectionImageCache.LoadAsync(materialPath)
                 : await ThemeImageCatalog.TryGetDefaultMaterialImageAsync();
+            if (generation != _refreshGeneration) return;
         }
 
         SetTextureLayer(MaterialImage, MaterialFallback, material);
@@ -206,22 +211,33 @@ public sealed partial class StylizationLayeredPreview : UserControl
     /// <summary>После gate OFF→ON без полного RefreshLayers источник мог остаться null, fallback — видим.</summary>
     private async void RefreshReflectionMaterialSourcesIfNeeded()
     {
+        var generation = _refreshGeneration;
         if (IsReflectionCollectionGateOn() && ReflectionTextureBrush.ImageSource is null)
         {
             var reflectionPath = NormalizeCustom(DwmRegistryStore.ReadEffectiveString(ReflectionRegistryKey));
-            var reflection = reflectionPath is not null
-                ? ThemeImageCatalog.CreateImageSource(reflectionPath)
-                : ThemeImageCatalog.TryGetDefaultReflectionImage();
-            SetReflectionTextureLayer(reflection);
             SetLayerTooltip(ReflectionLayer, "Stylization_Layer_Reflection", reflectionPath);
+            if (reflectionPath is null)
+            {
+                SetReflectionTextureLayer(ThemeImageCatalog.TryGetCachedDefaultReflectionImage());
+            }
+            else if (ReflectionImageCache.TryGet(reflectionPath) is { } cached)
+            {
+                SetReflectionTextureLayer(cached);
+            }
+            else
+            {
+                // Полотно профиля декодируется асинхронно, как и в RefreshLayers.
+                _ = ApplyReflectionSourceAsync(reflectionPath, generation);
+            }
         }
 
         if (IsMaterialCollectionGateOn() && MaterialImage.Source is null)
         {
             var materialPath = NormalizeCustom(DwmRegistryStore.ReadEffectiveString(MaterialRegistryKey));
             var material = materialPath is not null
-                ? ThemeImageCatalog.CreateImageSource(materialPath)
+                ? await ReflectionImageCache.LoadAsync(materialPath)
                 : await ThemeImageCatalog.TryGetDefaultMaterialImageAsync();
+            if (generation != _refreshGeneration || !IsLoaded) return;
             SetTextureLayer(MaterialImage, MaterialFallback, material);
             SetLayerTooltip(MaterialLayer, "Stylization_Layer_Material", materialPath);
         }
@@ -564,6 +580,20 @@ public sealed partial class StylizationLayeredPreview : UserControl
         var visible = source is not null;
         WindowImage.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         WindowFallback.Visibility = visible ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    /// <summary>
+    /// Слой отражения читается через общий кеш и асинхронно: полотно профиля — это PNG
+    /// размером с рабочий стол, его декодирование на UI-потоке подвесило бы страницу.
+    /// Одно полотно профиля всегда имеет то же имя файла, поэтому кеш ключуется версией
+    /// файла и после выбора другой текстуры картинка перечитывается, а не остаётся прежней.
+    /// </summary>
+    private async Task ApplyReflectionSourceAsync(string path, int generation)
+    {
+        var source = await ReflectionImageCache.LoadAsync(path);
+        if (generation != _refreshGeneration || !IsLoaded) return;
+        SetReflectionTextureLayer(source);
+        ApplyReflectionLayerEffects(IsReflectionCollectionGateOn(), source is not null);
     }
 
     private void SetReflectionTextureLayer(ImageSource? source)

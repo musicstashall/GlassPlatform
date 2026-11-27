@@ -300,6 +300,7 @@
                                         Tag="{x:Bind}"
                                         FilePath="{x:Bind FilePath}"
                                         Image="{x:Bind Image}"
+                                        Style="{x:Bind Style}"
                                         IsSelected="{x:Bind IsSelected, Mode=OneWay}"
                                         TooltipText="{x:Bind Title}" />
                                 </ItemContainer>
@@ -361,6 +362,7 @@
                                         Tag="{x:Bind}"
                                         FilePath="{x:Bind FilePath}"
                                         Image="{x:Bind Image}"
+                                        Style="{x:Bind Style}"
                                         IsSelected="{x:Bind IsSelected, Mode=OneWay}"
                                         TooltipText="{x:Bind Title}" />
                                 </ItemContainer>

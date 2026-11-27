@@ -31,6 +31,9 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
     private const string PolicyRegistryKey = "ColorizationGlassReflectionPolicy";
     private const string DefaultReflectionTilePath = "__glasssettings_default_reflection__";
     private const string DefaultMaterialTilePath = "__glasssettings_default_material__";
+
+    /// <summary>Категория «Другие»: растровые изображения и плитка «По умолчанию».</summary>
+    private const int ReflectionOtherCategory = 2;
     private const double HeroColumnGap = 24;
     private const double PolicyCardStackedThreshold = 450;
     private const double PolicyCardBesidePreviewMinWidth = 340;
@@ -76,6 +79,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
     private int _themeReloadGeneration;
     private int _displayReflectionRevision;
     private string? _pendingDisplayReflectionSource;
+    private int _reflectionApplyDepth;
     private bool _reflectionCanvasMissing;
     private string? _reflectionRecipeSource;
     private ReflectionRenderState.State? _lastAppliedReflectionRecipe;
@@ -381,6 +385,10 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         SettingsSession.Current.DirtyChanged -= Session_OnDirtyChanged;
         UnhookEnvironmentWatcher();
         _themeReloadTimer?.Stop();
+        // Уход со страницы во время подготовки полотна не должен оставить штору
+        // висеть на следующей странице.
+        while (Interlocked.Exchange(ref _reflectionApplyDepth, 0) > 0)
+            WindowBusyOverlayService.Pop();
     }
 
     private void HookEnvironmentWatcher()
@@ -708,10 +716,10 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         UpdateReflectionTileSelection();
     }
 
-    private async void LoadMaterialImages() =>
+    private void LoadMaterialImages() =>
         PopulateCollection(
             _materialItems,
-            await BuildMaterialItemsWithDefaultAsync(),
+            BuildMaterialItemsWithDefault(),
             MaterialEmptyStateHost,
             MaterialItems,
             UpdateMaterialTilesLayout,
@@ -833,29 +841,30 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         var category = Math.Max(0, ReflectionCategoryPivot.SelectedIndex);
         var items = ThemeImageCatalog.LoadReflectionImages()
             .Where(item => ReflectionCategory(item.FilePath) == category).ToList();
-        if (category != 1) return items;
-        var defaultImage = ThemeImageCatalog.TryGetDefaultReflectionImage();
+        if (category != ReflectionOtherCategory) return items;
+        // Системное отражение OpenGlass — не «рисунок», а вариант по умолчанию,
+        // поэтому плитка живёт в «Другие» рядом с прочими растровыми изображениями.
         items.Insert(0, new ThemeImageItem
         {
             Title = GlassSettingsResources.Get("Dwm_DefaultReflectionTile"),
             FilePath = DefaultReflectionTilePath,
-            Image = defaultImage
+            Style = ThemeImageStyle.DefaultReflection
         });
         return items;
     }
 
-    private static async System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<ThemeImageItem>> BuildMaterialItemsWithDefaultAsync()
+    /// <summary>
+    /// Плитка системного материала — маркер: изображение декодирует сама плитка, чтобы
+    /// сборка списка на UI-потоке не ждала ресурс Windows.
+    /// </summary>
+    private static IReadOnlyList<ThemeImageItem> BuildMaterialItemsWithDefault()
     {
         var items = ThemeImageCatalog.LoadMaterialImages().ToList();
-        var defaultImage = await ThemeImageCatalog.TryGetDefaultMaterialImageAsync();
-        if (defaultImage is null)
-            return items;
-
         items.Insert(0, new ThemeImageItem
         {
             Title = GlassSettingsResources.Get("Dwm_DefaultMaterialTile"),
             FilePath = DefaultMaterialTilePath,
-            Image = defaultImage
+            Style = ThemeImageStyle.DefaultMaterial
         });
         return items;
     }
@@ -1010,10 +1019,10 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
 
     private static int ReflectionCategory(string path)
     {
-        if (path == DefaultReflectionTilePath) return 1;
+        if (path == DefaultReflectionTilePath) return ReflectionOtherCategory;
         var parent = Path.GetFileName(Path.GetDirectoryName(path));
         if (string.Equals(parent, "Textured", StringComparison.OrdinalIgnoreCase)) return 0;
-        return string.Equals(parent, "Pattern", StringComparison.OrdinalIgnoreCase) ? 1 : 2;
+        return string.Equals(parent, "Pattern", StringComparison.OrdinalIgnoreCase) ? 1 : ReflectionOtherCategory;
     }
 
     private void ReflectionCategory_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -1334,45 +1343,85 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
             _pendingDisplayReflectionSource = null;
             _lastAppliedReflectionRecipe = null;
         }
-        Exception? preparationError = null;
-        await PageShell.Operations.RunSequenceAsync(async seq =>
+
+        // PNG-текстура и особенно SVG рендерятся секундами на большом профиле. Пока идёт
+        // подготовка, показываем «бублик» и запираем галерею: иначе пользователь успевает
+        // накликать несколько применений, и они выстраиваются в очередь друг за другом.
+        var showProgress = IsLoaded;
+        if (showProgress)
         {
-            await seq.RegistryMutationAsync(async () =>
+            Interlocked.Increment(ref _reflectionApplyDepth);
+            WindowBusyOverlayService.Push(showProgress: true);
+            ReflectionItems.IsEnabled = false;
+            MaterialItems.IsEnabled = false;
+            _reflectionConfigureButton.IsEnabled = false;
+        }
+
+        Exception? preparationError = null;
+        try
+        {
+            await PageShell.Operations.RunSequenceAsync(async seq =>
             {
-                // Generate successfully before changing the applied registry path.
-                if (canApply is not null && !canApply()) return;
-                string path;
-                try
+                await seq.RegistryMutationAsync(async () =>
                 {
-                    path = await ReflectionTextureService.PrepareAsync(source, settings, expectedProfile);
-                    TrySelectCustomImage(ReflectionRegistryKey, path, refreshNotice: false, canApply: canApply);
-                    // Only the display-change rebind passes canApply; manual tile or
-                    // Configure Apply selections stay unsaved as before.
-                    if (canApply is not null
-                        && SamePath(DwmRegistryStore.ReadString(_hive, ReflectionRegistryKey), path))
-                        SettingsSession.Current.AcceptAutomaticReflectionBaseline(baselineAtSignal, path);
-                }
-                catch (Exception error)
-                {
-                    System.Diagnostics.Trace.TraceError("Reflection generation failed: {0}", error);
-                    preparationError = error;
-                    return;
-                }
+                    // Generate successfully before changing the applied registry path.
+                    if (canApply is not null && !canApply()) return;
+                    string path;
+                    try
+                    {
+                        path = await ReflectionTextureService.PrepareAsync(source, settings, expectedProfile);
+                        TrySelectCustomImage(ReflectionRegistryKey, path, refreshNotice: false, canApply: canApply);
+                        // Only the display-change rebind passes canApply; manual tile or
+                        // Configure Apply selections stay unsaved as before.
+                        if (canApply is not null
+                            && SamePath(DwmRegistryStore.ReadString(_hive, ReflectionRegistryKey), path))
+                            SettingsSession.Current.AcceptAutomaticReflectionBaseline(baselineAtSignal, path);
+                    }
+                    catch (Exception error)
+                    {
+                        System.Diagnostics.Trace.TraceError("Reflection generation failed: {0}", error);
+                        preparationError = error;
+                        return;
+                    }
+                });
+                await seq.NoticeSyncAsync(() => PageShell.RefreshSessionNoticeProgrammatic());
             });
-            await seq.NoticeSyncAsync(() => PageShell.RefreshSessionNoticeProgrammatic());
-        });
+        }
+        finally
+        {
+            if (showProgress) EndReflectionApplyProgress();
+        }
+
         if (preparationError is not null)
-            await HostedConfirmationDialogService.ConfirmAsync(new HostedConfirmationSpec
-            {
-                Title = GlassSettingsResources.Get("Dialog_ReflectionPrepareFailedTitle"),
-                Body = HostedConfirmationDialogService.CreateBody(
-                    GlassSettingsResources.Format("Dialog_ReflectionPrepareFailedBody",
-                        GlassSettings.Core.Platform.PlatformPaths.ReflectionAppliedDirectory,
-                        preparationError.Message)),
-                Footer = HostedConfirmationDialogService.CreateFooter(
-                    GlassSettingsResources.Get("Dialog_Understood"))
-            });
+            await ShowReflectionPrepareFailedAsync(preparationError);
     }
+
+    /// <summary>
+    /// Счётчик вложенности: прогресс снимается только после последнего применения,
+    /// а галерея снова становится доступной один раз.
+    /// </summary>
+    private void EndReflectionApplyProgress()
+    {
+        if (Interlocked.Decrement(ref _reflectionApplyDepth) > 0)
+            return;
+        WindowBusyOverlayService.Pop();
+        if (!IsLoaded) return;
+        ReflectionItems.IsEnabled = true;
+        MaterialItems.IsEnabled = true;
+        UpdateReflectionTileSelection();
+    }
+
+    private async Task ShowReflectionPrepareFailedAsync(Exception error) =>
+        await HostedConfirmationDialogService.ConfirmAsync(new HostedConfirmationSpec
+        {
+            Title = GlassSettingsResources.Get("Dialog_ReflectionPrepareFailedTitle"),
+            Body = HostedConfirmationDialogService.CreateBody(
+                GlassSettingsResources.Format("Dialog_ReflectionPrepareFailedBody",
+                    GlassSettings.Core.Platform.PlatformPaths.ReflectionAppliedDirectory,
+                    error.Message)),
+            Footer = HostedConfirmationDialogService.CreateFooter(
+                GlassSettingsResources.Get("Dialog_Understood"))
+        });
 
     private void MaterialItems_OnItemInvoked(ItemsView sender, ItemsViewItemInvokedEventArgs e)
     {
@@ -1427,8 +1476,18 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
             return;
 
         if (!deleteFile(filePath))
+        {
+            // Без сообщения отказ выглядел как «ничего не произошло»: пользователь
+            // нажимал «Удалить» и не понимал, почему плитка на месте.
+            System.Diagnostics.Trace.TraceWarning("Theme image delete refused: {0}", filePath);
+            await ThemeImageDeleteDialogService.ShowDeleteFailedAsync(title).ConfigureAwait(true);
+            reloadCollection();
             return;
+        }
 
+        // Drop the decoded copy first: a cached entry would keep the old tile alive
+        // even though the file no longer exists.
+        ReflectionImageCache.Invalidate(filePath);
         reloadCollection();
     }
 
@@ -1806,8 +1865,12 @@ public sealed class ReflectionImageTileModel : INotifyPropertyChanged, IThemeIma
     {
         Title = item.Title;
         FilePath = item.FilePath;
+        Style = item.Style;
         _image = item.Image;
     }
+
+    /// <summary>Откуда плитка берёт изображение: каталог, системное отражение, материал.</summary>
+    public ThemeImageStyle Style { get; }
 
     public event PropertyChangedEventHandler? PropertyChanged;
     public event EventHandler? DeleteRequested;

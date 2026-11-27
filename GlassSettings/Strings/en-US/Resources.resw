@@ -271,6 +271,7 @@
   <data name="Dialog_DeleteThemeImageTitle" xml:space="preserve"><value>Delete image?</value></data>
   <data name="Dialog_DeleteThemeImageBody" xml:space="preserve"><value>Delete «{0}» from the collection? The file will be removed from disk.</value></data>
   <data name="Dialog_DeleteThemeImageInUse" xml:space="preserve"><value>«{0}» is selected in DWM settings and cannot be deleted. Clear the selection or choose another file first.</value></data>
+  <data name="Dialog_DeleteThemeImageFailed" xml:space="preserve"><value>Could not delete "{0}". The file is still in the collection: it may be open in another app or protected by permissions. Close the app that uses it and try again.</value></data>
   <data name="Dialog_ExportAtlasOverwriteTitle" xml:space="preserve"><value>Overwrite atlas file?</value></data>
   <data name="Dialog_ExportAtlasOverwriteBody" xml:space="preserve"><value>«{0}» already exists in the atlas collection folder. Overwrite it?</value></data>
   <data name="Dialog_ExportAtlasOverwriteConfirm" xml:space="preserve"><value>Overwrite</value></data>

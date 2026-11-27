@@ -110,12 +110,14 @@ for language in ('ru-RU', 'en-US'):
 print('PASS: ProgramData destination, profile-preserving atomic copy, localized failure UI')
 
 control = (ROOT / 'GlassSettings/Controls/ReflectionImageTile.xaml.cs').read_text()
-assert 'ReflectionTextureService.CreatePreviewAsync(FilePath)' in control
+cache = (ROOT / 'GlassSettings/Services/ReflectionImageCache.cs').read_text()
+assert 'ReflectionImageCache.GetTileAsync(FilePath)' in control
+assert 'ReflectionTextureService.CreatePreviewAsync(key.FullPath)' in cache
 assert 'revision != _imageRevision' in control
 assert 'RepeatPixels(pixels.DetachPixelData()' in service
 assert 'var repeated = RepeatPixels(tile, tw, th, width, height);' in service
 assert 'return repeated;' in service
-print('PASS: texture previews and applied canvas share unscaled pixel repetition; stale previews guarded')
+print('PASS: texture previews are cached per file version and share unscaled pixel repetition; stale previews guarded')
 
 xaml = (ROOT / 'GlassSettings/Controls/ReflectionImageTile.xaml').read_text()
 assert 'CheckerboardImage' not in xaml and 'TransparencyCheckerboard' not in control
