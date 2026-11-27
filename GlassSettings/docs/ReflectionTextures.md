@@ -124,7 +124,7 @@ LiquidMetal перед маской берётся негатив (рисуно�
 
 Самостоятельные единые SVG-источники: SilkWave, FoldedVeil, CornerGlow, PrismGlints,
 LiquidCaustics, AuroraCurtain, IceFracture, NebulaDrift, VortexSwirl, TopoContours,
-WaveInterference, StarField, PentaStars, ScratchGrunge, PaperLayers, LineWaves, ThinRays, SoftRays, GoldHexagons, HexGrid, BokehDrift, BokehGlow, BokehDust, GlassPlates, NeonFrames, NeonTiles. Это реальные векторы без встроенных растровых изображений;
+WaveInterference, StarField, PentaStars, ScratchGrunge, PaperLayers, LineWaves, ThinRays, SoftRays, GoldHexagons, HexGrid, BokehDrift, BokehGlow, BokehDust, GlassPlates, NeonFrames, NeonTiles, LightStreaks, HexHalftone, GlassBars, TriangleMosaic. Это реальные векторы без встроенных растровых изображений;
 StarField составлен из четырёхлучевых бликов с радиальным ядром, PentaStars —
 отдельный рисунок с пятиконечными звёздами: три большие с сиянием и тёмной
 сердцевиной плюс малые с плоской альфой и разным поворотом; ScratchGrunge — конверсия EPS пользователя
@@ -221,6 +221,21 @@ NeonFrames, NeonTiles — AI (PDF-1.5) с неоновой графикой. О�
 op .2/.08). Концентрические круги NeonTiles (искры, блики) используют общие
 objectBoundingBox-градиенты по профилю — 442 узла вместо 2144.
 13 КБ/149 узлов и 67 КБ/442 узла.
+LightStreaks, HexHalftone, GlassBars — EPS с приватным потоком `%AI9_DataStream`
+(ASCII85+zlib), разобранным напрямую: `Xa` (цвет — последние три числа RGB),
+`Xy` (режим, непрозрачность), `m/L/l/C/c`, `f/S`, `Bb…BB` (градиент — средний
+цвет стопов из `%AI5_BeginGradient`). Координаты из HiResBoundingBox.
+LightStreaks: 332 тонких серых полосы (яркость .18–.38 × op), alpha = ярк × op
+× 2.5, плюс обводка 2.5 pt с 30 % alpha как замена растровому свечению
+(7 растров XI отброшены). 114 КБ, 335 узлов. HexHalftone: 929 чёрных точек
+полутона объединены в один path (alpha .5), 81 грань шестиугольников — ярк .32 ×
+1.6; 54 градиентных подложки PostScript-части не переносились. 188 КБ, 85 узлов.
+GlassBars: 5 капсул (alpha .55 × op) и 7 узких полос (alpha .85 × op), 81 растровый
+блик отброшен. 4 КБ, 15 узлов.
+TriangleMosaic — AI 288×288 (плитка): 432 треугольника трёх тонов (.02/.07/.12
+→ alpha ×4.5), надпись «DARK BACKGROUND» (32 фигуры, ярк .40) и чёрные
+треугольники (фон) удалены; плитка масштабирована по высоте и повторена
+дважды через `use`. 16 КБ, 9 узлов.
 DotWaveHalftone (реконструкция полутонового растра) удалён по решению пользователя.
 Геометрия и прозрачность прежних рисунков взяты из утверждённых исходников без изменения. `viewBox` и
 `preserveAspectRatio` определяют растеризацию; текущие композиции используют
