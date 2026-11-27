@@ -43,7 +43,7 @@ ns = '{http://www.w3.org/2000/svg}'
 assets = root / 'OpenGlass/Resources/GlassReflection/Pattern'
 assert all(path.suffix.lower() == '.svg' for path in assets.iterdir() if path.is_file())
 assert not list(assets.glob('*_Dark.*')) and not list(assets.glob('*_Lite.*'))
-for name in ('SilkWave', 'FoldedVeil', 'CornerGlow', 'PrismGlints', 'LiquidCaustics'):
+for name in ('SilkWave', 'FoldedVeil', 'PrismGlints', 'LiquidCaustics'):
     path = assets / f'{name}.svg'
     assert path.stat().st_size <= 262144
     svg = ET.parse(path).getroot()
@@ -61,3 +61,22 @@ for name in ('SilkWave', 'FoldedVeil', 'CornerGlow', 'PrismGlints', 'LiquidCaust
             if key == 'stop-color':
                 assert value == '#000000'
 print('PASS: single SVG source per composition complies with renderer profile; color is generated')
+
+# Every shipped Pattern SVG must pass the same restricted profile the renderer enforces
+# (element/attribute allowlists, 256 KiB, 512 nodes, viewBox) so unsupported markup
+# such as <use> never reaches GlassSettings.
+svg_ns = '{http://www.w3.org/2000/svg}'
+for svg in sorted((root / 'OpenGlass/Resources/GlassReflection/Pattern').glob('*.svg')):
+    data = svg.read_bytes()
+    assert len(data) <= 262144, f'{svg.name}: {len(data)} bytes > 256 KiB'
+    tree = ET.parse(svg)
+    nodes = list(tree.getroot().iter())
+    assert len(nodes) <= 512, f'{svg.name}: {len(nodes)} nodes > 512'
+    assert tree.getroot().get('viewBox'), f'{svg.name}: missing viewBox'
+    for node in nodes:
+        assert node.tag.startswith(svg_ns), f'{svg.name}: foreign element {node.tag}'
+        name = node.tag[len(svg_ns):]
+        assert name in elements, f'{svg.name}: element <{name}> not in renderer allowlist'
+        for attr in node.attrib:
+            assert attr in attributes, f'{svg.name}: attribute {attr} on <{name}> not in renderer allowlist'
+print('PASS: all Pattern SVG files conform to the renderer element/attribute/size profile')

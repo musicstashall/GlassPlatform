@@ -63,13 +63,13 @@ def decode_rgba(path, expected_size):
 
 
 assets = ROOT / 'OpenGlass/Resources/GlassReflection/Textured'
-for name in ('FrostWeave', 'DiagonalWeave'):
-    size = (8, 8) if name == 'DiagonalWeave' else (21, 18)
+for name in ('TextureFrostWeave', 'TextureDiagonalWeave'):
+    size = (8, 8) if name == 'TextureDiagonalWeave' else (21, 18)
     dark = decode_rgba(assets / (name + '_Dark.png'), size)
     lite = decode_rgba(assets / (name + '_Lite.png'), size)
     assert dark[3::4] == lite[3::4]
     assert len(set(dark[3::4])) > 1
-    if name == 'DiagonalWeave':
+    if name == 'TextureDiagonalWeave':
         # Golden canvas hashes: 160% geometry; Lite recolored to #A0A0A0.
         for pixels, expected_hash in (
             (dark, '6ca50312be4ef2ab027cc04f7cd8e9c0d081a62c7262a971e8bf32f5a041fc35'),
@@ -123,8 +123,8 @@ assert 'Background="#FF909090"' in xaml
 print('PASS: flat neutral reflection substrate, no checkerboard')
 
 # Approved MicroBasket geometry and alpha must match the original approval swatch.
-basket_dark = decode_rgba(assets / 'MicroBasket_Dark.png', (8, 8))
-basket_lite = decode_rgba(assets / 'MicroBasket_Lite.png', (8, 8))
+basket_dark = decode_rgba(assets / 'TextureMicroBasket_Dark.png', (8, 8))
+basket_lite = decode_rgba(assets / 'TextureMicroBasket_Lite.png', (8, 8))
 expected_alpha = bytes(150 if ((x // 2 + y // 2) % 2 == 0 and x % 2 == 0)
                        or ((x // 2 + y // 2) % 2 == 1 and y % 2 == 0) else 65
                        for y in range(8) for x in range(8))
@@ -134,17 +134,46 @@ for channel in range(3):
     assert set(basket_lite[channel::4]) == {160}
 print('PASS: approved MicroBasket 8x8 geometry, single alpha source and synthesized Dark/Lite presets')
 
-fine_dark = decode_rgba(assets / 'FineDiagonal_Dark.png', (3, 3))
-fine_lite = decode_rgba(assets / 'FineDiagonal_Lite.png', (3, 3))
-expected_fine_alpha = bytes((60, 95, 125)[(x + y) % 3] for y in range(3) for x in range(3))
+carbon_dark = decode_rgba(assets / 'TextureCarbonWeave_Dark.png', (16, 16))
+carbon_lite = decode_rgba(assets / 'TextureCarbonWeave_Lite.png', (16, 16))
+# Round 13 approval: the 8x8 checkerboard enlarged twice, pixel-exact blocks.
+expected_carbon = bytes(168 if (x // 2 + y // 2) % 2 == 0 else 42
+                        for y in range(16) for x in range(16))
+assert carbon_dark[3::4] == carbon_lite[3::4] == expected_carbon
+for channel in range(3):
+    assert set(carbon_dark[channel::4]) == {0}
+    assert set(carbon_lite[channel::4]) == {160}
+print('PASS: approved CarbonWeave 16x16 (2x) geometry, single alpha source and synthesized Dark/Lite presets')
+
+fine_dark = decode_rgba(assets / 'TextureFineDiagonal_Dark.png', (9, 9))
+fine_lite = decode_rgba(assets / 'TextureFineDiagonal_Lite.png', (9, 9))
+
+
+def _fine_weights(t):
+    # Overlap of the target pixel footprint [t/1.5, (t+1)/1.5) with source
+    # phase cells mod 3: the approved 1.5x geometry of the 3x3 diagonal.
+    lo, hi = t / 1.5, (t + 1) / 1.5
+    acc = {}
+    for s in range(int(lo), int(hi - 1e-12) + 2):
+        w = min(hi, s + 1) - max(lo, s)
+        if w > 1e-12:
+            acc[s % 3] = acc.get(s % 3, 0.0) + w
+    tot = sum(acc.values())
+    return [(i, w / tot) for i, w in sorted(acc.items())]
+
+
+expected_fine_alpha = bytes(
+    round(sum(wx * wy * (60, 95, 125)[(i + j) % 3]
+              for i, wx in _fine_weights(x) for j, wy in _fine_weights(y)))
+    for y in range(9) for x in range(9))
 assert fine_dark[3::4] == fine_lite[3::4] == expected_fine_alpha
 for channel in range(3):
     assert set(fine_dark[channel::4]) == {0}
     assert set(fine_lite[channel::4]) == {160}
-print('PASS: approved FineDiagonal 3x3 geometry, single alpha source and synthesized Dark/Lite presets')
+print('PASS: approved FineDiagonal 9x9 (1.5x) geometry, single alpha source and synthesized Dark/Lite presets')
 
-dragon_dark = decode_rgba(assets / 'DragonScale_Dark.png', (8, 8))
-dragon_lite = decode_rgba(assets / 'DragonScale_Lite.png', (8, 8))
+dragon_dark = decode_rgba(assets / 'TextureDragonScale_Dark.png', (8, 8))
+dragon_lite = decode_rgba(assets / 'TextureDragonScale_Lite.png', (8, 8))
 # Regression alpha for the periodically filtered 2/3-size DragonScale.
 expected_dragon = bytes.fromhex(
     "4f342d3e4f342d3e564e3b55564e3b552f47473d2f47473d2d32492d2d32492d2d3e4f342d3e4f343b55564e3b55564e473d2f47473d2f47492d2d32492d2d32"
@@ -155,39 +184,9 @@ for channel in range(3):
     assert set(dragon_lite[channel::4]) == {160}
 print('PASS: DragonScale 8x8 geometry, single alpha source and synthesized Dark/Lite presets')
 
-chevron_dark = decode_rgba(assets / 'MicroChevron_Dark.png', (8, 8))
-chevron_lite = decode_rgba(assets / 'MicroChevron_Lite.png', (8, 8))
-expected_chevron = bytes((145, 95, 45, 65)[(y - (x if x < 4 else 7 - x)) % 4]
-                         for y in range(8) for x in range(8))
-assert chevron_dark[3::4] == chevron_lite[3::4] == expected_chevron
-for channel in range(3):
-    assert set(chevron_dark[channel::4]) == {0}
-    assert set(chevron_lite[channel::4]) == {160}
-print('PASS: approved MicroChevron geometry and synthesized theme presets')
 
-maze_dark = decode_rgba(assets / 'CircuitMaze_Dark.png', (12, 12))
-maze_lite = decode_rgba(assets / 'CircuitMaze_Lite.png', (12, 12))
-maze_pattern = (
-    '111111000000', '000001000000', '011101011110', '010001010010',
-    '010111010010', '010000010010', '011111110010', '000000000010',
-    '011111111110', '010000000000', '010111111110', '010000000010',
-)
-original_maze = bytes(145 if c == '1' else 45 for row in maze_pattern for c in row)
-# Gentle Gaussian-like edge softening, toroidal to preserve the existing repeat.
-kernel = (1, 6, 1)
-expected_maze = bytes((sum(kernel[dx + 1] * kernel[dy + 1] *
-                          original_maze[((y + dy) % 12) * 12 + (x + dx) % 12]
-                          for dy in (-1, 0, 1) for dx in (-1, 0, 1)) + 32) // 64
-                      for y in range(12) for x in range(12))
-assert expected_maze != original_maze
-assert maze_dark[3::4] == maze_lite[3::4] == expected_maze
-for channel in range(3):
-    assert set(maze_dark[channel::4]) == {0}
-    assert set(maze_lite[channel::4]) == {160}
-print('PASS: approved CircuitMaze geometry and synthesized theme presets')
-
-stitch_dark = decode_rgba(assets / 'CrossStitch_Dark.png', (8, 8))
-stitch_lite = decode_rgba(assets / 'CrossStitch_Lite.png', (8, 8))
+stitch_dark = decode_rgba(assets / 'TextureCrossStitch_Dark.png', (8, 8))
+stitch_lite = decode_rgba(assets / 'TextureCrossStitch_Lite.png', (8, 8))
 expected_stitch = bytearray()
 for y in range(8):
     for x in range(8):
@@ -205,8 +204,8 @@ for channel in range(3):
     assert set(stitch_lite[channel::4]) == {160}
 print('PASS: approved dense CrossStitch geometry and synthesized theme presets')
 
-twill_dark = decode_rgba(assets / 'TwillWeave_Dark.png', (8, 8))
-twill_lite = decode_rgba(assets / 'TwillWeave_Lite.png', (8, 8))
+twill_dark = decode_rgba(assets / 'TextureTwillWeave_Dark.png', (8, 8))
+twill_lite = decode_rgba(assets / 'TextureTwillWeave_Lite.png', (8, 8))
 expected_twill = bytearray()
 for y in range(8):
     for x in range(8):

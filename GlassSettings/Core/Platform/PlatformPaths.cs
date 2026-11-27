@@ -59,9 +59,11 @@ public static class PlatformPaths
         _openGlassGuiPath ??= ResolveOpenGlassGuiCore();
 
     /// <summary>
-    /// Корень дополнений GlassPlatform, содержащий Resources. Не зависит от
-    /// каталога upstream OG, разрядности Settings или наличия GlassCompat.dll.
-    /// Совпадает с ProgramFiles64Folder\GlassPlatform\OpenGlass в Resources MSI.
+    /// Корень дополнений GlassPlatform, содержащий Resources: каталог OpenGlass
+    /// в родительской папке каталога GlassSettings.exe (MSI-раскладка —
+    /// ProgramFiles64Folder\GlassPlatform\OpenGlass рядом с GlassSettings\).
+    /// Не зависит от каталога upstream OG, разрядности Settings, реестра и
+    /// наличия GlassCompat.dll; отсутствующий каталог означает пустой каталог.
     /// </summary>
     public static string? OpenGlassResourcesRoot => ResolveOpenGlassResourcesRoot();
 
@@ -81,17 +83,17 @@ public static class PlatformPaths
     {
         try
         {
-            // HKLM64 gives native Program Files even to x86 GlassSettings.
-            // Do not use the external OG InstallLocation or process AppBase.
-            using var machine = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine,
-                Environment.Is64BitOperatingSystem ? RegistryView.Registry64 : RegistryView.Registry32);
-            using var key = machine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion");
-            if (key is null || key.GetValueKind("ProgramFilesDir") != RegistryValueKind.String ||
-                key.GetValue("ProgramFilesDir", null, RegistryValueOptions.DoNotExpandEnvironmentNames) is not string programFiles ||
-                string.IsNullOrWhiteSpace(programFiles) || !Path.IsPathFullyQualified(programFiles))
+            // Дополнения поставляются рядом с Settings: OpenGlass\ в родительской
+            // папке каталога GlassSettings.exe. Реестр и внешний OG не участвуют:
+            // неизвестный корень означает отсутствие встроенного каталога,
+            // а не подстановку чужого пути.
+            var appBase = Path.GetFullPath(AppBase);
+            var parent = Directory.GetParent(appBase.TrimEnd('\\', '/'));
+            if (parent is null)
                 return null;
 
-            return Path.Combine(Path.GetFullPath(programFiles), "GlassPlatform", "OpenGlass");
+            var candidate = Path.Combine(parent.FullName, "OpenGlass");
+            return Directory.Exists(candidate) ? candidate : null;
         }
         catch
         {

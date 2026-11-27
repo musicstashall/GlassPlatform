@@ -84,12 +84,15 @@ assert not any(resources_guid in line and '.Debug|' in line and '.Build.0' in li
 paths=(root/'GlassSettings/Core/Platform/PlatformPaths.cs').read_text()
 assert paths.index('var upstream = ReadUpstreamOpenGlassInstallPath()') < paths.index('var installDir = ReadBlackWindowManagerInstallPath()')
 resource_policy=paths[paths.index('public static string? OpenGlassResourcesRoot'):paths.index('/// <summary>Резолв модуля платформы')]
-for forbidden in ('AddRoot(OpenGlassDir)', 'ReadUpstreamOpenGlassInstallPath()', 'Path.Combine(PlatformRoot', 'Path.Combine(AppBase'):
+for forbidden in ('AddRoot(OpenGlassDir)', 'ReadUpstreamOpenGlassInstallPath()', 'Path.Combine(PlatformRoot', 'Path.Combine(AppBase',
+                  'ProgramFilesDir', 'RegistryView.Registry64', 'RegistryValueOptions.DoNotExpandEnvironmentNames'):
  assert forbidden not in resource_policy
 assert 'OpenGlassResourcesRoot is { } root ? new[] { root } : Array.Empty<string>()' in resource_policy
-assert 'RegistryView.Registry64' in resource_policy and 'RegistryValueOptions.DoNotExpandEnvironmentNames' in resource_policy
-assert 'RegistryValueKind.String' in resource_policy and 'Path.IsPathFullyQualified(programFiles)' in resource_policy
-assert 'Path.Combine(Path.GetFullPath(programFiles), "GlassPlatform", "OpenGlass")' in resource_policy
+# Встроенный каталог дополнений ищется относительно GlassSettings.exe:
+# OpenGlass\ в родительской папке его каталога, без реестра и чужих корней.
+assert 'Directory.GetParent(' in resource_policy
+assert 'Path.Combine(parent.FullName, "OpenGlass")' in resource_policy
+assert 'Directory.Exists(candidate)' in resource_policy
 assert 'Path.Combine(root, "Resources")' in resource_policy
 catalog=(root/'GlassSettings/Services/ThemeImageCatalog.cs').read_text()
 assert 'new(PlatformPaths.GetResourceSearchRoots())' in catalog
