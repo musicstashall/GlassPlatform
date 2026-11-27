@@ -16,7 +16,7 @@ int main() {
     static_assert(!GlassProducts::ShouldStartOpenGlass(OpenGlassStartupState{false,false,true}));
     static_assert(GlassProducts::ShouldStartOpenGlass(OpenGlassStartupState{true,false,false})); // first install
     static_assert(GlassProducts::ShouldStartOpenGlass(OpenGlassStartupState{true,false,true}));
-    static_assert(!GlassProducts::ShouldStartOpenGlass(OpenGlassStartupState{true,true,false})); // upgrade, stopped at wizard start
+    static_assert(GlassProducts::ShouldStartOpenGlass(OpenGlassStartupState{true,true,false})); // upgrade, stopped at wizard start — запуск разрешён, сторож DWM страхует
     static_assert(GlassProducts::ShouldStartOpenGlass(OpenGlassStartupState{true,true,true}));  // upgrade, running at wizard start
     static_assert(GlassProducts::OpenGlassAutostartAllowed(22631));
     static_assert(GlassProducts::OpenGlassAutostartAllowed(26100));

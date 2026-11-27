@@ -23,7 +23,14 @@ void CloseServiceHandle(SC_HANDLE){++closed;}
 struct SERVICE_STATUS_PROCESS{unsigned dwCurrentState;};
 bool QueryServiceStatusEx(SC_HANDLE,unsigned,BYTE* p,unsigned,DWORD*){++query;if(!queryOk)return false;
  reinterpret_cast<SERVICE_STATUS_PROCESS*>(p)->dwCurrentState=states.empty()?SERVICE_START_PENDING:states[query-1<states.size()?query-1:states.size()-1];return true;}
-namespace GlassOpenGlassInstall {struct Record{bool installed;std::wstring directory=L"official";};bool Query(Record& r,std::wstring&){r.installed=present;return known;}}
+namespace GlassOpenGlassInstall {struct Record{bool installed;std::wstring directory=L"official";std::wstring version=L"3.0.2.3749";};bool Query(Record& r,std::wstring&){r.installed=present;return known;}}
+namespace Shared { namespace OpenGlassDwmGuard {
+constexpr DWORD kArmedBySetup=1;
+bool watching=false; int armed=0, disarmed=0;
+bool IsWatching(){return watching;}
+bool Arm(DWORD,const std::wstring&){++armed;return true;}
+void Disarm(){++disarmed;}
+}}
 namespace GlassInstallRemoval {bool ValidateOpenGlassPaths(const std::wstring& p,void*,bool,std::wstring&){assert(p==L"official");return safe;}}
 namespace GlassInstallHost {bool QueryOpenGlassServiceStartType(bool& e,DWORD& type){e=exists;type=configuredType;return true;}
  bool StartOpenGlassServicePreservingStartType(DWORD type){assert(type==configuredType);++starts;return accept;}}
@@ -31,7 +38,7 @@ namespace InstallLog {void Line(const wchar_t*){}template<class... T>void LineFo
 struct InstallEngine{bool EnsureOpenGlassBeforePlatform() noexcept;};
 '''
 main=r'''
-void reset(){configuredType=2;tick=query=closed=starts=0;present=known=safe=exists=accept=queryOk=true;states.clear();}
+void reset(){configuredType=2;tick=query=closed=starts=0;present=known=safe=exists=accept=queryOk=true;states.clear();Shared::OpenGlassDwmGuard::watching=false;Shared::OpenGlassDwmGuard::armed=0;Shared::OpenGlassDwmGuard::disarmed=0;}
 int main(){InstallEngine e;
  reset();present=false;assert(e.EnsureOpenGlassBeforePlatform()&&starts==0);
  reset();known=false;assert(!e.EnsureOpenGlassBeforePlatform()&&starts==0);
@@ -40,6 +47,10 @@ int main(){InstallEngine e;
  reset();configuredType=SERVICE_DISABLED;assert(!e.EnsureOpenGlassBeforePlatform()&&starts==0);
  reset();accept=false;assert(!e.EnsureOpenGlassBeforePlatform()&&query==0);
  reset();states={SERVICE_START_PENDING,SERVICE_START_PENDING,SERVICE_RUNNING};assert(e.EnsureOpenGlassBeforePlatform()&&query==3&&tick==400&&closed==2);
+ reset();states={SERVICE_RUNNING};assert(e.EnsureOpenGlassBeforePlatform()&&Shared::OpenGlassDwmGuard::armed==1&&Shared::OpenGlassDwmGuard::disarmed==0);
+ reset();states={SERVICE_RUNNING};Shared::OpenGlassDwmGuard::watching=true;assert(e.EnsureOpenGlassBeforePlatform()&&Shared::OpenGlassDwmGuard::armed==0); // базовую линию держит более раннее вооружение
+ reset();accept=false;assert(!e.EnsureOpenGlassBeforePlatform()&&Shared::OpenGlassDwmGuard::disarmed==1);
+ reset();configuredType=SERVICE_DISABLED;assert(!e.EnsureOpenGlassBeforePlatform()&&Shared::OpenGlassDwmGuard::armed==0);
  reset();states={SERVICE_STOPPED};assert(!e.EnsureOpenGlassBeforePlatform()&&closed==2);
  reset();queryOk=false;assert(!e.EnsureOpenGlassBeforePlatform()&&closed==2);
  reset();assert(!e.EnsureOpenGlassBeforePlatform()&&tick>=15000&&closed==2);
@@ -56,4 +67,4 @@ with tempfile.TemporaryDirectory() as d:
  p=Path(d)/'test.cpp';p.write_text(prefix+fn+main);exe=Path(d)/'test'
  subprocess.run(['g++','-std=c++17','-Wall','-Wextra','-Werror',str(p),'-o',str(exe)],check=True)
  subprocess.run([str(exe)],check=True)
-print('PASS: actual OG startup barrier: absence, trust gate, start failure, pending/running, stopped, query failure, bounded timeout, handle cleanup; platform/mixed ordering source gates')
+print('PASS: actual OG startup barrier: absence, trust gate, start failure, pending/running, stopped, query failure, bounded timeout, handle cleanup, DWM-guard arm/disarm; platform/mixed ordering source gates')

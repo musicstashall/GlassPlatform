@@ -92,7 +92,7 @@ int main(){
  {Reset();InstallEngine e;e.selection_=Removal(1);e.selection_.settings32=true;e.LaunchSelectedProducts();
   assert(publishes==1&&published.size()==5);for(const auto& name:published)assert(name!=L"Glass-x64.msi");}
  auto platform=Removal(0);platform.platform64=true;assert(NeedsHostLaunch(platform,existing));
- auto og=Removal(0);og.openGlass=true;assert(!NeedsHostLaunch(og,existing));
+ auto og=Removal(0);og.openGlass=true;assert(NeedsHostLaunch(og,existing)); // 2026-11-27: запуск при обновлении разрешён (сторож DWM)
  assert(NeedsHostLaunch(og,fresh));
 }
 '''.replace('// REAL_PREFIX', prefix)
