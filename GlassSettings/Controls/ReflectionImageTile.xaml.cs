@@ -30,12 +30,13 @@ public sealed partial class ReflectionImageTile : UserControl
             typeof(ReflectionImageTile),
             new PropertyMetadata(string.Empty, OnTooltipTextChanged));
 
-    public static readonly DependencyProperty StyleProperty =
+    // Не Style: это имя занято FrameworkElement.Style, и XAML привязал бы базовое свойство.
+    public static readonly DependencyProperty ImageStyleProperty =
         DependencyProperty.Register(
-            nameof(Style),
+            nameof(ImageStyle),
             typeof(ThemeImageStyle),
             typeof(ReflectionImageTile),
-            new PropertyMetadata(ThemeImageStyle.Catalog, OnStyleChanged));
+            new PropertyMetadata(ThemeImageStyle.Catalog, OnImageStyleChanged));
 
     public static readonly DependencyProperty IsSelectedProperty =
         DependencyProperty.Register(
@@ -70,10 +71,10 @@ public sealed partial class ReflectionImageTile : UserControl
     }
 
     /// <summary>Откуда брать изображение: каталог, системное отражение или материал.</summary>
-    public ThemeImageStyle Style
+    public ThemeImageStyle ImageStyle
     {
-        get => (ThemeImageStyle)GetValue(StyleProperty);
-        set => SetValue(StyleProperty, value);
+        get => (ThemeImageStyle)GetValue(ImageStyleProperty);
+        set => SetValue(ImageStyleProperty, value);
     }
 
     public bool IsSelected
@@ -109,7 +110,7 @@ public sealed partial class ReflectionImageTile : UserControl
             string.IsNullOrEmpty(text) ? null : text);
     }
 
-    private static void OnStyleChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    private static void OnImageStyleChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         if (d is ReflectionImageTile tile)
             tile.ApplyImage(tile.Image);
@@ -144,12 +145,12 @@ public sealed partial class ReflectionImageTile : UserControl
     private async void ApplyImage(ImageSource? source)
     {
         var revision = ++_imageRevision;
-        if (Style == ThemeImageStyle.DefaultReflection)
+        if (ImageStyle == ThemeImageStyle.DefaultReflection)
         {
             // Ресурс OpenGlass извлекается один раз; плитка только показывает готовое.
             source = ThemeImageCatalog.TryGetDefaultReflectionImage();
         }
-        else if (Style == ThemeImageStyle.DefaultMaterial)
+        else if (ImageStyle == ThemeImageStyle.DefaultMaterial)
         {
             // Системный материал декодируется один раз и кешируется в памяти.
             source = await ThemeImageCatalog.TryGetDefaultMaterialImageAsync();

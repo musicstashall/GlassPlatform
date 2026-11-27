@@ -189,9 +189,9 @@ internal static class ReflectionImageCache
         catch { return; }
         lock (Gate)
         {
-            foreach (var key in Sources.Keys.Where(k => Same(key.FullPath, full)).ToArray())
+            foreach (var key in Sources.Keys.Where(k => Same(k.FullPath, full)).ToArray())
                 Sources.Remove(key);
-            foreach (var key in Tiles.Keys.Where(k => Same(key.FullPath, full)).ToArray())
+            foreach (var key in Tiles.Keys.Where(k => Same(k.FullPath, full)).ToArray())
                 Tiles.Remove(key);
         }
     }
@@ -213,12 +213,12 @@ internal static class ReflectionImageCache
         {
             // Каталог читает каталоги ресурсов (файловый I/O) — выносим его с UI-потока.
             var paths = await Task.Run(() => CollectCatalogPaths()).ConfigureAwait(true);
-            if (paths.Count == 0) return;
+            if (paths.Length == 0) return;
 
             // Системное отражение (ресурс OpenGlass) и полотно профиля — то, что превью
             // нужно первым. Ресурс извлекается на UI-потоке, как и любое создание bitmap.
             if (dispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low,
-                    () => { ThemeImageCatalog.TryGetDefaultReflectionImage(); }))
+                    () => WarmDefaultReflection()))
                 await Task.Delay(1).ConfigureAwait(true);
             await WarmFullSizeAsync();
 
@@ -240,6 +240,8 @@ internal static class ReflectionImageCache
             System.Diagnostics.Trace.TraceWarning("Reflection image preload: {0}", error);
         }
     }
+
+    private static void WarmDefaultReflection() => ThemeImageCatalog.TryGetDefaultReflectionImage();
 
     private static string[] CollectCatalogPaths()
     {

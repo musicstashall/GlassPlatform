@@ -11,7 +11,7 @@ public sealed class ThemeImageItem
     public required string FilePath { get; init; }
 
     /// <summary>Откуда плитка берёт изображение; по умолчанию обычное изображение каталога.</summary>
-    public ThemeImageStyle Style { get; init; }
+    public ThemeImageStyle ImageStyle { get; init; }
 
     public Microsoft.UI.Xaml.Media.ImageSource? Image { get; init; }
 }

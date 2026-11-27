@@ -334,6 +334,10 @@ assert 'ReflectionImageCache.Invalidate(fullPath)' in catalog
 assert 'ReflectionImageCache.Invalidate(filePath)' in page
 assert 'internal static class ReflectionImageCache' in cache
 assert 'public enum ThemeImageStyle' in catalog
+# Style is taken by FrameworkElement.Style; the marker must use its own name on both sides.
+assert 'public ThemeImageStyle ImageStyle' in tile and 'ImageStyle="{x:Bind ImageStyle}"' in \
+    (root / 'GlassSettings/Pages/Dwm/DwmThemeDetailPage.xaml').read_text()
+assert 'public ThemeImageStyle ImageStyle' in catalog
 
 # Tiles resolve default/маркер images themselves and reuse the cache for the rest.
 assert 'ThemeImageCatalog.TryGetDefaultReflectionImage();' in tile
@@ -353,6 +357,7 @@ assert 'ReflectionImageCache.BeginPreload(DispatcherQueue)' in main
 assert main.index('DesktopWallpaperImageCache.BeginLoad(DispatcherQueue);') < \
     main.index('ReflectionImageCache.BeginPreload(DispatcherQueue)')
 assert 'await Task.Run(() => CollectCatalogPaths())' in cache
+assert 'paths.Length == 0' in cache
 assert 'WarmFullSizeAsync()' in cache
 
 # Apply keeps the user from double-clicking the gallery while the canvas renders.

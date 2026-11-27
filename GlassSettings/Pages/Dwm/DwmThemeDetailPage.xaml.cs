@@ -848,7 +848,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         {
             Title = GlassSettingsResources.Get("Dwm_DefaultReflectionTile"),
             FilePath = DefaultReflectionTilePath,
-            Style = ThemeImageStyle.DefaultReflection
+            ImageStyle = ThemeImageStyle.DefaultReflection
         });
         return items;
     }
@@ -864,7 +864,7 @@ public sealed partial class DwmThemeDetailPage : Page, ISettingsCommitScopeProvi
         {
             Title = GlassSettingsResources.Get("Dwm_DefaultMaterialTile"),
             FilePath = DefaultMaterialTilePath,
-            Style = ThemeImageStyle.DefaultMaterial
+            ImageStyle = ThemeImageStyle.DefaultMaterial
         });
         return items;
     }
@@ -1865,12 +1865,12 @@ public sealed class ReflectionImageTileModel : INotifyPropertyChanged, IThemeIma
     {
         Title = item.Title;
         FilePath = item.FilePath;
-        Style = item.Style;
+        ImageStyle = item.ImageStyle;
         _image = item.Image;
     }
 
     /// <summary>Откуда плитка берёт изображение: каталог, системное отражение, материал.</summary>
-    public ThemeImageStyle Style { get; }
+    public ThemeImageStyle ImageStyle { get; }
 
     public event PropertyChangedEventHandler? PropertyChanged;
     public event EventHandler? DeleteRequested;
