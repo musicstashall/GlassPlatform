@@ -391,6 +391,22 @@ API на [`SettingsUnsavedNoticeStrip`](../../GlassSettings/Controls/SettingsUns
 
 ---
 
+## «Сторож» падений DWM (карантин OpenGlass)
+
+Отдельный случай Action-уведомления, не связанный с обновлениями:
+
+| Элемент | Реализация |
+|---------|------------|
+| Состояние | Маркер `HKCU\Software\StanislavKa\GlassPlatform\OpenGlassGuard` (`Quarantine=1`); пишет только сторож |
+| Источник правды в UI | `Services/OpenGlassDwmGuardService.cs` → `ShouldShowNotice()` (побочный эффект: строгая более новая версия OG снимает карантин автоматически) |
+| Показ | Home (`UpdateNoticeStrip`, ветка `_guardUpdateNoticeActive`) и Система (`ActionNotice` стека, `_guardNoticeActive`); **приоритетнее** апдейт-уведомлений |
+| Действие | «Включить автозапуск и запустить» (`OpenGlass_GuardNotice_Action`) → `ReinstateAndLaunchAsync()`: ClearQuarantine → `SetOrchestrationAutostartEnabled(true)` → `StartOpenGlassAsync()` (сторож вооружается повторно) |
+| Крестик | Скрывает на сессию (`DismissNotice`); карантин остаётся активен до версии/кнопки |
+| Обновление | При переходе сторожа в карантин событие `OpenGlassDwmGuardService.Changed` (опрос 500 мс) → страницы перечитывают `ShouldShowNotice()` |
+| Согласующая кнопка | Включение автозапуска OpenGlass в меню `PlatformSchedulerRow` — явное согласие: ClearQuarantine (`NotifyUserEnabledAutostart`) |
+
+Счётчик падений в тексте (`«… (N× dwm.exe)»`) — из `GetQuarantineInfo`. Если `_backupNoticeActive` (Система) — backup-уведомление в приоритете, сторож ждёт его вручную закрытия.
+
 ## Страница «Процессы» — action notice
 
 Списки Attach/Block пишутся в реестр сразу; session notice с «Сохранить» нет.
