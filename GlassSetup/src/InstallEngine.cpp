@@ -21,6 +21,7 @@
 #include "InstallSupport/GlassInstallWatch.h"
 #include "../res/resource.h"
 #include <GlassPlatformTask.h>
+#include <OpenGlassDwmGuard.h>
 #include <InjectModuleScan.h>
 #include <utility>
 #include <OpenGlassHostState.h>
@@ -2593,8 +2594,13 @@ bool InstallEngine::EnsureOpenGlassBeforePlatform() noexcept {
         if(startType==SERVICE_DISABLED) {
             InstallLog::Line(L"Startup order: OpenGlass service is disabled; no configuration change or Platform launch");return false;
         }
+        // Гасим гонку: если сервис стартует здесь (OG ещё не был запущен блоком launch выше),
+        // вооружаем сторожа до старта. Уже активное наблюдение сохраняет прежнюю базовую линию dwm.exe.
+        if(!Shared::OpenGlassDwmGuard::IsWatching()
+            && !Shared::OpenGlassDwmGuard::Arm(Shared::OpenGlassDwmGuard::kArmedBySetup, record.version))
+            InstallLog::Line(L"Startup order: DWM guard could not be armed");
         InstallLog::Line(L"Startup order: starting installed OpenGlass before Platform");
-        if(!GlassInstallHost::StartOpenGlassServicePreservingStartType(startType))return false;
+        if(!GlassInstallHost::StartOpenGlassServicePreservingStartType(startType)) {(void)Shared::OpenGlassDwmGuard::Disarm();return false;}
         const SC_HANDLE scm=OpenSCManagerW(nullptr,nullptr,SC_MANAGER_CONNECT);
         if(!scm)return false;
         const SC_HANDLE service=OpenServiceW(scm,L"OpenGlassHost",SERVICE_QUERY_STATUS);
@@ -2699,13 +2705,30 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
         InstallLog::LineFormat(L"Autostart: platform running arch %d", static_cast<int>(arch));
     };
 
-    // First install starts OpenGlass. An update or reinstall starts it only when
-    // it was running at wizard open, because that is the instance Setup stopped.
+    // Policy 2026-11-27: the chosen OpenGlass is started after install AND after an
+    // update/reinstall (autostartAllowed && valid). Insurance against cyclic DWM
+    // crashes is the OpenGlassDwmGuard (two dwm.exe crashes within 30 s of the start
+    // → stop OG + disable autostart). An active quarantine marker suppresses the
+    // automatic start here; the user can still start OG manually from GlassSettings.
     // A product outside this plan is neither stopped nor started.
     bool shouldStartOg=false;
     if (is64 && selection_.openGlass) {
         SetStatus(labels_.startOg, 9400);
+        std::wstring installedOgVersion;
+        {
+            GlassOpenGlassInstall::Record record;std::wstring queryError;
+            if(GlassOpenGlassInstall::Query(record,queryError)&&record.installed)installedOgVersion=record.version;
+            else if(!queryError.empty())InstallLog::LineFormat(L"Autostart: OpenGlass version query: %s",queryError.c_str());
+        }
         shouldStartOg = GlassProducts::ShouldStartOpenGlass(openGlassStartup_);
+        if (shouldStartOg && Shared::OpenGlassDwmGuard::ShouldSuppressOpenGlassStart(installedOgVersion)) {
+            InstallLog::Line(L"Autostart: OpenGlass suppressed by DWM-guard quarantine marker");
+            AddFinishWarning(labels_.warnOpenGlassStart.empty() ? L"OpenGlass was not started." : labels_.warnOpenGlassStart,
+                JoinWarningDetail(labels_.warnOpenGlassHint,
+                    ru?L"OpenGlass был остановлен автоматическим контролем DWM; автозапуск отключён. Вернуть его можно в GlassSettings («Включить автозапуск»)."
+                       :L"OpenGlass was stopped automatically by the DWM crash guard and autostart is disabled. Re-enable it in GlassSettings ('Enable autostart')."));
+            shouldStartOg = false;
+        }
         InstallLog::LineFormat(L"Autostart: OpenGlass files-at-start=%d running-at-start=%d start=%d",
             openGlassStartup_.filesPresent ? 1 : 0, openGlassStartup_.wasRunning ? 1 : 0, shouldStartOg ? 1 : 0);
         const std::wstring warnOg = labels_.warnOpenGlassStart.empty() ? L"OpenGlass did not start." : labels_.warnOpenGlassStart;
@@ -2715,6 +2738,10 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
             // the installation is complete, so this is a note rather than a failure.
             AddFinishWarning(warnOg, pathError);
         } else if (shouldStartOg) {
+            // Вооружаем сторожа ДО старта: базовая идентичность dwm.exe снимается синхронно,
+            // мгновенный краш после старта будет замечен опросом (200 мс).
+            if(!Shared::OpenGlassDwmGuard::Arm(Shared::OpenGlassDwmGuard::kArmedBySetup, installedOgVersion))
+                InstallLog::Line(L"Autostart: DWM guard could not be armed");
             bool startupAccepted=false;
             const bool serviceBackend=prior_.ogServiceExisted || ogServiceCreatedBySetup_;
             if (serviceBackend && prior_.ogServiceExisted && prior_.ogServiceStartType==SERVICE_DISABLED) {
@@ -2729,6 +2756,7 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
                 startupAccepted=GlassInstallUtil::RunEnabledOpenGlassTask();
             }
             if (!startupAccepted) {
+                (void)Shared::OpenGlassDwmGuard::Disarm();
                 InstallLog::Line(L"Autostart: OpenGlassHost start request was refused");
                 AddFinishWarning(warnOg, JoinWarningDetail(labels_.warnOpenGlassHint,
                     serviceBackend ? L"service start request failed" : L"legacy task could not be run"));
@@ -2742,9 +2770,11 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
                     Sleep(250);
                 } while (true);
                 InstallLog::LineFormat(L"Autostart: OpenGlass running=%d known=%d",running?1:0,known?1:0);
-                if (!running || !known)
+                if (!running || !known) {
+                    if (!running) (void)Shared::OpenGlassDwmGuard::Disarm(); // OG так и не стартовал — наблюдать нечего
                     AddFinishWarning(warnOg, JoinWarningDetail(labels_.warnOpenGlassHint,
                         known ? L"OpenGlassHost did not report running within 15 s" : L"running state could not be queried"));
+                }
             }
         }
     }
@@ -2773,6 +2803,23 @@ void InstallEngine::LaunchSelectedProducts() noexcept {
     if (ogReady && !RestorePriorHosts(true)) {
         AddFinishWarning(labels_.warnPriorHosts.empty()
             ? L"A previously running component could not be restarted." : labels_.warnPriorHosts, labels_.warnPriorHostsHint);
+    }
+    // Дождаться исхода DWM-сторожа (≤30 с от старта OG): если dwm.exe упал дважды,
+    // сторож уже остановил OG и отключил автозапуск — замечание попадёт на страницу «Готово».
+    if (Shared::OpenGlassDwmGuard::IsWatching()) {
+        InstallLog::Line(L"Autostart: waiting for the OpenGlass DWM crash guard (up to 30 s)");
+        const ULONGLONG guardWaitStart = GetTickCount64();
+        while (Shared::OpenGlassDwmGuard::IsWatching() && GetTickCount64() - guardWaitStart < 33000)
+            Sleep(150);
+        if (Shared::OpenGlassDwmGuard::IsQuarantined()) { // маркер — единственный источник, переживает GS-владельца мьютекса
+            Shared::OpenGlassDwmGuard::MarkerInfo guardMarker{};
+            DWORD guardCrashes = 0;
+            if (Shared::OpenGlassDwmGuard::ReadMarker(guardMarker)) guardCrashes = guardMarker.crashCount;
+            InstallLog::LineFormat(L"Autostart: DWM crash guard stopped OpenGlass and disabled autostart (crashes=%lu)", guardCrashes);
+            AddFinishWarning(ru ? L"OpenGlass остановлен автоматически" : L"OpenGlass was stopped automatically",
+                ru ? L"dwm.exe падал неоднократно в течение 30 секунд после запуска OpenGlass. OG остановлен, автозапуск отключён. Вернуть его можно в GlassSettings («Включить автозапуск»)."
+                   : L"dwm.exe crashed repeatedly within 30 seconds of OpenGlass start. OG was stopped and autostart disabled. Open GlassSettings to re-enable it.");
+        }
     }
     // Removal must not recreate the native menu or require an already removed helper.
     if(!(is64?selection_.platform64:selection_.platform32))return;

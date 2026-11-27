@@ -57,6 +57,7 @@ public sealed partial class HomePage : Page
     private Button? _saveFooterButton;
     private bool _yellowRebootActive;
     private bool _saveInProgress;
+    private bool _guardUpdateNoticeActive; // полоса Update показывает карантин «сторожа», не обновление
     private CancellationTokenSource? _footerRevealCts;
     private const int FooterRevealMs = 350;
     private SettingsNoticeCoordinator.HomeNoticePageHost? _noticeHost;
@@ -101,7 +102,16 @@ public sealed partial class HomePage : Page
                 ScheduleNoticeRefreshSettle();
         };
         ProductUpdateCoordinator.PendingUpdatesChanged += OnPendingUpdatesChanged;
-        UpdateNoticeStrip.ActionRequested += async (_, _) => await ProductUpdateCoordinator.OpenVisibleUpdateDownloadAsync();
+        UpdateNoticeStrip.ActionRequested += async (_, _) =>
+        {
+            if (_guardUpdateNoticeActive)
+            {
+                _guardUpdateNoticeActive = false;
+                await OpenGlassDwmGuardService.ReinstateAndLaunchAsync();
+                return;
+            }
+            await ProductUpdateCoordinator.OpenVisibleUpdateDownloadAsync();
+        };
     }
 
     private void OnPendingUpdatesChanged(object? sender, EventArgs e) =>
@@ -154,7 +164,15 @@ public sealed partial class HomePage : Page
 
         UpdateNoticeStrip.DismissRequested += (_, _) =>
         {
-            ProductUpdateCoordinator.DismissVisibleUpdateNotice();
+            if (_guardUpdateNoticeActive)
+            {
+                _guardUpdateNoticeActive = false;
+                OpenGlassDwmGuardService.DismissNotice();
+            }
+            else
+            {
+                ProductUpdateCoordinator.DismissVisibleUpdateNotice();
+            }
             _ = SettingsNoticeCoordinator.OnUserDismissedAsync(NoticeHost, UpdateNoticeStrip);
         };
     }
@@ -237,6 +255,7 @@ public sealed partial class HomePage : Page
         UnhookEnvironmentWatcher();
         ProductUpdateCoordinator.PendingUpdatesChanged -= OnPendingUpdatesChanged;
         OpenGlassUiPolicy.Changed -= OnOpenGlassUiPolicyChanged;
+        OpenGlassDwmGuardService.Changed -= OnOpenGlassDwmGuardChanged;
         OpenGlassBorderPolicyCoordinator.Changed -= OnOpenGlassBorderPolicyChanged;
         PlatformPresenceService.Instance.PresenceChanged -= OnPresenceChanged;
         PlatformPresenceService.Instance.RemoveSubscriber();
@@ -250,6 +269,9 @@ public sealed partial class HomePage : Page
             _ = RefreshNoticesAsync();
             RefreshCustomizationUnsavedIndicators();
         });
+
+    private void OnOpenGlassDwmGuardChanged(object? sender, EventArgs e) =>
+        DispatcherQueue.TryEnqueue(() => _ = RefreshNoticesAsync(animateUpdate: true));
 
     private void OnOpenGlassUiPolicyChanged(object? sender, EventArgs e) =>
         DispatcherQueue.TryEnqueue(() =>
@@ -355,6 +377,7 @@ public sealed partial class HomePage : Page
         ApplyOpenGlassUiVisibility();
         ApplyPlatformHomeVisibility();
         OpenGlassUiPolicy.Changed += OnOpenGlassUiPolicyChanged;
+        OpenGlassDwmGuardService.Changed += OnOpenGlassDwmGuardChanged;
         OpenGlassBorderPolicyCoordinator.Changed += OnOpenGlassBorderPolicyChanged;
         // Presence subscription on every load — ensures toggle updates when navigating back.
         PlatformPresenceService.Instance.PresenceChanged -= OnPresenceChanged;
@@ -1789,7 +1812,24 @@ public sealed partial class HomePage : Page
         string? updateMessage = null;
         string? updateActionText = null;
 
+        // «Сторож» падений DWM: приоритетнее уведомлений об обновлении — это безопасность сеанса.
         if (OpenGlassUiPolicy.IsFeatureExposedInUi()
+            && OpenGlassDwmGuardService.ShouldShowNotice())
+        {
+            showUpdate = true;
+            _guardUpdateNoticeActive = true;
+            updateMessage = OpenGlassDwmGuardService.BuildNoticeMessage();
+            updateActionText = GlassSettingsResources.Get("OpenGlass_GuardNotice_Action");
+            if (!animateUpdate)
+                animateUpdate = !UpdateNoticeStrip.IsVisuallyOpen;
+        }
+        else
+        {
+            _guardUpdateNoticeActive = false;
+        }
+
+        if (!showUpdate
+            && OpenGlassUiPolicy.IsFeatureExposedInUi()
             && ProductUpdateCoordinator.ShouldShowOpenGlassNotice
             && ProductUpdateCoordinator.GetPendingOpenGlass() is { } pendingOg)
         {
@@ -1800,7 +1840,7 @@ public sealed partial class HomePage : Page
             if (!animateUpdate)
                 animateUpdate = !UpdateNoticeStrip.IsVisuallyOpen;
         }
-        else if (ProductUpdateCoordinator.ShouldShowGlassNotice
+        else if (!showUpdate && ProductUpdateCoordinator.ShouldShowGlassNotice
             && ProductUpdateCoordinator.GetPendingGlass() is { } pendingGlassNotice)
         {
             showUpdate = true;
@@ -1812,7 +1852,7 @@ public sealed partial class HomePage : Page
             if (!animateUpdate)
                 animateUpdate = !UpdateNoticeStrip.IsVisuallyOpen;
         }
-        else if (ProductUpdateCoordinator.ShouldShowSecureUxThemeNotice
+        else if (!showUpdate && ProductUpdateCoordinator.ShouldShowSecureUxThemeNotice
             && ProductUpdateCoordinator.GetPendingSecureUxTheme() is { } pendingSecureUxTheme)
         {
             showUpdate = true;

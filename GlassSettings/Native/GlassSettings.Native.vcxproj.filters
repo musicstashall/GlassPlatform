@@ -27,4 +27,5 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup><ClCompile Include="ReflectionProfilesNative.cpp" /></ItemGroup>
+  <ItemGroup><ClCompile Include="OpenGlassDwmGuardNative.cpp" /></ItemGroup>
 </Project>

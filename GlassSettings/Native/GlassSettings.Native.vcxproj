@@ -141,6 +141,7 @@
     <ClCompile Include="MaintenanceSetupTicketNative.cpp" />
     <ClCompile Include="BlockListNative.cpp" />
     <ClCompile Include="ReflectionProfilesNative.cpp" />
+    <ClCompile Include="OpenGlassDwmGuardNative.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\GlassShared\GlassShared.vcxproj">

@@ -184,6 +184,8 @@
     <ClInclude Include="include\Helpers\SwcaBackdrop.h" />
     <ClInclude Include="include\Helpers\ThemeHelper.h" />
     <ClInclude Include="include\OpenGlassDwmPolicy.h" />
+    <ClInclude Include="include\OpenGlassDwmGuardPolicy.h" />
+    <ClInclude Include="include\OpenGlassDwmGuard.h" />
     <ClInclude Include="include\OpenGlassHostState.h" />
     <ClInclude Include="include\OpenGlassHostCommand.h" />
     <ClInclude Include="include\OpenGlassHostLaunch.h" />
@@ -227,6 +229,7 @@
     <ClCompile Include="src\RegistrySanity.cpp" />
     <ClCompile Include="src\WinApiUtils.cpp" />
     <ClCompile Include="src\OpenGlassDwmPolicy.cpp" />
+    <ClCompile Include="src\OpenGlassDwmGuard.cpp" />
     <ClCompile Include="src\OpenGlassHostState.cpp" />
     <ClCompile Include="src\OpenGlassHostCommand.cpp" />
     <ClCompile Include="src\OpenGlassHostLaunch.cpp" />

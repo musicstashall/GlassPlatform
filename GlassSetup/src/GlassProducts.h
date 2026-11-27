@@ -137,6 +137,14 @@ constexpr bool FullRemovalSelected(const Selection& choice,unsigned installedMas
         (!installedMask&&vendorInstalled&&choice.secureUxThemeRemove));
 }
 
+// Политика автозапуска OpenGlass (2026-11-27, заменяет решение от 2026-11-03):
+// выбранный OpenGlass стартует после установки И после обновления/переустановки,
+// даже если он не работал при открытии мастера (autostartAllowed && valid).
+// Страховка от циклических падений DWM — «сторож» OpenGlassDwmGuard
+// (GlassShared): два краша dwm.exe в течение 30 с после старта → немедленная
+// остановка OG и отключение автозапуска (служба → DEMAND_START, задача → /DISABLE).
+// Запрет по маркеру карантина применяется на месте вызова через
+// OpenGlassDwmGuard::ShouldSuppressOpenGlassStart, а не здесь.
 // Windows 11 23H2. Более старые системы OpenGlass после установки не запускают.
 constexpr unsigned kOpenGlassAutostartMinBuild = 22631;
 constexpr bool OpenGlassAutostartAllowed(unsigned windowsBuild) noexcept {
@@ -153,7 +161,7 @@ struct OpenGlassStartupState {
     bool autostartAllowed = true;
 };
 constexpr bool ShouldStartOpenGlass(const OpenGlassStartupState& startup) noexcept {
-    return startup.autostartAllowed && startup.valid && (!startup.filesPresent || startup.wasRunning);
+    return startup.autostartAllowed && startup.valid;
 }
 
 // Removal has no new media/controller to publish. Keep the running cache intact.

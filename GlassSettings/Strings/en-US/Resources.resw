@@ -804,6 +804,10 @@
   <data name="System_OpenGlassRepairSpoiler" xml:space="preserve"><value>OpenGlass needs to be reinstalled ({0})</value></data>
   <data name="System_OpenGlassUpdateMessage" xml:space="preserve"><value>Consider updating OpenGlass to the latest legacy release.</value></data>
   <data name="System_OpenGlassUpdateAction" xml:space="preserve"><value>Open maintenance</value></data>
+  <data name="OpenGlass_GuardNotice_Title" xml:space="preserve"><value>OpenGlass was stopped automatically</value></data>
+  <data name="OpenGlass_GuardNotice_Body" xml:space="preserve"><value>dwm.exe crashed repeatedly within 30 seconds of the OpenGlass start. OpenGlass was stopped and its autostart was disabled to protect the session. You can re-enable it — it will be started again right now — or update OpenGlass first.</value></data>
+  <data name="OpenGlass_GuardNotice_Action" xml:space="preserve"><value>Enable autostart and launch</value></data>
+  <data name="OpenGlass_GuardNotice_Reinstated" xml:space="preserve"><value>OpenGlass autostart was re-enabled and the crash counter was reset.</value></data>
   <data name="Notice_OpenGlassBorderBody" xml:space="preserve"><value>Window borders are drawn by the Desktop Window Manager (DWM). When OpenGlass is active, it takes precedence over DWM and overrides border color. You cannot change border colors while OpenGlass is running. Stop OpenGlass if colored borders are important to you.</value></data>
   <data name="Notice_OpenGlassBorderTitle" xml:space="preserve"><value>Border color changes are limited</value></data>
   <data name="Notice_OpenGlassBorderTraySuffix" xml:space="preserve"><value>For the taskbar, it remains possible to customize colors in the XAML rendering path.</value></data>

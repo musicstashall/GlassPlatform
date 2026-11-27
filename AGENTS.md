@@ -68,7 +68,24 @@
 - **Сертификат разработчика — только по явному выбору пользователя.** Единственный код, добавляющий его в `LocalMachine\TrustedPeople`, — `ShellSparsePackage::TrustSparseSigner`; вызывается со страницы «Сертификат разработчика» установщика или по ссылке в GlassSettings → Система. Сборка ничего не создаёт/не экспортирует (`New-SelfSignedCertificate`, `Import-Certificate` и т. п. запрещены), GlassUnins сертификат не удаляет. Пользователю не предлагать ручные шаги (regedit, certlm, PowerShell) там, где есть кнопка.
 - **Единственная папка платформы в профиле — `%LOCALAPPDATA%\GlassPlatform`** (логи — `Logs\`, дампы — `Crashes\`). `AppData\Local\GlassProject` и другие каталоги не создавать.
 - **SecureUxTheme — отдельный per-machine MSI** (System32/SysWOW64, IFEO/COM через custom action пакета). GlassSettings и GlassUnins перед удалением только переключают штатный стиль текущего пользователя (`GlassSettings_SecureUxThemeSetupV1W`); снятие hook и файлов — удалением MSI. Тумблер в GlassSettings ставит/снимает MSI из `%ProgramData%\Packages\GlassPlatform\Current`.
-- **Политика автозапуска OpenGlass в установщике — `!filesPresent || wasRunning`** (решение пользователя 2026-11-03, «оставить текущее правило»): запускать после установки только при свежей установке или если OpenGlass работал раньше; существующую установку «файлы без оркестрации» не автоматизировать. Предложения «всегда запускать» отклоняются.
+- **Политика автозапуска OpenGlass в установщике — `autostartAllowed && valid`** (решение пользователя 2026-11-27, отменяет правило 2026-11-03 `!filesPresent || wasRunning`): выбранный OpenGlass запускается и после установки, и после обновления/переустановки, даже если он не был запущен при открытии мастера. Страховка от циклических падений DWM (26H2/26300.9818) — сторож `OpenGlassDwmGuard`, а не запрет запуска. Предыдущее правило отменено явно; возвращающие его предложения отклоняются без нового явного запроса.
+
+## Сторож падений DWM (OpenGlassDwmGuard) — сводка для агентов
+
+Принято 2026-11-27 (согласованный план). Реализация: `GlassShared/{include/OpenGlassDwmGuard{,Policy}.h, src/OpenGlassDwmGuard.cpp}`; мосты: `GlassSetup` (arm в `LaunchSelectedProducts` до старта OG + в `EnsureOpenGlassBeforePlatform`; подавление по маркеру; ожидание ≤33 с; finish warning) и `GlassSettings` (`Native/OpenGlassDwmGuardNative.cpp`, `Services/OpenGlassDwmGuardService.cs`, уведомления Home/System с действием «Включить автозапуск и запустить»; согласующая кнопка в `PlatformSchedulerRow`).
+
+Семантика (не менять молча — только новым решением пользователя):
+- сторож вооружается ДО старта OG; базовая идентичность dwm.exe (PID + FILETIME создания) снимается синхронно;
+- второй краш dwm.exe в скользящем окне 30 с → карантин: OG останавливается, автозапуск отключается (служба → DEMAND_START; явный DISABLED не перетирается; legacy-задача → `schtasks /Change /DISABLE`);
+- мгновенный краш (≤5 с) → режим Danger («самый опасный» сценарий 26H2): следующий краш → тот же карантин; одиночный — Suspect;
+- абсолютный предохранитель: 3-й краш за цикл наблюдения → карантин независимо от окна;
+- сторож живёт до 120 с; без единого краша выходит досрочно за 30 с; `SM_SHUTTINGDOWN` → тихий выход;
+- маркер `HKCU\Software\StanislavKa\GlassPlatform\OpenGlassGuard` переживает выход из системы; карантин снимается строго более новой версией OG (IsVersionStrictlyGreater по OgVersion в маркере) либо вручную в GlassSettings;
+- кросс-процессная единственность — именованный мьютекс `Local\GlassPlatform.OpenGlassDwmGuard.Watch` (watcher = процесс, запустивший OG; фонового процесса нет); смена состояния — событие `Local\GlassPlatform.OpenGlassDwmGuard.StateChanged` (GS поллит маркер по таймеру 500 мс);
+- ручной запуск OG разрешён всегда; Setup не стартует OG автоматически при активном карантине;
+- сторож НЕ удаляет службу/задачи/файлы, не трогает DWM-политику, не шлёт телеметрию; OG можно обновить — новая версия снимет карантин автоматически.
+
+Известные границы: второй краш DWM может завершить сеанс до реакции сторожа; ложные срабатывания подавляются только проверкой SM_SHUTTINGDOWN; Setup следит ≤33 с (дальше — GS/маркер); Windows-сборка и VM-приёмка отдельно (g++-мок `openglass_dwm_guard_policy_mock.py` + source-gate `*_mock.py` — не доказательство на Windows).
 
 ## Скиллы проекта
 

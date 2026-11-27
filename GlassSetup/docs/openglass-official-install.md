@@ -1484,3 +1484,49 @@ scoped to Resources. Standalone OG remains the OG-only optimization.
 Validation: actual UI gates and dispatcher mock cover SUT-only+OG, full plans,
 Resources optional, SUT removal, preflight/managed/Resources/OG failures. Native
 Windows build/runtime verification is still required.
+
+## 2026-11-27: старт OpenGlass после установки/обновления и сторож падений DWM
+
+Политика автозапуска в установщике изменена решением пользователя (2026-11-27):
+`!filesPresent || wasRunning` (2026-11-03) отменена; выбранный OpenGlass
+запускается и после установки, и после обновления/переустановки
+(`autostartAllowed && valid`). Страховка от циклических падений DWM
+(26H2/26300.9818) — встроенный сторож `OpenGlassDwmGuard`, а не запрет запуска.
+
+Сторож вооружается синхронно ДО команды старта OpenGlass (и в ветке запуска,
+и в барьере `EnsureOpenGlassBeforePlatform` для цепочки зависимости платформы);
+базовая идентичность dwm.exe — PID и FILETIME создания. Второй краш dwm.exe
+в скользящем окне 30 с → карантин: OG останавливается (общий TryShutdown),
+автозапуск отключается (служба → DEMAND_START; явный SERVICE_DISABLED не
+перетирается; legacy-задача → `schtasks /Change /DISABLE`). Мгновенный краш
+(≤5 с после старта) — режим Danger: следующий краш → тот же карантин.
+Абсолютный предохранитель: третий краш за цикл наблюдения → карантин вне окна.
+Жизнь сторожа до 120 с, без единого краша — досрочный чистый выход за 30 с,
+`SM_SHUTTINGDOWN` — тихий выход.
+
+Маркер `HKCU\Software\StanislavKa\GlassPlatform\OpenGlassGuard` переживает
+выход из системы; карантин снимается строго более новой версией OG
+(IsVersionStrictlyGreater по OgVersion) либо вручную в GlassSettings (жёлтое
+уведомление «Включить автозапуск и запустить» в Home/Системе; включение
+автозапуска в меню строки также считается явным согласием). Ручной запуск OG
+не запрещён. При активном карантине Setup пропускает автоматический старт OG
+и показывает замечание на странице «Готово».
+
+Кросс-процессная единственность — именованный мьютекс
+`Local\GlassPlatform.OpenGlassDwmGuard.Watch` (сторожит процесс, запустивший OG:
+Setup или GlassSettings; фонового процесса нет). Смена состояния — авто-сброс-
+событие `Local\GlassPlatform.OpenGlassDwmGuard.StateChanged`; GlassSettings
+поллит маркер раз в 500 мс.
+
+Границы и остаточные риски: второй краш DWM может завершить сеанс раньше
+реакции сторожа; ложные срабатывания подавляются только `SM_SHUTTINGDOWN`;
+Setup следит ≤33 с (дальше — GlassSettings/маркер); сторож не удаляет
+службу/задачи/файлы и не меняет DWM-политику. 26300.9818 и issues #380/#393
+остаются актуальным предупреждением: риск не устранён, только уменьшен ущерб.
+
+Verification: g++-мок `openglass_dwm_guard_policy_mock.py` (окно/Danger/
+предохранитель/версии), source-gate `openglass_dwm_guard_mock.py`
+(InstallEngine: suppress → arm → start → watch → finish warning),
+`glasssettings_openglass_dwm_guard_mock.py` (мост GS),
+`openglass_startup_barrier_mock.py` (барьер). Windows-сборка и VM-приёмка
+не выполнялись — остаются отдельным этапом.

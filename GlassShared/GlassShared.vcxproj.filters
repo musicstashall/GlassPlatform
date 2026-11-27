@@ -47,6 +47,9 @@
     <ClCompile Include="src\OpenGlassDwmPolicy.cpp">
       <Filter>src</Filter>
     </ClCompile>
+    <ClCompile Include="src\OpenGlassDwmGuard.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
     <ClCompile Include="src\OpenGlassHostState.cpp">
       <Filter>src</Filter>
     </ClCompile>
@@ -230,6 +233,12 @@
       <Filter>include</Filter>
     </ClInclude>
     <ClInclude Include="include\OpenGlassDwmPolicy.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\OpenGlassDwmGuardPolicy.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\OpenGlassDwmGuard.h">
       <Filter>include</Filter>
     </ClInclude>
     <ClInclude Include="include\OpenGlassHostState.h">

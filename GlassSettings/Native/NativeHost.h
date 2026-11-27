@@ -159,6 +159,17 @@ extern "C"
     __declspec(dllexport) BOOL WINAPI GlassSettings_StartOpenGlassService() noexcept;
     __declspec(dllexport) BOOL WINAPI GlassSettings_StopOpenGlassService() noexcept;
     __declspec(dllexport) BOOL WINAPI GlassSettings_RemoveOpenGlassService() noexcept;
+
+    // --- «Сторож» падений DWM после старта OpenGlass (GlassShared::OpenGlassDwmGuard) ---
+    __declspec(dllexport) BOOL WINAPI GlassSettings_OpenGlassDwmGuard_Arm(DWORD armedBy, const wchar_t* ogVersion) noexcept;
+    __declspec(dllexport) void WINAPI GlassSettings_OpenGlassDwmGuard_Disarm() noexcept;
+    __declspec(dllexport) DWORD WINAPI GlassSettings_OpenGlassDwmGuard_QueryState() noexcept;
+    __declspec(dllexport) BOOL WINAPI GlassSettings_OpenGlassDwmGuard_IsWatching() noexcept;
+    __declspec(dllexport) BOOL WINAPI GlassSettings_OpenGlassDwmGuard_IsQuarantined() noexcept;
+    __declspec(dllexport) BOOL WINAPI GlassSettings_OpenGlassDwmGuard_ShouldSuppressOpenGlassStart(const wchar_t* installedOgVersion) noexcept;
+    __declspec(dllexport) BOOL WINAPI GlassSettings_OpenGlassDwmGuard_ClearQuarantine() noexcept;
+    __declspec(dllexport) BOOL WINAPI GlassSettings_OpenGlassDwmGuard_GetQuarantineInfo(DWORD* crashCountOut, DWORD* reasonOut) noexcept;
+
     __declspec(dllexport) void WINAPI GlassSettings_InvalidateOGCache() noexcept;
 
     __declspec(dllexport) HRESULT WINAPI GlassSettings_TryBuildSymbolModuleDownloadInfo(
