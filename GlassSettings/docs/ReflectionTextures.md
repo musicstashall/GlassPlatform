@@ -123,7 +123,7 @@ LiquidMetal перед маской берётся негатив (рисуно�
 ### Векторные рисунки
 
 Самостоятельные единые SVG-источники: SilkWave, FoldedVeil, CornerGlow, PrismGlints,
-LiquidCaustics, AuroraCurtain, IceFracture, NebulaDrift, VortexSwirl, TopoContours,
+LiquidCaustics, AuroraCurtain, IceFracture, VortexSwirl, TopoContours,
 WaveInterference, StarField, PentaStars, ScratchGrunge, PaperLayers, LineWaves, ThinRays, SoftRays, GoldHexagons, HexGrid, BokehDrift, BokehGlow, BokehDust, GlassPlates, NeonFrames, NeonTiles, LightStreaks, HexHalftone, GlassBars, TriangleMosaic. Это реальные векторы без встроенных растровых изображений;
 StarField составлен из четырёхлучевых бликов с радиальным ядром, PentaStars —
 отдельный рисунок с пятиконечными звёздами: три большие с сиянием и тёмной
@@ -237,7 +237,9 @@ TriangleMosaic — AI 288×288 (плитка): 432 треугольника тр
 треугольники (фон) удалены; плитка масштабирована по высоте и повторена
 дважды явными копиями групп (`use` рендерером не поддерживается — контракт
 теперь проверяет все Pattern-SVG по allowlist рендерера). 31 КБ, 13 узлов.
-DotWaveHalftone (реконструкция полутонового растра) удалён по решению пользователя.
+DotWaveHalftone (реконструкция полутонового растра) и NebulaDrift удалены по решению пользователя.
+WaveInterference, SilkWave, AuroraCurtain, CornerGlow, FoldedVeil: по просьбе пользователя все
+непрозрачности (stop/stroke/fill-opacity) умножены на 3 (потолок 0.9).
 Геометрия и прозрачность прежних рисунков взяты из утверждённых исходников без изменения. `viewBox` и
 `preserveAspectRatio` определяют растеризацию; текущие композиции используют
 1920×1080 и `none` для заполнения холста. У градиентов добавленных композиций
