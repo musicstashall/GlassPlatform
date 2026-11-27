@@ -570,7 +570,11 @@ public sealed class PlatformSchedulerRow
         if (Kind == PlatformSchedulerKind.Glass)
             GlassPlatformService.SetGlassAutorunTaskSchedulerEnabled(EffectiveGlassArch, enable);
         else
+        {
             OpenGlassHostService.SetOrchestrationAutostartEnabled(enable);
+            if (enable)
+                OpenGlassDwmGuardService.NotifyUserEnabledAutostart(); // явное согласие → снять карантин
+        }
 
         Refresh();
         StateChanged?.Invoke(this, EventArgs.Empty);

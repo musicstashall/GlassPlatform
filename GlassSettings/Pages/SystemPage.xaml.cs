@@ -77,10 +77,17 @@ public sealed partial class SystemPage : Page
 
         PageShell.PageNoticeStack.ActionNotice.ActionRequested += async (_, _) =>
         {
+            if (_guardNoticeActive)
+            {
+                _guardNoticeActive = false;
+                await OpenGlassDwmGuardService.ReinstateAndLaunchAsync();
+                return;
+            }
             if (!_backupNoticeActive) await ProductUpdateCoordinator.OpenVisibleUpdateDownloadAsync();
         };
         PageShell.PageNoticeStack.ActionNotice.DismissRequested += (_, _) =>
         {
+            if (_guardNoticeActive) { _guardNoticeActive = false; OpenGlassDwmGuardService.DismissNotice(); return; }
             if (_backupNoticeActive) { _backupNoticeActive = false; return; }
             ProductUpdateCoordinator.DismissVisibleUpdateNotice();
         };
@@ -109,6 +116,7 @@ public sealed partial class SystemPage : Page
         {
             ProductUpdateCoordinator.PendingUpdatesChanged += OnPendingUpdatesChanged;
             OpenGlassUiPolicy.Changed += OnOpenGlassUiPolicyChanged;
+            OpenGlassDwmGuardService.Changed += OnOpenGlassDwmGuardChanged;
             _updateNoticeSubscribed = true;
         }
 
@@ -134,6 +142,7 @@ public sealed partial class SystemPage : Page
 
         ProductUpdateCoordinator.PendingUpdatesChanged -= OnPendingUpdatesChanged;
         OpenGlassUiPolicy.Changed -= OnOpenGlassUiPolicyChanged;
+        OpenGlassDwmGuardService.Changed -= OnOpenGlassDwmGuardChanged;
         _updateNoticeSubscribed = false;
     }
 
@@ -206,6 +215,8 @@ public sealed partial class SystemPage : Page
         UpdateIntervalRow.Description = GlassSettingsResources.Get("System_UpdateIntervalDesc");
     }
 
+    private bool _guardNoticeActive; // «сторож DWM» quarantine-уведомление на полосе ActionNotice
+
     private bool _updateIntervalSuppress;
 
     private void ConfigureUpdateIntervalRow()
@@ -243,6 +254,9 @@ public sealed partial class SystemPage : Page
 
     private void OnOpenGlassUiPolicyChanged(object? sender, EventArgs e) =>
         DispatcherQueue.TryEnqueue(RefreshAfterShellNavigation);
+
+    private void OnOpenGlassDwmGuardChanged(object? sender, EventArgs e) =>
+        DispatcherQueue.TryEnqueue(RefreshUpdateNotice);
 
     private void ApplyOpenGlassUiVisibility()
     {
@@ -335,6 +349,18 @@ public sealed partial class SystemPage : Page
     private async void RefreshUpdateNotice()
     {
         if (_backupNoticeActive) return;
+        // «Сторож» падений DWM: приоритетнее уведомлений об обновлении — это безопасность сеанса.
+        if (OpenGlassUiPolicy.IsFeatureExposedInUi() && OpenGlassDwmGuardService.ShouldShowNotice())
+        {
+            _guardNoticeActive = true;
+            await PageShell.PageNoticeStack.ShowActionNoticeAsync(
+                SettingsNoticeSeverity.Warning,
+                OpenGlassDwmGuardService.BuildNoticeMessage(),
+                GlassSettingsResources.Get("OpenGlass_GuardNotice_Action"),
+                animate: !PageShell.PageNoticeStack.ActionNotice.IsVisuallyOpen);
+            return;
+        }
+        _guardNoticeActive = false;
         if (ProductUpdateCoordinator.ShouldShowOpenGlassNotice
             && ProductUpdateCoordinator.GetPendingOpenGlass() is { } pendingOg)
         {

@@ -102,11 +102,18 @@ public static class SystemPlatformRunActions
             return false;
         try
         {
+            // «Сторож» до старта OG: dwm.exe снимается синхронно, 2 краша в окне 30 с
+            // после старта → OG останавливается, автозапуск отключается (см. OpenGlassDwmGuardService).
+            OpenGlassDwmGuardService.ArmForSettings();
             if (!await Task.Run(OpenGlassHostService.TryStartHostNoWait).ConfigureAwait(true))
+            {
+                OpenGlassDwmGuardService.Disarm(); // OG так и не стартовал — наблюдать нечего
                 return false;
+            }
 
             if (!await WaitForOpenGlassLaunchCompleteAsync(OpenGlassLaunchWait).ConfigureAwait(true))
             {
+                OpenGlassDwmGuardService.Disarm(); // старт не подтвердился — сторож снимаем после отката
                 await RollbackFailedOpenGlassStartAsync().ConfigureAwait(true);
                 return false;
             }
