@@ -132,6 +132,9 @@ public sealed partial class MainWindow : Window
         {
             StartupPhaseTrace.Mark("preload:begin");
             DesktopWallpaperImageCache.BeginLoad(DispatcherQueue);
+            // Reflection gallery images are decoded under the splash: the first visit to
+            // «Стилизация» and every tab switch then render from the cache.
+            ReflectionImageCache.BeginPreload(DispatcherQueue);
             await Task.Run(LoadStartupSettings).ConfigureAwait(true);
             if (_closeInProgress)
                 return;

@@ -15,6 +15,16 @@ public static class ThemeImageDeleteDialogService
                 GlassSettingsResources.Get("Attach_MenuDelete"))
         });
 
+    public static Task ShowDeleteFailedAsync(string fileName) =>
+        HostedConfirmationDialogService.ConfirmAsync(new HostedConfirmationSpec
+        {
+            Title = GlassSettingsResources.Get("Dialog_DeleteThemeImageTitle"),
+            Body = HostedConfirmationDialogService.CreateBody(
+                GlassSettingsResources.Format("Dialog_DeleteThemeImageFailed", fileName)),
+            Footer = HostedConfirmationDialogService.CreateFooter(
+                GlassSettingsResources.Get("Dialog_Understood"))
+        });
+
     public static Task ShowInUseAsync(string fileName) =>
         HostedConfirmationDialogService.ConfirmAsync(new HostedConfirmationSpec
         {

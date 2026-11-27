@@ -9,7 +9,28 @@ public sealed class ThemeImageItem
 {
     public required string Title { get; init; }
     public required string FilePath { get; init; }
+
+    /// <summary>Откуда плитка берёт изображение; по умолчанию обычное изображение каталога.</summary>
+    public ThemeImageStyle ImageStyle { get; init; }
+
     public Microsoft.UI.Xaml.Media.ImageSource? Image { get; init; }
+}
+
+/// <summary>
+/// Как плитка получает изображение. Каталог не декодирует файлы: список собирается
+/// на UI-потоке при открытии страницы, и декодирование всех обложек здесь раньше
+/// блокировало интерфейс.
+/// </summary>
+public enum ThemeImageStyle
+{
+    /// <summary>Обычное изображение каталога: декодируется через общий кеш.</summary>
+    Catalog,
+
+    /// <summary>Системное отражение OpenGlass: ресурс извлекается из OpenGlass.dll.</summary>
+    DefaultReflection,
+
+    /// <summary>Системный материал: ресурс системы, без файла каталога.</summary>
+    DefaultMaterial
 }
 
 public static class ThemeImageCatalog
@@ -54,7 +75,7 @@ public static class ThemeImageCatalog
     {
         foreach (var dir in EnumerateAtlasCatalogDirectoryCandidates())
         {
-            if (Directory.Exists(dir) && LoadFromDirectory(dir, includeImage: false).Count > 0)
+            if (Directory.Exists(dir) && LoadFromDirectory(dir).Count > 0)
                 return dir;
         }
 
@@ -149,6 +170,9 @@ public static class ThemeImageCatalog
                 return false;
 
             File.Delete(fullPath);
+            // Every preview cached for this path is stale now; only refresh, never delete
+            // through the cache.
+            ReflectionImageCache.Invalidate(fullPath);
             return true;
         }
         catch
@@ -168,7 +192,7 @@ public static class ThemeImageCatalog
         var nativeDllPath = ResolveNativeDllPath();
         AtlasPreviewTrace.CatalogNativeDll(nativeDllPath, nativeDllPath is not null && File.Exists(nativeDllPath));
 
-        return LoadFromResourceFolders(AtlasRelativeFolders, includeImage: false, traceCatalog: true);
+        return LoadFromResourceFolders(AtlasRelativeFolders, traceCatalog: true);
     }
 
     public static IReadOnlyList<ThemeImageItem> LoadFromFolder(string relativeFolder) =>
@@ -321,10 +345,21 @@ public static class ThemeImageCatalog
     private const string ReflectionResourceType = "PNG";
     private const string WindowsUIXamlControlsDll = "Windows.UI.Xaml.Controls.dll";
 
+    private static string? _defaultReflectionPath;
     private static Microsoft.UI.Xaml.Media.ImageSource? _defaultReflectionImage;
     private static Microsoft.UI.Xaml.Media.ImageSource? _defaultMaterialImage;
     private static bool _defaultReflectionResolved;
     private static bool _defaultMaterialResolved;
+
+    /// <summary>
+    /// Дефолтное отражение OpenGlass только из кеша: превью не должно извлекать ресурс
+    /// (native I/O) на каждом кадре. Разрешением занимается прогрев и страница.
+    /// </summary>
+    public static Microsoft.UI.Xaml.Media.ImageSource? TryGetCachedDefaultReflectionImage()
+    {
+        var path = _defaultReflectionPath;
+        return string.IsNullOrEmpty(path) ? null : ReflectionImageCache.TryGet(path);
+    }
 
     /// <summary>Дефолтное отражение: PNG-ресурс 102 из OpenGlass.dll (живой, без копии в проекте).</summary>
     public static Microsoft.UI.Xaml.Media.ImageSource? TryGetDefaultReflectionImage()
@@ -338,6 +373,7 @@ public static class ThemeImageCatalog
             return null;
 
         var png = TryExtractResourceImageToCache(dll, ReflectionResourceId, ReflectionResourceType, "reflection_default_102");
+        _defaultReflectionPath = png;
         _defaultReflectionImage = png is null ? null : CreateImageSource(png);
         return _defaultReflectionImage;
     }
@@ -477,7 +513,6 @@ public static class ThemeImageCatalog
 
     private static IReadOnlyList<ThemeImageItem> LoadFromResourceFolders(
         IReadOnlyList<string> relativeFolders,
-        bool includeImage = true,
         bool traceCatalog = false)
     {
         var searchRoots = BuildSearchRoots();
@@ -493,7 +528,7 @@ public static class ThemeImageCatalog
             foreach (var relative in relativeFolders)
             {
                 var dir = Path.Combine(root, relative);
-                var items = LoadFromDirectory(dir, includeImage);
+                var items = LoadFromDirectory(dir);
                 if (traceCatalog)
                     AtlasPreviewTrace.CatalogProbe(dir, Directory.Exists(dir), items.Count);
 
@@ -562,7 +597,7 @@ public static class ThemeImageCatalog
     private static List<string> BuildSearchRoots() =>
         new(PlatformPaths.GetResourceSearchRoots());
 
-    private static IReadOnlyList<ThemeImageItem> LoadFromDirectory(string dir, bool includeImage = true)
+    private static IReadOnlyList<ThemeImageItem> LoadFromDirectory(string dir)
     {
         if (!Directory.Exists(dir))
             return Array.Empty<ThemeImageItem>();
@@ -582,11 +617,11 @@ public static class ThemeImageCatalog
                 && !SvgReflectionRenderer.IsPattern(file))
                 continue;
 
+            // No decode here: the page builds the catalog on the UI thread.
             list.Add(new ThemeImageItem
             {
                 Title = Path.GetFileNameWithoutExtension(file),
-                FilePath = file,
-                Image = includeImage ? CreateImageSource(file) : null
+                FilePath = file
             });
         }
 
@@ -597,18 +632,9 @@ public static class ThemeImageCatalog
     {
         if (SvgReflectionRenderer.IsPattern(filePath))
             return null; // ReflectionImageTile asynchronously rasterizes SVG with the production renderer.
-        if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
-            return null;
-
-        try
-        {
-            var fullPath = Path.GetFullPath(filePath);
-            return new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(fullPath, UriKind.Absolute));
-        }
-        catch
-        {
-            return null;
-        }
+        // Decoded from memory through the shared cache: the file is not held open, so a
+        // gallery delete works, and a rewritten canvas is not masked by the URI cache.
+        return ReflectionImageCache.GetOrLoad(filePath);
     }
 
     private static string? ResolveLayoutPath(string atlasPath)

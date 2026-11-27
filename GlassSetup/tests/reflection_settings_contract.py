@@ -7,6 +7,13 @@ page = (root / 'GlassSettings/Pages/Dwm/DwmThemeDetailPage.xaml.cs').read_text()
 service = (root / 'GlassSettings/Services/ReflectionTextureService.cs').read_text()
 state = (root / 'GlassSettings/Services/ReflectionRenderSettings.cs').read_text()
 dialog = (root / 'GlassSettings/Services/ReflectionSettingsDialog.cs').read_text()
+cache = (root / 'GlassSettings/Services/ReflectionImageCache.cs').read_text()
+catalog = (root / 'GlassSettings/Services/ThemeImageCatalog.cs').read_text()
+tile = (root / 'GlassSettings/Controls/ReflectionImageTile.xaml.cs').read_text()
+layered = (root / 'GlassSettings/Controls/StylizationLayeredPreview.xaml.cs').read_text()
+main = (root / 'GlassSettings/MainWindow.xaml.cs').read_text()
+resw = {lang: ET.parse(root / f'GlassSettings/Strings/{lang}/Resources.resw')
+        for lang in ('ru-RU', 'en-US')}
 assert 'Software\\StanislavKa\\GlassPlatform\\GlassSettings\\Textured' in state
 assert 'RegistryHive.CurrentUser' in state and 'RegistryValueKind.String' in state
 assert 'key.SetValue("State"' in state and 'SHA256.HashData(image)' in state
@@ -17,8 +24,10 @@ assert 'if (!IsTexture(source) && !isSvg) return source;' in service
 assert 'settings with { NoisePercent = 0, OpacityPercent = 100 }, wrap: true)' in service
 assert 'ReflectionPixelEffects.ApplyAlpha(repeated, width, height,' in service
 assert 'ReflectionPixelEffects.ApplyAlpha(pixels, width, height, settings, wrap: false)' in service
-assert 'if (category != 1) return items;' in page
+assert 'if (category != ReflectionOtherCategory) return items;' in page
 assert '.Where(item => ReflectionCategory(item.FilePath) == category)' in page
+assert 'private const int ReflectionOtherCategory = 2;' in page
+assert 'if (path == DefaultReflectionTilePath) return ReflectionOtherCategory;' in page
 assert 'ReflectionSettingsDialog.ShowAsync(source)' in page
 assert 'if (settings is not null) await ApplyReflectionSourceAsync(source, settings, profile)' in page
 assert 'ReflectionRenderState.Save' not in dialog and 'WriteDwm' not in dialog
@@ -143,9 +152,9 @@ assert 'CompositionWallpaperPipelineBuilder.CreateBitmap(' in flat and 'Composit
 assert 'BuildGaussian' not in flat and 'File.ReadAllBytes' not in flat
 assert 'RuntimeReflectionOpacity' in desktop_preview and 'RuntimeReflectionOpacity' in stylization
 assert 'Translation' not in flat and 'Margin' not in flat
-cache = (root / 'GlassSettings/Services/DesktopWallpaperImageCache.cs').read_text()
-assert 'GetMonitorDisplaySourcesAsync' in cache and 'GetMonitorDisplaySourcesAsync' in desktop_preview
-assert 'MonitorSources.Clear()' in cache
+wallpaperCache = (root / 'GlassSettings/Services/DesktopWallpaperImageCache.cs').read_text()
+assert 'GetMonitorDisplaySourcesAsync' in wallpaperCache and 'GetMonitorDisplaySourcesAsync' in desktop_preview
+assert 'MonitorSources.Clear()' in wallpaperCache
 print('PASS: flat wallpaper/glass/reflection order, shared Stylization glass policy/compositor and per-monitor wallpaper cache')
 
 assert 'Directory.CreateTempSubdirectory("GlassPlatform-Reflection-")' in service
@@ -301,3 +310,65 @@ assert 'диалог следует открыть заново' not in docs
 assert 'ярлычок поверх верхней части' not in docs
 assert 'в промежутках между мониторами отражение не рисуется' not in docs.lower()
 print('PASS: reflection documentation matches the current preview, labels and live display-change behaviour')
+
+
+# --- Кеш изображений отражения -------------------------------------------------
+# Decoding must not bind a URI (WinUI caches by URI and keeps the file open, so a
+# republished profile canvas kept the old pixels and deletes failed) and must not
+# hold the file at all.
+assert cache.count('bitmap.SetSource(stream);') == 2
+assert 'new Uri(' not in cache
+assert 'File.ReadAllBytesAsync' in cache
+assert 'LastWriteTimeUtc' in cache and 'Length' in cache
+assert 'MaximumEntries' in cache and 'MaximumSourceBytes' in cache
+assert 'public static void Invalidate(string? path)' in cache
+assert 'public static async Task<ImageSource?> GetTileAsync(string? path)' in cache
+assert 'ReflectionTextureService.CreatePreviewAsync(key.FullPath)' in cache
+assert 'SvgReflectionRenderer.CreatePreviewAsync(key.FullPath)' in cache
+
+# Catalog no longer decodes on the UI thread; both delete paths drop the cached copy.
+assert 'Image = includeImage ? CreateImageSource(file) : null' not in catalog
+assert 'private static IReadOnlyList<ThemeImageItem> LoadFromDirectory(string dir)' in catalog
+assert 'return ReflectionImageCache.GetOrLoad(filePath);' in catalog
+assert 'ReflectionImageCache.Invalidate(fullPath)' in catalog
+assert 'ReflectionImageCache.Invalidate(filePath)' in page
+assert 'internal static class ReflectionImageCache' in cache
+assert 'public enum ThemeImageStyle' in catalog
+# Style is taken by FrameworkElement.Style; the marker must use its own name on both sides.
+assert 'public ThemeImageStyle ImageStyle' in tile and 'ImageStyle="{x:Bind ImageStyle}"' in \
+    (root / 'GlassSettings/Pages/Dwm/DwmThemeDetailPage.xaml').read_text()
+assert 'public ThemeImageStyle ImageStyle' in catalog
+
+# Tiles resolve default/маркер images themselves and reuse the cache for the rest.
+assert 'ThemeImageCatalog.TryGetDefaultReflectionImage();' in tile
+assert 'ThemeImageCatalog.TryGetDefaultMaterialImageAsync();' in tile
+assert 'await ReflectionImageCache.GetTileAsync(FilePath)' in tile
+assert 'await ReflectionImageCache.LoadAsync(FilePath)' in tile
+assert 'if (revision != _imageRevision) return;' in tile
+
+# Layered preview: full canvas is loaded off the UI read path, guarded by generation.
+assert 'await ReflectionImageCache.LoadAsync(path)' in layered
+assert 'generation != _refreshGeneration' in layered
+assert 'ThemeImageCatalog.TryGetCachedDefaultReflectionImage()' in layered
+assert 'LoadReflectionSource(' not in layered
+
+# Splash warm-up.
+assert 'ReflectionImageCache.BeginPreload(DispatcherQueue)' in main
+assert main.index('DesktopWallpaperImageCache.BeginLoad(DispatcherQueue);') < \
+    main.index('ReflectionImageCache.BeginPreload(DispatcherQueue)')
+assert 'await Task.Run(() => CollectCatalogPaths())' in cache
+assert 'paths.Length == 0' in cache
+assert 'WarmFullSizeAsync()' in cache
+
+# Apply keeps the user from double-clicking the gallery while the canvas renders.
+assert 'WindowBusyOverlayService.Push(showProgress: true);' in page
+assert 'Interlocked.Increment(ref _reflectionApplyDepth);' in page
+assert 'EndReflectionApplyProgress()' in page
+assert 'ReflectionItems.IsEnabled = false;' in page
+
+# Delete outcome is reported instead of silently doing nothing.
+assert 'ThemeImageDeleteDialogService.ShowDeleteFailedAsync(title)' in page
+for tree in resw.values():
+    assert tree.find("data[@name='Dialog_DeleteThemeImageFailed']/value").text
+
+print('PASS: reflection image cache, splash preload, apply progress and delete feedback')

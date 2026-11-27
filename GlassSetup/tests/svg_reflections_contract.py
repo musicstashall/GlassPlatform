@@ -8,12 +8,14 @@ renderer = (root / 'GlassSettings/Services/SvgReflectionRenderer.cs').read_text(
 service = (root / 'GlassSettings/Services/ReflectionTextureService.cs').read_text()
 catalog = (root / 'GlassSettings/Services/ThemeImageCatalog.cs').read_text()
 control = (root / 'GlassSettings/Controls/ReflectionImageTile.xaml.cs').read_text()
+cache = (root / 'GlassSettings/Services/ReflectionImageCache.cs').read_text()
 paths = (root / 'GlassSettings/Core/Platform/PlatformPaths.cs').read_text()
 project = ET.parse(root / 'GlassSettings/GlassSettings.csproj')
 assert project.find(".//PackageReference[@Include='Svg']").get('Version') == '3.4.7'
 assert 'SvgReflectionRenderer.IsPattern(file)' in catalog
 assert 'SvgReflectionRenderer.IsPattern(filePath)' in catalog
-assert 'SvgReflectionRenderer.CreatePreviewAsync(FilePath)' in control
+assert 'ReflectionImageCache.GetTileAsync(FilePath)' in control
+assert 'SvgReflectionRenderer.CreatePreviewAsync(key.FullPath)' in cache
 assert 'revision != _imageRevision' in control
 assert 'Task.Run(() => SvgReflectionRenderer.RenderPng(bytes, width, height))' in service
 assert 'RenderPng(source, 148, 92)' in renderer

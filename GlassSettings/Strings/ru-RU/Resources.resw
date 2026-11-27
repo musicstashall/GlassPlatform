@@ -274,6 +274,7 @@
   <data name="Dialog_DeleteThemeImageTitle" xml:space="preserve"><value>Удалить изображение?</value></data>
   <data name="Dialog_DeleteThemeImageBody" xml:space="preserve"><value>Удалить «{0}» из коллекции? Файл будет удалён с диска.</value></data>
   <data name="Dialog_DeleteThemeImageInUse" xml:space="preserve"><value>«{0}» выбрано в настройках DWM и не может быть удалено. Сначала сбросьте выбор или выберите другой файл.</value></data>
+  <data name="Dialog_DeleteThemeImageFailed" xml:space="preserve"><value>Не удалось удалить «{0}». Файл остался в коллекции: возможно, он открыт в программе просмотра или защищён правами доступа. Закройте приложение, которое его использует, и повторите удаление.</value></data>
   <data name="Dialog_ExportAtlasOverwriteTitle" xml:space="preserve"><value>Перезаписать файл атласа?</value></data>
   <data name="Dialog_ExportAtlasOverwriteBody" xml:space="preserve"><value>«{0}» уже существует в каталоге коллекции атласов. Перезаписать?</value></data>
   <data name="Dialog_ExportAtlasOverwriteConfirm" xml:space="preserve"><value>Перезаписать</value></data>

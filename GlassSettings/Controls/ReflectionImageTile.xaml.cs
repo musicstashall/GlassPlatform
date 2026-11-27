@@ -30,6 +30,14 @@ public sealed partial class ReflectionImageTile : UserControl
             typeof(ReflectionImageTile),
             new PropertyMetadata(string.Empty, OnTooltipTextChanged));
 
+    // Не Style: это имя занято FrameworkElement.Style, и XAML привязал бы базовое свойство.
+    public static readonly DependencyProperty ImageStyleProperty =
+        DependencyProperty.Register(
+            nameof(ImageStyle),
+            typeof(ThemeImageStyle),
+            typeof(ReflectionImageTile),
+            new PropertyMetadata(ThemeImageStyle.Catalog, OnImageStyleChanged));
+
     public static readonly DependencyProperty IsSelectedProperty =
         DependencyProperty.Register(
             nameof(IsSelected),
@@ -62,6 +70,13 @@ public sealed partial class ReflectionImageTile : UserControl
         set => SetValue(TooltipTextProperty, value);
     }
 
+    /// <summary>Откуда брать изображение: каталог, системное отражение или материал.</summary>
+    public ThemeImageStyle ImageStyle
+    {
+        get => (ThemeImageStyle)GetValue(ImageStyleProperty);
+        set => SetValue(ImageStyleProperty, value);
+    }
+
     public bool IsSelected
     {
         get => (bool)GetValue(IsSelectedProperty);
@@ -70,6 +85,8 @@ public sealed partial class ReflectionImageTile : UserControl
 
     private int _imageRevision;
 
+    // FilePath, Image and Style arrive as separate bindings and a recycled tile may keep
+    // the previous picture; ApplyImage therefore always re-resolves from FilePath + Style.
     private static void OnFilePathChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         if (d is ReflectionImageTile tile)
@@ -91,6 +108,12 @@ public sealed partial class ReflectionImageTile : UserControl
         GlassSettingsToolTipService.SetToolTip(
             tile.RootBorder,
             string.IsNullOrEmpty(text) ? null : text);
+    }
+
+    private static void OnImageStyleChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is ReflectionImageTile tile)
+            tile.ApplyImage(tile.Image);
     }
 
     private static void OnIsSelectedChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
@@ -122,24 +145,33 @@ public sealed partial class ReflectionImageTile : UserControl
     private async void ApplyImage(ImageSource? source)
     {
         var revision = ++_imageRevision;
-        if (SvgReflectionRenderer.IsPattern(FilePath) ||
-            (source is not null && ReflectionTextureService.IsTexture(FilePath)))
+        if (ImageStyle == ThemeImageStyle.DefaultReflection)
+        {
+            // Ресурс OpenGlass извлекается один раз; плитка только показывает готовое.
+            source = ThemeImageCatalog.TryGetDefaultReflectionImage();
+        }
+        else if (ImageStyle == ThemeImageStyle.DefaultMaterial)
+        {
+            // Системный материал декодируется один раз и кешируется в памяти.
+            source = await ThemeImageCatalog.TryGetDefaultMaterialImageAsync();
+            if (revision != _imageRevision) return;
+        }
+        else if (SvgReflectionRenderer.IsPattern(FilePath) ||
+            ReflectionTextureService.IsTexture(FilePath))
         {
             PreviewImage.Source = null;
             PreviewImage.Visibility = Visibility.Collapsed;
             PreviewFallback.Visibility = Visibility.Visible;
-            try
-            {
-                source = SvgReflectionRenderer.IsPattern(FilePath)
-                    ? await SvgReflectionRenderer.CreatePreviewAsync(FilePath)
-                    : await ReflectionTextureService.CreatePreviewAsync(FilePath);
-            }
-            catch (Exception error)
-            {
-                System.Diagnostics.Trace.TraceError("Reflection preview failed: {0}", error);
-                source = null;
-            }
+            // Cached per file version: revisiting a tab does not rasterize again.
+            source = await ReflectionImageCache.GetTileAsync(FilePath);
             // A recycled tile may now refer to another image or path.
+            if (revision != _imageRevision) return;
+        }
+        else if (source is null)
+        {
+            // Каталог не декодирует обложки: чтение идёт из общего кеша, а байты
+            // читаются вне UI-потока, чтобы плитка не подвешивала прокрутку.
+            source = await ReflectionImageCache.LoadAsync(FilePath);
             if (revision != _imageRevision) return;
         }
         if (source is not null)
