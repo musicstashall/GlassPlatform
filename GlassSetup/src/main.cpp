@@ -31,6 +31,7 @@
 #include "WizardProgress.h"
 #include "GlassProductPlan.h"
 #include "GlassProductDownloads.h"
+#include "InstallSupport/GlassDownloadCache.h"
 #include "GlassProductUiPolicy.h"
 #include "InstallSupport/GlassInstallMsi.h"
 #include "InstallSupport/GlassInstallUtil.h"
@@ -76,8 +77,11 @@ namespace {
 constexpr int kWidth = 1000, kHtmlHeight = 540, kProgressHeight = 4;
 constexpr int kContentHeight = kHtmlHeight + kProgressHeight;
 constexpr int kFooterHeight = 56, kHeight = 600;
-constexpr UINT_PTR kInstallTimer = 1, kFadeTimer = 2, kHeroTimer = 3, kStartupPollTimer = 5, kComponentNoticeTimer = 6, kProductDownloadTimer = 7;
+constexpr UINT_PTR kInstallTimer = 1, kFadeTimer = 2, kHeroTimer = 3, kStartupPollTimer = 5, kComponentNoticeTimer = 6, kProductDownloadTimer = 7, kWebWaitTimer = 8;
+// kHeroTimer — только пульсация нативной страницы ошибки (fallback без WebView2).
 constexpr UINT kInstallTimerMs = 16, kHeroTimerMs = 50;
+// Предел ожидания WebView2 перед проверкой версий: зависший WebView2 не держит мастер.
+constexpr UINT kWebWaitTimeoutMs = 10000;
 constexpr ULONGLONG kMarqueePeriodMs = 1400;
 constexpr double kProgressSmoothTauMs = 120.0;
 constexpr ULONGLONG kRollbackFinishMs = 900;
@@ -1279,6 +1283,9 @@ private:
     WizardUi::ErrorDetails errorDetails_;
     bool accepted_ = false, closing_ = false, webReady_ = false, webBridgeReady_ = false;
     bool webStartupExpected_ = false;
+    bool webInitPosted_ = false;          // kInitWebView уже поставлен в очередь
+    bool versionCheckAwaitingWeb_ = false; // проверка версий отложена до готовности WebView2
+    bool webWaitDone_ = false;             // ожидание WebView2 уже было: повторно не ждать
     WizardUi::WebState webState_;
     InstallEngine::ComponentSelection selection_{};
     InstallEngine::ComponentSelection installedSelection_{};
@@ -1310,7 +1317,7 @@ private:
     std::atomic_bool startupStop_{false};
     StartupResult startupResult_;
     bool startupReady_ = false, startupPending_ = true, startupStarted_ = false;
-    bool controlsReady_ = false, loadingAnimationsEnabled_ = true;
+    bool controlsReady_ = false;
     std::thread runtimeThread_;
     std::atomic_bool runtimeCancel_{false};
     std::mutex runtimeMutex_;
@@ -1326,6 +1333,7 @@ private:
     std::wstring vendorMetadataRetry_;
     std::atomic_bool inspectReady_{false};
     bool inspectionApplied_=false;
+    bool downloadCacheChecked_=false; // кэш загрузок прошлого запуска уже сверен
     std::atomic_bool inspectStop_{false};
     mutable std::mutex inspectMutex_;
     std::wstring footerSetupVersion_; // Actual running EXE FileVersion; not catalog/bundle.
@@ -1436,10 +1444,8 @@ private:
         // WM_CREATE precedes ShowWindow/first Paint; never use a stock bitmap font.
         CreateFonts();
         WizardTheme::ApplyDarkWindowChrome(window);
-        BOOL animationsEnabled=TRUE;
-        SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION,0,&animationsEnabled,0);
-        loadingAnimationsEnabled_=animationsEnabled!=FALSE;
-        if (loadingAnimationsEnabled_) SetTimer(window,kHeroTimer,kHeroTimerMs,nullptr);
+        // Нативного «бублика» нет: до готовности WebView2 окно остаётся тёмным,
+        // ожидание показывает сам WebView2 (режим loading в slideshow.html).
     }
     void InitializeControls() {
         licenseBrush_ = CreateSolidBrush(kLicensePanel);
@@ -1630,9 +1636,30 @@ private:
             SetPage(Page::Error);
             return;
         }
+        // WebView2 стартует сразу, параллельно с рабочим потоком: «бублик»
+        // ожидания рисует страница loading, проверка версий ждёт готовности WebView2.
+        if (IsWebView2RuntimeInstalled()) PostWebViewInit();
         // Fallback if the worker's PostMessage fails because the queue is full.
         SetTimer(window,kStartupPollTimer,100,nullptr);
         CompleteStartupIfReady();
+    }
+    // Один запрос инициализации WebView2 на жизнь окна (старт или после установки среды).
+    void PostWebViewInit() {
+        if (webInitPosted_ || NativeDemo() || closing_) return;
+        webInitPosted_=true;
+        webStartupExpected_=true;
+        if (!PostMessageW(window,kInitWebView,0,0)) WebFailure(HRESULT_FROM_WIN32(GetLastError()));
+    }
+    // Стартовая загрузка: WebView2 показывает «бублик», кнопки мастера скрыты.
+    [[nodiscard]] bool StartupLoading() const noexcept {
+        return startupPending_ || versionCheckAwaitingWeb_;
+    }
+    // Проверка версий начинается после готовности WebView2 (или его отказа/таймаута).
+    void ResumeVersionCheckAfterWeb() {
+        if (!versionCheckAwaitingWeb_) return;
+        versionCheckAwaitingWeb_=false; webWaitDone_=true;
+        KillTimer(window,kWebWaitTimer);
+        if (!closing_) ContinueVersionCheck();
     }
     void CompleteStartupIfReady() {
         if (!startupPending_ || closing_) return;
@@ -1648,9 +1675,9 @@ private:
         startupPending_=false;
         // Queue on the UI STA BEFORE any terminal startup branch can return.
         // A stale ARP command/startup failure must not strand the native page.
-        webStartupExpected_=result.runtimeInstalled;
-        if (result.runtimeInstalled && !PostMessageW(window,kInitWebView,0,0))
-            WebFailure(HRESULT_FROM_WIN32(GetLastError()));
+        // Обычно WebView2 уже запущен из BeginStartup; повторного запроса не будет.
+        const bool runtimeInstalled=result.runtimeInstalled||webInitPosted_;
+        if (runtimeInstalled) PostWebViewInit();
         if (!result.ok) {
             (void)FinalizeControllerStartup(false);
             errorReason_=Text(IDS_STARTUP_FAILED);
@@ -1699,9 +1726,9 @@ private:
             ContinueVersionCheck();
             if (!maintenanceFocusProduct_.empty())
                 InstallLog::LineFormat(L"Maintenance focus product: %s",maintenanceFocusProduct_.c_str());
-        } else if(result.runtimeInstalled) {
+        } else if(runtimeInstalled) {
 #ifdef _DEBUG
-            if(debugDemoPending_)SetPage(Page::Welcome);
+            if(debugDemoPending_){SetPage(Page::Welcome);MaybeStartDebugDemo();}
             else
 #endif
                 ContinueVersionCheck(); // Update the controller before exposing product choices.
@@ -1749,8 +1776,10 @@ private:
             errorDetails_.Update(false,{});
             EnableWindow(next_,FALSE);EnableWindow(back_,FALSE);
             for(HWND control:{back_,next_,eula_,accept_,cleanupOg_,component64_,component32_,componentSettings_,
-                componentSettings32_,componentOpenGlass_,componentSecureUxTheme_,componentResources_,certInstall_,certSkip_,progress_,webHost_})
+                componentSettings32_,componentOpenGlass_,componentSecureUxTheme_,componentResources_,certInstall_,certSkip_,progress_})
                 if(control)ShowWindow(control,SW_HIDE);
+            if (webHost_) ShowWindow(webHost_, SW_SHOWNA);
+            web_.SetVisible(true);
             return;
         }
         const bool webVisible = SlidesVisible();
@@ -1779,7 +1808,7 @@ private:
         ShowWindow(componentSecureUxTheme_,nativeComponents?SW_SHOWNA:SW_HIDE);
         ShowWindow(componentResources_,nativeComponents && os64?SW_SHOWNA:SW_HIDE);
         if (nativeComponents) {
-            SetWindowTextW(next_,Text(CertificatePageApplies()?IDS_NEXT:ProductApplyTextId()).c_str());
+            UpdateNextText();
             const std::wstring mandatory=L" ("+Text(IDS_COMP_MANDATORY)+L")";
             SetWindowTextW(component64_,(Text(IDS_COMP_P64_TITLE)+(os64?mandatory:L"")).c_str());
             SetWindowTextW(component32_,(Text(IDS_COMP_P32_TITLE)+(!os64?mandatory:L"")).c_str());
@@ -1848,6 +1877,8 @@ private:
 #endif
     }
     [[nodiscard]] const wchar_t* WebPageName(WizardUnlock::Phase unlock) const noexcept {
+        // Пока идёт стартовая загрузка, слайд-шоу не мелькает: держим «бублик».
+        if (StartupLoading() && page_==Page::Welcome) return L"loading";
         switch (page_) {
         case Page::Welcome: return L"welcome";
         case Page::Checking: return L"checking";
@@ -2206,7 +2237,7 @@ private:
                 L",\"attachedPayloadVersion\":"+JsStringLiteral(rep?rep->attachedPayloadVersion:L"")+
                 L",\"attachedPackagePath\":"+JsStringLiteral(rep?rep->attachedPackagePath:L"")+
                 L",\"selectedPackagePath\":"+JsStringLiteral(rep?rep->selectedPackagePath:L"")+
-                L",\"downloadRequired\":"+((openGlass||!targetVersion.empty())&&!selectedLocal?L"true":L"false")+
+                L",\"downloadRequired\":"+(DownloadRequiredLocked(catalogIndex==5?6u:static_cast<std::size_t>(catalogIndex))?L"true":L"false")+
                 L",\"localPackageVersion\":"+JsStringLiteral(rep&&rep->sourceVerified?rep->targetVersion:L"")+
                 L",\"packageSize\":"+std::to_wstring(packageSize)+
                 L",\"operation\":"+JsStringLiteral(removing?L"remove":condition==GlassProducts::ProductCondition::NotInstalled?L"install":condition==GlassProducts::ProductCondition::UpdateAvailable?L"update":L"repair")+
@@ -2280,7 +2311,7 @@ private:
             L",\"attachedPackageVersion\":"+JsStringLiteral(sutOffer.attachedVersion)+
             L",\"attachedPackagePath\":"+JsStringLiteral(sutOffer.attachedPath)+
             L",\"selectedPackagePath\":"+JsStringLiteral(sutUseLocal?sutOffer.localPath:L"")+
-            L",\"downloadRequired\":"+(!sutUseLocal?L"true":L"false")+
+            L",\"downloadRequired\":"+(DownloadRequiredLocked(5)?L"true":L"false")+
             L",\"localPackageVersion\":"+JsStringLiteral(sutOffer.attachedVersion)+
             L",\"remoteVersion\":"+JsStringLiteral(sutOffer.releaseVersion)+
             L",\"releaseTag\":"+JsStringLiteral(sutOffer.releaseTag)+
@@ -2400,6 +2431,9 @@ private:
         // Apply starts preparation. A transfer waits for another Apply after the
         // files are ready. Packages already on disk continue on this Apply.
         if(!DownloadsReady()) {
+            // Нужна сеть — запомнить выбор: при отмене следующий запуск подхватит скачанное.
+            if(ProductApplyTextId()==IDS_APPLY&&!GlassDownloadCache::WriteSelection(DownloadSelection()))
+                InstallLog::Line(L"Download cache: cannot save product selection");
             downloadContinuePending_=true;
             ReconcileDownloads();UpdateDownloadProgress();
             SyncWebViewState();
@@ -2419,11 +2453,15 @@ private:
         for(std::size_t i=0;i<selected.size();++i)
             transferred|=selected[i]&&downloads_.jobs[i]&&downloads_.jobs[i]->network.load(std::memory_order_acquire);
         if(transferred) {
-            InstallLog::Line(L"Product preparation finished; installation waits for Apply");
+            // Скачанное теперь локально: кнопка становится «Выполнить» и ждёт нажатия.
+            InstallLog::Line(L"Product preparation finished; installation waits for Execute");
+            if(!GlassDownloadCache::WriteSelection(selected))InstallLog::Line(L"Download cache: cannot save product selection");
+            UpdateNextText();
             EnableWindow(next_,!failurePending_&&!DebugDemoLocksControls()&&ComponentsReady());
             UpdateDownloadProgress();
             return;
         }
+        // Всё уже было на диске: «Выполнить» нажата один раз — установка продолжается.
         InstallLog::Line(L"Selected packages are already local; installation continues");
         if(CertificatePageApplies())SetPage(Page::Certificate);else StartInstallation();
     }
@@ -2461,7 +2499,11 @@ private:
     }
     void SyncWebViewState() {
         ReconcileDownloads();
+        // Подпись зависит от сверки загрузок выше; WebView для неё не нужен.
+        if (controlsReady_ && (page_==Page::Components || page_==Page::Certificate)) UpdateNextText();
         if (!webReady_ || !webBridgeReady_) return;
+        // init несёт текст EULA, известный только после старта; до него страница сама держит 'loading'.
+        if (webState_.NeedsInit() && startupPending_) return;
         if (webState_.NeedsInit()) {
             const UINT doneBodyId=SimulationBuild()?IDS_DONE_BODY_DEMO:IDS_DONE_BODY;
             const UINT doneNoteId=SimulationBuild()?IDS_DONE_NOTE_DEMO:IDS_DONE_NOTE;
@@ -2615,9 +2657,65 @@ private:
         FocusPage();
         InvalidateContent();
     }
-    // «Установить» доступен только с выбранными продуктами: без них делать нечего.
+    // Признак downloadRequired карточки: проверенного пакета целевой версии нет на диске.
+    // Слоты — как у DownloadSelection (5 — SecureUxTheme). Вызывающий держит inspectMutex_.
+    [[nodiscard]] bool DownloadRequiredLocked(std::size_t slot) const noexcept {
+        try {
+            if(slot==4)return true; // OpenGlass: файл апстрима всегда готовится заново
+            if(slot==5) {
+                const auto& offer=inspect_.secureUxOffer;
+                const bool file=offer.localVerified&&!offer.localVersion.empty();
+                const bool releaseNewer=file&&!offer.releaseVersion.empty()&&VersionOlder(offer.localVersion,offer.releaseVersion);
+                return !(file&&!releaseNewer);
+            }
+            if(slot>6)return false;
+            const GlassProductInspect::ProductReport& rep=slot==0?inspect_.x64:slot==1?inspect_.x86:
+                slot==2?inspect_.settings64:slot==3?inspect_.settings32:inspect_.openGlassResources;
+            std::wstring target=rep.targetVersion;
+            const auto& asset=releaseCatalog_.products[slot==6?5:slot];
+            if(asset&&asset->downloadable) {
+                const auto& v=asset->version.parts;
+                const auto remote=std::to_wstring(v[0])+L"."+std::to_wstring(v[1])+L"."+std::to_wstring(v[2])+L"."+std::to_wstring(v[3]);
+                if(target.empty()||VersionOlder(target,remote))target=remote;
+            }
+            const bool selectedLocal=rep.sourceVerified&&target==rep.targetVersion;
+            return !target.empty()&&!selectedLocal;
+        }catch(...){return true;} // неизвестно — считаем, что нужна сеть
+    }
+    // «Применить» — выбранному продукту ещё нужна загрузка с сервера.
+    // «Выполнить» — всё уже на диске: лежало рядом, в кэше загрузок или только что скачано;
+    // также для удаления и обслуживания без установки.
     [[nodiscard]] UINT ProductApplyTextId() const noexcept {
-        return selection_.removeMask || selection_.secureUxThemeRemove || MaintenanceUi()?IDS_APPLY:IDS_INSTALL;
+        if(SimulationBuild()||!inspectReady_.load(std::memory_order_acquire))return IDS_APPLY;
+        const auto selected=DownloadSelection();
+        std::lock_guard<std::mutex> lock(inspectMutex_);
+        for(std::size_t i=0;i<selected.size();++i) {
+            if(!selected[i]||!DownloadRequiredLocked(i))continue;
+            const auto& job=downloads_.jobs[i];
+            const bool prepared=job&&job->done.load(std::memory_order_acquire)&&job->ok&&!job->cancel.load();
+            if(!prepared)return IDS_APPLY;
+        }
+        return IDS_EXECUTE;
+    }
+    // Единственный источник подписи next_: SetPage, правка плана, готовность загрузок.
+    // Не const: CertificatePageApplies лениво опрашивает подпись (certQueried_).
+    [[nodiscard]] UINT NextTextId() noexcept {
+        const bool terminal=page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error;
+        return page_==Page::FullCleanup?IDS_APPLY:
+            page_==Page::ConfirmCancel?IDS_CONFIRM_ABORT:
+            page_==Page::Conflicts?IDS_RECHECK_CONFLICTS:
+            page_==Page::Components?(CertificatePageApplies()?IDS_NEXT:ProductApplyTextId()):
+            page_==Page::Certificate?ProductApplyTextId():
+            terminal?IDS_FINISH:
+            page_==Page::ModulesBusy || page_==Page::SettingsBusy?IDS_HOLD_RETRY:
+            page_==Page::ProcessesStuck?IDS_UNLOCK:IDS_NEXT;
+    }
+    void UpdateNextText() {
+        if(!next_)return;
+        const std::wstring text=Text(NextTextId());
+        wchar_t current[64]{};
+        GetWindowTextW(next_,current,static_cast<int>(std::size(current)));
+        if(text!=current)SetWindowTextW(next_,text.c_str()); // без лишней перерисовки
     }
     [[nodiscard]] bool HasSelectedComponent() const noexcept {
         return selection_.removeMask || selection_.platform64 || selection_.platform32 || selection_.glassSettings || selection_.openGlass || selection_.secureUxTheme || selection_.secureUxThemeRemove || selection_.openGlassResources;
@@ -2629,6 +2727,79 @@ private:
             OpenGlassApplyPlanSupported() &&
             GlassProducts::ResourcesPlanReady(selection_,GlassInstallUtil::IsOs64Bit(),resourcesPrerequisiteReady_) &&
             !(selection_.removeMask && selection_.secureUxTheme));
+    }
+    // Кэш загрузок прошлого запуска (ProgramData\Packages\GlassPlatform\Downloads).
+    // Один раз за процесс, до загрузок этой сессии. Запись годна, только если
+    // сервер доступен, версия совпадает с актуальной, а обследование выбрало
+    // проверенный локальный пакет этой версии (Discover/FindLocal проверили хеш).
+    // Разошедшиеся записи удаляются; офлайн кэш не трогается и выбор не восстанавливается.
+    // Если годны все записи — восстанавливается сохранённый выбор продуктов,
+    // а подпись кнопки сама становится «Выполнить» (ProductApplyTextId).
+    void RestoreDownloadCache() noexcept {
+        if(downloadCacheChecked_||SimulationBuild())return;
+        downloadCacheChecked_=true;
+        try {
+            GlassDownloadCache::Manifest manifest;
+            if(!GlassDownloadCache::ReadManifest(manifest)||manifest.entries.empty())return;
+            enum class State{Unknown,Valid,Stale};
+            std::vector<State> states(manifest.entries.size(),State::Unknown);
+            {
+                std::lock_guard<std::mutex> lock(inspectMutex_);
+                for(std::size_t k=0;k<manifest.entries.size();++k) {
+                    const auto& e=manifest.entries[k];
+                    const bool present=!GlassDownloadCache::Path(e.file).empty();
+                    if(e.slot==5) {
+                        const auto& offer=inspect_.secureUxOffer;
+                        if(offer.releaseTag.empty())continue; // офлайн: сравнить не с чем
+                        const bool releaseNewer=!offer.releaseVersion.empty()&&VersionOlder(offer.localVersion,offer.releaseVersion);
+                        const bool ok=present&&offer.localVerified&&!releaseNewer&&!inspect_.secureUxTheme.installed&&
+                            GlassDownloadCache::Detail::Narrow(offer.localVersion)==e.version;
+                        states[k]=ok?State::Valid:State::Stale;
+                        continue;
+                    }
+                    if(e.slot==4){states[k]=State::Stale;continue;} // OpenGlass не кэшируется
+                    const auto& asset=releaseCatalog_.products[e.slot==6?5:e.slot];
+                    if(!asset||!asset->downloadable)continue;
+                    const GlassProductInspect::ProductReport& rep=e.slot==0?inspect_.x64:e.slot==1?inspect_.x86:
+                        e.slot==2?inspect_.settings64:e.slot==3?inspect_.settings32:inspect_.openGlassResources;
+                    GlassPackageRules::Version cached,target;
+                    const bool upToDate=rep.installed&&!rep.updateAvailable&&!rep.damaged;
+                    const bool ok=present&&!upToDate&&rep.sourceVerified&&
+                        GlassPackageRules::ParseVersion(e.version,cached)&&GlassPackageRules::Compare(cached,asset->version)==0&&
+                        GlassPackageRules::ParseVersion(GlassDownloadCache::Detail::Narrow(rep.targetVersion),target)&&
+                        GlassPackageRules::Compare(target,cached)==0;
+                    states[k]=ok?State::Valid:State::Stale;
+                }
+            }
+            bool allValid=true;
+            for(std::size_t k=0;k<states.size();++k) {
+                if(states[k]==State::Valid)continue;
+                allValid=false;
+                if(states[k]!=State::Stale)continue;
+                const auto& e=manifest.entries[k];
+                InstallLog::LineFormat(L"Download cache: stale entry removed slot=%u file=%s",e.slot,e.file.c_str());
+                if(!GlassDownloadCache::Remove(e.file))InstallLog::LineFormat(L"Download cache: cannot remove %s",e.file.c_str());
+            }
+            if(!allValid||!manifest.hasSelection||selection_.removeMask||selection_.secureUxThemeRemove)return;
+            const auto& s=manifest.selection;
+            const bool os64=GlassInstallUtil::IsOs64Bit();
+            selection_.platform64=os64&&s[0];
+            selection_.platform32=s[1];
+            selection_.settings64=os64&&s[2];
+            selection_.settings32=s[3];
+            selection_.SyncSettings(os64);
+            selection_.openGlass=os64&&s[4];
+            selection_.openGlassResources=os64&&s[6];
+            {
+                std::lock_guard<std::mutex> lock(inspectMutex_);
+                selection_.secureUxTheme=s[5]&&(!sutMetadataBlocked_||sutMetadataLocal_)&&
+                    !inspect_.secureUxTheme.installed&&!SecureUxThemeSelectionBlocked();
+                ClampSecureUxThemeSelection();
+            }
+            InstallLog::LineFormat(L"Download cache: previous selection restored (%u entries) x64=%d x86=%d s64=%d s32=%d og=%d sut=%d res=%d",
+                static_cast<unsigned>(manifest.entries.size()),s[0]?1:0,s[1]?1:0,s[2]?1:0,s[3]?1:0,s[4]?1:0,s[5]?1:0,s[6]?1:0);
+            UpdateNextText();
+        }catch(...){InstallLog::Line(L"Download cache: restore skipped (unexpected error)");}
     }
     void OnInspectReady() {
         {
@@ -2663,11 +2834,20 @@ private:
             }
             ClampSecureUxThemeSelection();
         }
+        RestoreDownloadCache();
         inspectionApplied_=true;
         EnableWindow(next_,!failurePending_ && ComponentsReady());
         SyncWebViewState();
         InvalidateContent();
         if(page_==Page::Checking)CompleteVersionCheck();
+    }
+    // Пульсация иллюстрации нативной страницы ошибки (только без WebView2).
+    void UpdateErrorPulseTimer() {
+        BOOL animationsEnabled=TRUE;
+        SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION,0,&animationsEnabled,0);
+        if (animationsEnabled && !webReady_ && page_==Page::Error)
+            SetTimer(window,kHeroTimer,kHeroTimerMs,nullptr);
+        else KillTimer(window,kHeroTimer);
     }
     void SetPage(Page page) {
         // Maintenance has no backwards route into the welcome slideshow.
@@ -2681,13 +2861,7 @@ private:
         page_=page;
         if(page_!=Page::Components)downloadContinuePending_=false;
         if(page_!=Page::Checking)setupDownloadActive_=false;
-        BOOL animationsEnabled=TRUE;
-        SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION,0,&animationsEnabled,0);
-        loadingAnimationsEnabled_=animationsEnabled!=FALSE;
-        const bool nativeLoading=(page_==Page::Welcome || (page_==Page::Checking)) && !webReady_ && SUCCEEDED(webError_);
-        if (animationsEnabled && !webReady_ && (nativeLoading || page_==Page::Error))
-            SetTimer(window,kHeroTimer,kHeroTimerMs,nullptr);
-        else KillTimer(window,kHeroTimer);
+        UpdateErrorPulseTimer();
         WizardTheme::ApplyDarkWindowChrome(window);
         const bool closeBlocked=page_==Page::Cancelling || page_==Page::Launching ||
             (page_==Page::Error && failurePending_);
@@ -2697,16 +2871,8 @@ private:
         const bool demoControlsLocked=DebugDemoLocksControls();
         const bool terminal=page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error;
         const bool inProgress=page_==Page::Checking || page_==Page::Installing || page_==Page::Cancelling ||
-            page_==Page::Launching;
-        const UINT nextId = page_==Page::FullCleanup?IDS_APPLY:
-            page_==Page::ConfirmCancel?IDS_CONFIRM_ABORT:
-            page_==Page::Conflicts?IDS_RECHECK_CONFLICTS:
-            page_==Page::Components?(CertificatePageApplies()?IDS_NEXT:ProductApplyTextId()):
-            page_==Page::Certificate?ProductApplyTextId():
-            terminal?IDS_FINISH:
-            page_==Page::ModulesBusy || page_==Page::SettingsBusy?IDS_HOLD_RETRY:
-            page_==Page::ProcessesStuck?IDS_UNLOCK:IDS_NEXT;
-        SetWindowTextW(next_,Text(nextId).c_str());
+            page_==Page::Launching || (page_==Page::Welcome && StartupLoading());
+        UpdateNextText();
         SetWindowTextW(back_,Text(page_==Page::ModulesBusy?IDS_CONTINUE_RISK:page_==Page::ConfirmCancel?IDS_CONFIRM_RESUME:IDS_BACK).c_str());
         SetWindowTextW(cancel_,Text(IDS_CANCEL).c_str());
         const bool confirm=page_==Page::ConfirmCancel;
@@ -2792,9 +2958,8 @@ private:
             return;
         }
         InstallLog::Line(L"WebView2 Runtime installed");
-        webStartupExpected_=true;
-        if (!PostMessageW(window,kInitWebView,0,0))
-            WebFailure(HRESULT_FROM_WIN32(GetLastError()));
+        PostWebViewInit();
+        InvalidateContent();
 #ifdef _DEBUG
         if (debugDemoPending_) return;
 #endif
@@ -3141,6 +3306,16 @@ private:
             else if (page_ != Page::Error) ContinueAfterLicenseCheck();
             return;
         }
+        // Сначала WebView2 и «бублик», затем проверка версий. Отказ WebView2
+        // или таймаут снимают ожидание (ResumeVersionCheckAfterWeb).
+        if (!webWaitDone_ && webStartupExpected_ && !webReady_ && SUCCEEDED(webError_) && !NativeDemo()) {
+            if (!versionCheckAwaitingWeb_) {
+                versionCheckAwaitingWeb_=true;
+                SetTimer(window,kWebWaitTimer,kWebWaitTimeoutMs,nullptr);
+                InstallLog::Line(L"Version check waits for WebView2");
+            }
+            return;
+        }
         versionCheckStarted_ = true;
         InstallLog::Line(IsControllerChild()?L"Controller already checked; loading inherited product catalog":L"Checking for newer setup on GitHub…");
         SetPage(Page::Checking);
@@ -3285,6 +3460,7 @@ private:
 #ifdef _DEBUG
     void MaybeStartDebugDemo() {
         if (!debugDemoPending_ || debugDemoStarted_ || (!debugNativeDemo_ && (!webReady_ || !webBridgeReady_))) return;
+        if (StartupLoading()) return; // Тур стартует после проверки, иначе её SetPage перебьёт показ.
         debugDemoStarted_=true;
         debugDemoPending_=false;
         debugDemoActive_=true;
@@ -3610,8 +3786,8 @@ private:
 #endif
         web_.SetVisible(false);
         ShowWindow(webHost_,SW_HIDE);
-        if (page_==Page::Welcome) KillTimer(window,kHeroTimer);
         SetPage(page_); // Restore controls only after a confirmed WebView failure.
+        ResumeVersionCheckAfterWeb(); // Без WebView2 проверка версий идёт на нативных страницах.
         InvalidateContent();
     }
     HRESULT HandleWebMessage(const std::wstring& message) {
@@ -3718,7 +3894,7 @@ private:
                 inspectReady_.load()?1:0,downloadContinuePending_?1:0,DownloadsReady()?1:0,
                 GlassProducts::ResourcesPlanReady(selection_,os64,resourcesPrerequisiteReady_)?1:0,failurePending_?1:0,ComponentsReady()?1:0);
             EnableWindow(next_,!failurePending_ && ComponentsReady());
-            SetWindowTextW(next_,Text(CertificatePageApplies()?IDS_NEXT:ProductApplyTextId()).c_str());
+            UpdateNextText();
             SyncWebViewState();
             // Правка плана во время подготовки — это не «Применить». Снятые
             // продукты уже отменены сверкой выше; остальные не уходят в установку,
@@ -3754,12 +3930,22 @@ private:
             [](void* context,HRESULT hr) { static_cast<Installer*>(context)->WebFailure(hr); },
             [](void* context,const std::wstring& message) { static_cast<Installer*>(context)->HandleWebMessage(message); }
         });
+        // Хост показывается сразу: «бублик» страницы 'loading' виден, пока идёт старт.
+        if (StartupLoading() && page_==Page::Welcome && controlsReady_) ShowContentControls();
     }
     void OnWebReady() {
         KillTimer(window,kFadeTimer);
         transitioning_=false;
         webReady_=true; webError_=S_OK;
-        KillTimer(window,kHeroTimer);
+        UpdateErrorPulseTimer();
+        if (StartupLoading() && page_==Page::Welcome) {
+            // Старт ещё идёт: кнопки остаются скрытыми, видна только страница загрузки.
+            ShowContentControls();
+            SyncWebViewState();
+            ResumeVersionCheckAfterWeb();
+            InvalidateContent();
+            return;
+        }
         SetPage(page_);
         SyncWebViewState();
 #ifdef _DEBUG
@@ -3953,7 +4139,15 @@ private:
         g.FillEllipse(&spark,GdiReal(cx+Scale(119)),GdiReal(cy-Scale(73)),GdiReal(Scale(7)),GdiReal(Scale(7)));
         g.FillEllipse(&spark,GdiReal(cx-Scale(127)),GdiReal(cy+Scale(81)),GdiReal(Scale(5)),GdiReal(Scale(5)));
     }
-    void DrawLoadingScreen(HDC dc) { WizardUi::DrawLoadingSpinner(dc,dpi_,loadingAnimationsEnabled_); }
+    // Без WebView2 (среда ставится) «бублик» нарисовать нечем: только строка состояния, без нативного спиннера.
+    void DrawStartupStatus(HDC dc, const std::wstring& status) {
+        if (status.empty()) return;
+        DrawLabel(dc,status,Box(80,250,840,60),font_,RGB(163,168,191),DT_CENTER | DT_WORDBREAK | DT_NOPREFIX);
+    }
+    [[nodiscard]] std::wstring RuntimeStatusText() {
+        std::lock_guard<std::mutex> lock(runtimeMutex_);
+        return runtimeStatus_.empty()?Text(IDS_RUNTIME_INSTALLING_PACKAGE):runtimeStatus_;
+    }
     void EnsureBanner() {
         if (bannerLoaded_) return;
         bannerLoaded_=true;
@@ -4005,7 +4199,8 @@ private:
         // Do not flash native Checking before the real WebView Checking page,
         // for either bootstrapper or maintenance startup. Retain the native fallback on WebView error.
         if (WaitingForWebUi()) {
-            DrawLoadingScreen(dc);
+            // Пока WebView2 грузится, тёмный фон совпадает с его фоном; «бублик» рисует сама страница.
+            if (!webStartupExpected_ && runtimeThread_.joinable()) DrawStartupStatus(dc,RuntimeStatusText());
             return;
         }
         if (page_==Page::Certificate && !webReady_) {
@@ -4177,8 +4372,8 @@ private:
                 rowY+=64;
             }
             DrawLabel(dc,Text(IDS_CONFLICTS_INSTRUCTIONS),Box(48,443,558,78),small_,white,DT_LEFT|DT_TOP|DT_WORDBREAK|DT_NOPREFIX);
-        } else if ((page_==Page::Welcome || (page_==Page::Checking)) && !webReady_ && SUCCEEDED(webError_)) {
-            DrawLoadingScreen(dc);
+        } else if (page_==Page::Checking && !webReady_ && SUCCEEDED(webError_)) {
+            DrawStartupStatus(dc,checkingStatus_);
         } else if (!webReady_ && FAILED(webError_)) {
             wchar_t code[16]{};
             swprintf_s(code,L"0x%08lX",static_cast<unsigned long>(webError_));
@@ -4247,7 +4442,7 @@ private:
         downloads_.Stop();
         KillTimer(window,kProductDownloadTimer);
         KillTimer(window,kStartupPollTimer);
-        KillTimer(window,kInstallTimer); KillTimer(window,kFadeTimer); KillTimer(window,kHeroTimer);
+        KillTimer(window,kInstallTimer); KillTimer(window,kFadeTimer); KillTimer(window,kHeroTimer); KillTimer(window,kWebWaitTimer);
 #ifdef _DEBUG
         KillTimer(window,kDebugDemoTimer);
 #endif
@@ -4322,14 +4517,7 @@ private:
         case WM_THEMECHANGED:
             EndTransition(); InvalidateRect(window,nullptr,FALSE); return 0;
         case WM_SETTINGCHANGE:
-            if ((page_==Page::Welcome || (page_==Page::Checking)) && !webReady_ && SUCCEEDED(webError_)) {
-                BOOL enabled=TRUE;
-                SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION,0,&enabled,0);
-                loadingAnimationsEnabled_=enabled!=FALSE;
-                if (loadingAnimationsEnabled_) SetTimer(window,kHeroTimer,kHeroTimerMs,nullptr);
-                else KillTimer(window,kHeroTimer);
-                InvalidateContent();
-            }
+            if (page_==Page::Error && !webReady_) { UpdateErrorPulseTimer(); InvalidateContent(); }
             break;
         case WM_DPICHANGED: {
             EndTransition();
@@ -4568,9 +4756,11 @@ private:
             else if (w==kFadeTimer && transitioning_) {
                 if (GetTickCount64()-fadeStarted_>=kFadeDuration) EndTransition();
                 else InvalidateContent();
-            } else if (w==kHeroTimer && !webReady_ &&
-                       (page_==Page::Welcome || (page_==Page::Checking) || page_==Page::Error)) {
+            } else if (w==kHeroTimer && !webReady_ && page_==Page::Error) {
                 InvalidateContent();
+            } else if (w==kWebWaitTimer) {
+                InstallLog::Line(L"WebView2 did not become ready in time; version check continues");
+                ResumeVersionCheckAfterWeb();
             }
             return 0;
         case WM_SYSCOMMAND: if ((w & 0xfff0)==SC_CLOSE) { RequestClose(); return 0; } break;

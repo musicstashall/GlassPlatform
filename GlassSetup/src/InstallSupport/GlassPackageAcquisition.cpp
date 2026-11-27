@@ -2,6 +2,7 @@
 #include "GlassPackageAcquisition.h"
 #include "GlassReleaseClient.h"
 #include "GlassMaintenanceCache.h"
+#include "GlassDownloadCache.h"
 #include "GlassProductInspect.h"
 #include "../InstallLog.h"
 #include <wincrypt.h>
@@ -238,8 +239,11 @@ static bool Discover(GlassPackageCatalog::Product product,const GlassPackageCata
         if(!length||length>=32768)return Fail(error,L"Cannot locate installer directory");
         std::wstring parent(exe,length);parent=parent.substr(0,parent.find_last_of(L"\\/"));
         if(!GlassSetupSourceLayout::directory.empty())parent=GlassSetupSourceLayout::directory;
-        const std::array<std::wstring,4> paths={GlassMaintenanceCache::CurrentFile(name.c_str()),
-            parent+L"\\packages\\"+name,parent+L"\\"+name,GlassSetupSourceLayout::Prepared(GlassPackageCatalog::PreparedIndex(product))};
+        // [4] — кэш загрузок прошлых запусков (Downloads): доверие только по точной
+        // версии актуального релиза + SHA-256 каталога, без запасного пути по издателю.
+        const std::array<std::wstring,5> paths={GlassMaintenanceCache::CurrentFile(name.c_str()),
+            parent+L"\\packages\\"+name,parent+L"\\"+name,GlassSetupSourceLayout::Prepared(GlassPackageCatalog::PreparedIndex(product)),
+            GlassDownloadCache::Path(name)};
         const auto rejected=[&](const std::wstring& path,const std::wstring& reason) {
             InstallLog::LineFormat(L"Local MSI rejected: %s: %s",path.c_str(),reason.c_str());
             diagnostics+=L"\n"+path+L": "+reason;
@@ -257,12 +261,13 @@ static bool Discover(GlassPackageCatalog::Product product,const GlassPackageCata
             bool trusted=n==0&&GlassMaintenanceCache::MatchesInstalled(paths[n],code,display);
             if(!trusted&&remote&&remote->downloadable&&Compare(v,remote->version)==0)
                 trusted=GlassReleaseClient::VerifyHash(file.h,remote->size,remote->sha256,cancel,error);
-            if(!trusted)trusted=SameMsiPublisher(paths[n]);
+            if(!trusted&&n!=4)trusted=SameMsiPublisher(paths[n]);
             if(!trusted) {
-                rejected(paths[n],L"signature/publisher or release hash verification failed (see log); unsigned local MSI is not trusted");
+                rejected(paths[n],n==4?L"download cache entry is not the current release (version or hash mismatch)":
+                    L"signature/publisher or release hash verification failed (see log); unsigned local MSI is not trusted");
                 continue;
             }
-            candidates.push_back({(n==3?Source::Prepared:static_cast<Source>(n)),v,true});sources.push_back(paths[n]);
+            candidates.push_back({(n>=3?Source::Prepared:static_cast<Source>(n)),v,true});sources.push_back(paths[n]);
             if(labels)labels->push_back(display);
         }
         if(remote&&remote->downloadable){
