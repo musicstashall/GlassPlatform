@@ -124,7 +124,7 @@ LiquidMetal перед маской берётся негатив (рисуно�
 
 Самостоятельные единые SVG-источники: SilkWave, FoldedVeil, CornerGlow, PrismGlints,
 LiquidCaustics, AuroraCurtain, IceFracture, NebulaDrift, VortexSwirl, TopoContours,
-WaveInterference, StarField, PentaStars, ScratchGrunge, PaperLayers, LineWaves, ThinRays, SoftRays, GoldHexagons, HexGrid, BokehDrift, BokehGlow, BokehDust. Это реальные векторы без встроенных растровых изображений;
+WaveInterference, StarField, PentaStars, ScratchGrunge, PaperLayers, LineWaves, ThinRays, SoftRays, GoldHexagons, HexGrid, BokehDrift, BokehGlow, BokehDust, GlassPlates, NeonFrames, NeonTiles. Это реальные векторы без встроенных растровых изображений;
 StarField составлен из четырёхлучевых бликов с радиальным ядром, PentaStars —
 отдельный рисунок с пятиконечными звёздами: три большие с сиянием и тёмной
 сердцевиной плюс малые с плоской альфой и разным поворотом; ScratchGrunge — конверсия EPS пользователя
@@ -204,6 +204,23 @@ BokehDrift, BokehGlow, BokehDust — три AI(PDF-1.5) пользователя
 градиентов на 112/63/98 фигур. Мелкие шестиугольники и точки (плоские заливки
 Overlay) переведены как alpha = ca × яркость × 0.8 × 1.7. Фоновые mesh/линейные
 шейдинги и полноформатные заливки удалены. 22/31/35 КБ, 160/342/333 узлов.
+GlassPlates — EPS Illustrator 28 без приватного потока: вся графика страницы —
+70 CMYK-растров (RunLength+ASCII85), каждый обрезан векторным контуром
+пластины. Растры не переносятся: по каждому вычислена плоскость яркости
+(МНК по пикселям), её градиент стал `linearGradient` в координатах страницы,
+контур клипа — многоугольником; непрозрачность = (фон 0.965 − яркость) × 1.8.
+Фоновая заливка удалена, фоновый шейдинг в зазорах сведён к плоской заливке.
+36 КБ, 285 узлов.
+NeonFrames, NeonTiles — AI (PDF-1.5) с неоновой графикой. Общий обходчик
+(`q/Q`, `cm`, клипы, `gs` с ca/BM/SMask, формы, паттерны в обводках) выдаёт
+листья: шейдинги типов 2/3 (и 7 — усреднённый цвет патчей), обводки
+с shading-pattern. Негативный перенос: alpha = ca × (яркость − фон для Normal,
+яркость для Screen/ColorDodge) × маска(t) × 1.5, потолок 0.9; Multiply-слои
+отброшены. Пять растровых ореолов NeonFrames (2560×2648, SMask) заменены
+двумя широкими полупрозрачными обводками тем же градиентом (w 18/40,
+op .2/.08). Концентрические круги NeonTiles (искры, блики) используют общие
+objectBoundingBox-градиенты по профилю — 442 узла вместо 2144.
+13 КБ/149 узлов и 67 КБ/442 узла.
 DotWaveHalftone (реконструкция полутонового растра) удалён по решению пользователя.
 Геометрия и прозрачность прежних рисунков взяты из утверждённых исходников без изменения. `viewBox` и
 `preserveAspectRatio` определяют растеризацию; текущие композиции используют
