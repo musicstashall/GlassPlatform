@@ -32,6 +32,22 @@
 | 12 | [Сборка, 5 MSI-пакетов установщика и подпись](12-build-signing) | — |
 | 13 | [Текстуры стекла OpenGlass и ReflectionTextureService](13-openglass-textures) | Mermaid · `flowchart` |
 
+## Где что лежит: сайт и GitHub
+
+Документация живёт на двух площадках, и это не дубли, а разные режимы чтения.
+
+| Документ | На сайте | На GitHub |
+|---|---|---|
+| Техническая документация, 13 разделов | [docs.html](https://glass-platform.ru/docs.html) — интерактивные схемы, фильтры по веткам и ролям, симуляторы | [эта вики](Home) — те же разделы текстом и диаграммами Mermaid |
+| Параметры реестра `HKCU\Software\StanislavKa\GlassPlatform` | [registry.html](https://glass-platform.ru/registry.html) — поиск по всем параметрам, сводные таблицы перекрытий, переключатели разделов | [`docs/registry.md`](https://github.com/musicstashall/GlassPlatform/blob/master/docs/registry.md) — markdown-исходник справочника, история правок в git |
+| Подпись сборок и состав подписи | отдельной страницы нет | [`docs/signing.md`](https://github.com/musicstashall/GlassPlatform/blob/master/docs/signing.md) |
+| Инструкции по установке и настройке | [help.html](https://glass-platform.ru/help.html) | — |
+
+**Какую ссылку давать.** Нужно найти параметр или показать схему — сайт. Нужна история
+изменений, `diff`, ссылка из кода, правка через PR или точная формулировка, которую можно
+процитировать в issue, — файл в репозитории. Если две версии разошлись, ориентируйтесь на
+файл: `registry.html` сам указывает `docs/registry.md` как источник.
+
 ## Интерактивная версия
 
 Часть схем на сайте интерактивна (клик по узлу, фильтры по ролям, симуляторы

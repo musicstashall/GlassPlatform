@@ -17,7 +17,13 @@
 
 ---
 
+**Справочники**
+
+- Параметры реестра · [сайт](https://glass-platform.ru/registry.html) · [GitHub](https://github.com/musicstashall/GlassPlatform/blob/master/docs/registry.md)
+- Подпись сборок · [GitHub](https://github.com/musicstashall/GlassPlatform/blob/master/docs/signing.md)
+
+**Ссылки**
+
 - [Документация на сайте](https://glass-platform.ru/docs.html)
-- [Справочник реестра](https://glass-platform.ru/registry.html)
 - [Инструкции](https://glass-platform.ru/help.html)
 - [Исходники](https://github.com/musicstashall/GlassPlatform)

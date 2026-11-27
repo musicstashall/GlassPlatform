@@ -67,7 +67,18 @@ HKCU\Software\StanislavKa\GlassPlatform
 `WM_DWMCOLORIZATIONCOLORCHANGED` (`0x0320`, `NotifyDwmColorizationChanged`) для цвета,
 прозрачности и blur.
 
-Полный справочник параметров с таблицами перекрытий Popup/Root/Menu/ToolTip/Tray —
-[registry.html](https://glass-platform.ru/registry.html).
+## Полный справочник параметров: сайт и GitHub
+
+В этой вики — только архитектурная часть: каскад резолверов, шкала `EffectType` и дерево
+ключей. Полный перечень параметров с описаниями, умолчаниями и таблицами перекрытий
+`Popup` / `Root` / `Menu` / `ToolTip` / `Tray` живёт в двух местах:
+
+| Где | Что даёт | Ссылка |
+|---|---|---|
+| **Сайт** | поиск по всем параметрам, сводные таблицы перекрытий, переключатели разделов, быстрый переход к нужному ключу | [glass-platform.ru/registry.html](https://glass-platform.ru/registry.html) |
+| **GitHub** | тот же справочник в markdown: 16 разделов, `diff` и история правок, ссылка из кода и issue, правка через PR | [`docs/registry.md`](https://github.com/musicstashall/GlassPlatform/blob/master/docs/registry.md) |
+
+Страница `registry.html` указывает `docs/registry.md` как источник, поэтому при
+расхождении ориентируйтесь на файл в репозитории.
 
 Источник: [docs.html · раздел 09](https://glass-platform.ru/docs.html) · ← [08](08-ipc) · → [10](10-unload)

@@ -28,8 +28,12 @@ Bootstrapper, проверяет сертификат кода (`CN=Stanislav K.
 SmartScreen и UAC для self-signed показывают «Неизвестный издатель» — подпись
 подтверждает авторство и целостность файла, а не репутацию издателя.
 
-Сборка — только из корня solution (x64 Debug → `Build\x64\Debug\`), см.
-[`contributing/build.md`](https://github.com/musicstashall/GlassPlatform/blob/master/contributing/build.md).
-Полный состав подписи — [`docs/signing.md`](https://github.com/musicstashall/GlassPlatform/blob/master/docs/signing.md).
+## Где смотреть подробности
+
+| Документ | Где | Ссылка |
+|---|---|---|
+| Полный состав подписи, таблица отпечатков, точки подписи в сборке | **только GitHub** (на сайте отдельной страницы нет) | [`docs/signing.md`](https://github.com/musicstashall/GlassPlatform/blob/master/docs/signing.md) |
+| Сборка из корня solution (x64 Debug → `Build\x64\Debug\`) | GitHub | [`contributing/build.md`](https://github.com/musicstashall/GlassPlatform/blob/master/contributing/build.md) |
+| Публикация комплекта и отдельных MSI | GitHub | [`GlassSetup/docs/release-publish.md`](https://github.com/musicstashall/GlassPlatform/blob/master/GlassSetup/docs/release-publish.md) |
 
 Источник: [docs.html · раздел 12](https://glass-platform.ru/docs.html) · ← [11](11-tools) · → [13](13-openglass-textures)
