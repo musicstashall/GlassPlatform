@@ -10,6 +10,8 @@ Glass Platform меняет отрисовку Windows 10 и 11: прозрач�
 
 Glass Platform is experimental theming for Windows 10 and 11. It hooks GUI processes and replaces how controls and shell surfaces are painted. License: [GNU GPL v3](LICENSE).
 
+**Где читать документацию:** [Wiki репозитория](https://github.com/musicstashall/GlassPlatform/wiki) · [техническая документация на сайте](https://glass-platform.ru/docs.html) · [справочник реестра](https://glass-platform.ru/registry.html).
+
 ## Что меняется
 
 - **Окна и диалоги** — рамки и фоны в цвете рабочего стола.
@@ -90,9 +92,13 @@ msbuild GlassProject.sln /p:Configuration=Debug /p:Platform=x64
 
 ## Документация
 
+Две площадки: в репозитории — версионируемый текст и диаграммы, на сайте — тот же материал с интерактивом и поиском.
+
+- Техническая документация, 13 разделов (архитектура 13 модулей, IPC и объекты ядра, выгрузка `ExecuteShutdown`, XAML Islands): [Wiki](https://github.com/musicstashall/GlassPlatform/wiki) — диаграммы Mermaid; интерактивные схемы, фильтры и симуляторы — [docs.html](https://glass-platform.ru/docs.html)
+- Справочник реестра: [docs/registry.md](docs/registry.md) на GitHub, с поиском по параметрам — [registry.html](https://glass-platform.ru/registry.html)
+- Инструкции по установке и настройке: [help.html](https://glass-platform.ru/help.html)
 - Архитектура: [ARCHITECTURE.md](ARCHITECTURE.md)
 - Сборка модулей и правила для разработчиков: [AGENTS.md](AGENTS.md), README каталогов `GlassCore/`, `GlassCompat/`, `GlassSettings/` и остальных проектов
-- Реестр: [docs/registry.md](docs/registry.md)
 - Установщик: [GlassSetup/README.md](GlassSetup/README.md)
 - Подпись: [docs/signing.md](docs/signing.md)
 
