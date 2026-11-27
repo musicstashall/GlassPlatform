@@ -63,13 +63,13 @@ def decode_rgba(path, expected_size):
 
 
 assets = ROOT / 'OpenGlass/Resources/GlassReflection/Textured'
-for name in ('FrostWeave', 'DiagonalWeave'):
-    size = (8, 8) if name == 'DiagonalWeave' else (21, 18)
+for name in ('TextureFrostWeave', 'TextureDiagonalWeave'):
+    size = (8, 8) if name == 'TextureDiagonalWeave' else (21, 18)
     dark = decode_rgba(assets / (name + '_Dark.png'), size)
     lite = decode_rgba(assets / (name + '_Lite.png'), size)
     assert dark[3::4] == lite[3::4]
     assert len(set(dark[3::4])) > 1
-    if name == 'DiagonalWeave':
+    if name == 'TextureDiagonalWeave':
         # Golden canvas hashes: 160% geometry; Lite recolored to #A0A0A0.
         for pixels, expected_hash in (
             (dark, '6ca50312be4ef2ab027cc04f7cd8e9c0d081a62c7262a971e8bf32f5a041fc35'),
@@ -123,8 +123,8 @@ assert 'Background="#FF909090"' in xaml
 print('PASS: flat neutral reflection substrate, no checkerboard')
 
 # Approved MicroBasket geometry and alpha must match the original approval swatch.
-basket_dark = decode_rgba(assets / 'MicroBasket_Dark.png', (8, 8))
-basket_lite = decode_rgba(assets / 'MicroBasket_Lite.png', (8, 8))
+basket_dark = decode_rgba(assets / 'TextureMicroBasket_Dark.png', (8, 8))
+basket_lite = decode_rgba(assets / 'TextureMicroBasket_Lite.png', (8, 8))
 expected_alpha = bytes(150 if ((x // 2 + y // 2) % 2 == 0 and x % 2 == 0)
                        or ((x // 2 + y // 2) % 2 == 1 and y % 2 == 0) else 65
                        for y in range(8) for x in range(8))
@@ -134,8 +134,8 @@ for channel in range(3):
     assert set(basket_lite[channel::4]) == {160}
 print('PASS: approved MicroBasket 8x8 geometry, single alpha source and synthesized Dark/Lite presets')
 
-carbon_dark = decode_rgba(assets / 'CarbonWeave_Dark.png', (16, 16))
-carbon_lite = decode_rgba(assets / 'CarbonWeave_Lite.png', (16, 16))
+carbon_dark = decode_rgba(assets / 'TextureCarbonWeave_Dark.png', (16, 16))
+carbon_lite = decode_rgba(assets / 'TextureCarbonWeave_Lite.png', (16, 16))
 # Round 13 approval: the 8x8 checkerboard enlarged twice, pixel-exact blocks.
 expected_carbon = bytes(168 if (x // 2 + y // 2) % 2 == 0 else 42
                         for y in range(16) for x in range(16))
@@ -145,8 +145,8 @@ for channel in range(3):
     assert set(carbon_lite[channel::4]) == {160}
 print('PASS: approved CarbonWeave 16x16 (2x) geometry, single alpha source and synthesized Dark/Lite presets')
 
-fine_dark = decode_rgba(assets / 'FineDiagonal_Dark.png', (9, 9))
-fine_lite = decode_rgba(assets / 'FineDiagonal_Lite.png', (9, 9))
+fine_dark = decode_rgba(assets / 'TextureFineDiagonal_Dark.png', (9, 9))
+fine_lite = decode_rgba(assets / 'TextureFineDiagonal_Lite.png', (9, 9))
 
 
 def _fine_weights(t):
@@ -172,8 +172,8 @@ for channel in range(3):
     assert set(fine_lite[channel::4]) == {160}
 print('PASS: approved FineDiagonal 9x9 (1.5x) geometry, single alpha source and synthesized Dark/Lite presets')
 
-dragon_dark = decode_rgba(assets / 'DragonScale_Dark.png', (8, 8))
-dragon_lite = decode_rgba(assets / 'DragonScale_Lite.png', (8, 8))
+dragon_dark = decode_rgba(assets / 'TextureDragonScale_Dark.png', (8, 8))
+dragon_lite = decode_rgba(assets / 'TextureDragonScale_Lite.png', (8, 8))
 # Regression alpha for the periodically filtered 2/3-size DragonScale.
 expected_dragon = bytes.fromhex(
     "4f342d3e4f342d3e564e3b55564e3b552f47473d2f47473d2d32492d2d32492d2d3e4f342d3e4f343b55564e3b55564e473d2f47473d2f47492d2d32492d2d32"
@@ -184,18 +184,9 @@ for channel in range(3):
     assert set(dragon_lite[channel::4]) == {160}
 print('PASS: DragonScale 8x8 geometry, single alpha source and synthesized Dark/Lite presets')
 
-chevron_dark = decode_rgba(assets / 'MicroChevron_Dark.png', (8, 8))
-chevron_lite = decode_rgba(assets / 'MicroChevron_Lite.png', (8, 8))
-expected_chevron = bytes((145, 95, 45, 65)[(y - (x if x < 4 else 7 - x)) % 4]
-                         for y in range(8) for x in range(8))
-assert chevron_dark[3::4] == chevron_lite[3::4] == expected_chevron
-for channel in range(3):
-    assert set(chevron_dark[channel::4]) == {0}
-    assert set(chevron_lite[channel::4]) == {160}
-print('PASS: approved MicroChevron geometry and synthesized theme presets')
 
-stitch_dark = decode_rgba(assets / 'CrossStitch_Dark.png', (8, 8))
-stitch_lite = decode_rgba(assets / 'CrossStitch_Lite.png', (8, 8))
+stitch_dark = decode_rgba(assets / 'TextureCrossStitch_Dark.png', (8, 8))
+stitch_lite = decode_rgba(assets / 'TextureCrossStitch_Lite.png', (8, 8))
 expected_stitch = bytearray()
 for y in range(8):
     for x in range(8):
@@ -213,8 +204,8 @@ for channel in range(3):
     assert set(stitch_lite[channel::4]) == {160}
 print('PASS: approved dense CrossStitch geometry and synthesized theme presets')
 
-twill_dark = decode_rgba(assets / 'TwillWeave_Dark.png', (8, 8))
-twill_lite = decode_rgba(assets / 'TwillWeave_Lite.png', (8, 8))
+twill_dark = decode_rgba(assets / 'TextureTwillWeave_Dark.png', (8, 8))
+twill_lite = decode_rgba(assets / 'TextureTwillWeave_Lite.png', (8, 8))
 expected_twill = bytearray()
 for y in range(8):
     for x in range(8):

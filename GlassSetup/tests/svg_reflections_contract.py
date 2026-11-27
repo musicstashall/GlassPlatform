@@ -43,7 +43,7 @@ ns = '{http://www.w3.org/2000/svg}'
 assets = root / 'OpenGlass/Resources/GlassReflection/Pattern'
 assert all(path.suffix.lower() == '.svg' for path in assets.iterdir() if path.is_file())
 assert not list(assets.glob('*_Dark.*')) and not list(assets.glob('*_Lite.*'))
-for name in ('SilkWave', 'FoldedVeil', 'CornerGlow', 'PrismGlints', 'LiquidCaustics'):
+for name in ('SilkWave', 'FoldedVeil', 'PrismGlints', 'LiquidCaustics'):
     path = assets / f'{name}.svg'
     assert path.stat().st_size <= 262144
     svg = ET.parse(path).getroot()

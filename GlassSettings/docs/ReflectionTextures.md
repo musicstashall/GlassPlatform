@@ -122,8 +122,8 @@ LiquidMetal перед маской берётся негатив (рисуно�
 
 ### Векторные рисунки
 
-Самостоятельные единые SVG-источники: SilkWave, FoldedVeil, CornerGlow, PrismGlints,
-LiquidCaustics, AuroraCurtain, IceFracture, VortexSwirl, TopoContours,
+Самостоятельные единые SVG-источники: SilkWave, FoldedVeil, PrismGlints,
+LiquidCaustics, IceFracture, TopoContours,
 WaveInterference, StarField, PentaStars, ScratchGrunge, PaperLayers, LineWaves, ThinRays, SoftRays, GoldHexagons, HexGrid, BokehDrift, BokehGlow, BokehDust, GlassPlates, NeonFrames, NeonTiles, LightStreaks, HexHalftone, GlassBars, TriangleMosaic. Это реальные векторы без встроенных растровых изображений;
 StarField составлен из четырёхлучевых бликов с радиальным ядром, PentaStars —
 отдельный рисунок с пятиконечными звёздами: три большие с сиянием и тёмной
@@ -237,7 +237,8 @@ TriangleMosaic — AI 288×288 (плитка): 432 треугольника тр
 треугольники (фон) удалены; плитка масштабирована по высоте и повторена
 дважды явными копиями групп (`use` рендерером не поддерживается — контракт
 теперь проверяет все Pattern-SVG по allowlist рендерера). 31 КБ, 13 узлов.
-DotWaveHalftone (реконструкция полутонового растра) и NebulaDrift удалены по решению пользователя.
+DotWaveHalftone (реконструкция полутонового растра), NebulaDrift, AuroraCurtain, VortexSwirl,
+CornerGlow и растровый MicroChevron удалены по решению пользователя.
 WaveInterference, SilkWave, AuroraCurtain, CornerGlow, FoldedVeil: по просьбе пользователя все
 непрозрачности (stop/stroke/fill-opacity) умножены на 3 (потолок 0.9).
 Геометрия и прозрачность прежних рисунков взяты из утверждённых исходников без изменения. `viewBox` и
@@ -935,3 +936,26 @@ baseline всё ещё содержит прежнее автоматическ�
 снимка, поэтому остальные несохранённые параметры остаются dirty. Ручной выбор
 текстуры, Configure/Apply, изменённые параметры и чужие значения остаются dirty,
 как раньше.
+
+### Категории растровых Textured (префиксы имён)
+
+Галерея сортирует плитки по имени файла, поэтому растровые текстуры получили
+префикс категории (исторические имена в описаниях выше — без префикса):
+
+- `Plant` — растения: PlantBlossomWhirl, PlantBranchLines, PlantFeatherSwirl, PlantLeafHatch.
+- `Fabric` — ткани: FabricCanvasWeave, FabricLinenWeave, FabricJuteWeave.
+- `Texture` — текстуры: TextureCarbonWeave, TextureCrossStitch, TextureDiagonalWeave,
+  TextureDiamondLattice, TextureDragonScale, TextureFineDiagonal, TextureFrostWeave,
+  TextureHerringbone, TextureHexComb, TextureMicroBasket, TextureMicroGrid,
+  TextureOffsetBricks, TextureParquetLines, TexturePinDot, TexturePlainWeave,
+  TextureRippleRows, TextureSilverBasket, TextureStripeBasket, TextureSilkHerring,
+  TextureTwillWeave.
+- `Liquid` — жидкость: LiquidCausticCells, LiquidCoralMaze, LiquidFineWorms, LiquidInkDots,
+  LiquidMetal (имя без изменений), LiquidSatinWaves, LiquidWormMaze.
+- `Metal` — металл: MetalCrossLinen, MetalScratchGrid, MetalScratchLinen.
+- `Collage` — коллаж: CollageFastFoodLines, CollageOrchardLines.
+- `Plaster` — штукатурка: PlasterGrain (без изменений), PlasterStuccoMist.
+
+Вне категорий остались OutlineSquares и WavyNet. Уже применённые пользователем
+отражения ссылаются на старый путь Source и после переименования покажут
+«источник не найден» до повторного выбора.
