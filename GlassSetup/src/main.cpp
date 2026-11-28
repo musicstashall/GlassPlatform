@@ -2510,7 +2510,7 @@ private:
         if(!DownloadsReady()||ServerMsiNeedsTransfer()) {
             DiscardUnsatisfiedServerJobs();
             // Нужна сеть — запомнить выбор: при отмене следующий запуск подхватит скачанное.
-            if(ProductApplyTextId()==IDS_APPLY&&!GlassDownloadCache::WriteSelection(DownloadSelection()))
+            if(!GlassDownloadCache::WriteSelection(DownloadSelection()))
                 InstallLog::Line(L"Download cache: cannot save product selection");
             serverDownloadDeferred_=false;
             downloadContinuePending_=true;
@@ -2556,7 +2556,9 @@ private:
             return;
         }
         // Всё уже было на диске: «Выполнить» нажата один раз — установка продолжается.
+        // Выбор пишется и здесь: прерванная установка должна восстановиться без новой загрузки.
         InstallLog::Line(L"Selected packages are already local; installation continues");
+        if(!GlassDownloadCache::WriteSelection(selected))InstallLog::Line(L"Download cache: cannot save product selection");
         if(CertificatePageApplies())SetPage(Page::Certificate);else StartInstallation();
     }
     std::wstring NativeDownloadSummary() const {
@@ -2831,76 +2833,116 @@ private:
             !(selection_.removeMask && selection_.secureUxTheme));
     }
     // Кэш загрузок прошлого запуска (ProgramData\Packages\GlassPlatform\Downloads).
-    // Один раз за процесс, до загрузок этой сессии. Запись годна, только если
-    // сервер доступен, версия совпадает с актуальной, а обследование выбрало
-    // проверенный локальный пакет этой версии (Discover/FindLocal проверили хеш).
-    // Разошедшиеся записи удаляются; офлайн кэш не трогается и выбор не восстанавливается.
-    // Если годны все записи — восстанавливается сохранённый выбор продуктов,
-    // а подпись кнопки сама становится «Выполнить» (ProductApplyTextId).
+    // Один раз за процесс, после публикации каталога и до загрузок этой сессии.
+    // Актуальный проверенный файл остаётся локальным источником. Устаревший файл
+    // удаляется, но продукт прерванного плана остаётся выбранным и ждёт загрузку.
+    // Установленная версия новее скачанной или новее текущего предложения — не выбирать.
     void RestoreDownloadCache() noexcept {
         if(downloadCacheChecked_||SimulationBuild())return;
         downloadCacheChecked_=true;
         try {
             GlassDownloadCache::Manifest manifest;
-            if(!GlassDownloadCache::ReadManifest(manifest)||manifest.entries.empty())return;
-            enum class State{Unknown,Valid,Stale};
-            std::vector<State> states(manifest.entries.size(),State::Unknown);
+            if(!GlassDownloadCache::ReadManifest(manifest))return;
+            if(manifest.entries.empty()&&!manifest.hasSelection)return;
+            std::array<bool,7> current{},catalogKnown{},aheadOfCache{},aheadOfOffer{},saved{};
+            if(manifest.hasSelection)saved=manifest.selection;
             {
                 std::lock_guard<std::mutex> lock(inspectMutex_);
-                for(std::size_t k=0;k<manifest.entries.size();++k) {
-                    const auto& e=manifest.entries[k];
+                const auto reportOf=[&](std::size_t slot)->const GlassProductInspect::ProductReport* {
+                    if(slot==0)return &inspect_.x64;
+                    if(slot==1)return &inspect_.x86;
+                    if(slot==2)return &inspect_.settings64;
+                    if(slot==3)return &inspect_.settings32;
+                    if(slot==4)return &inspect_.og;
+                    if(slot==5)return &inspect_.secureUxTheme;
+                    if(slot==6)return &inspect_.openGlassResources;
+                    return nullptr;
+                };
+                const auto installedOf=[&](std::size_t slot)->std::wstring {
+                    const auto* rep=reportOf(slot);
+                    if(!rep)return {};
+                    return slot==4?rep->installedPayloadVersion:rep->installedPackageVersion;
+                };
+                const auto offerOf=[&](std::size_t slot)->std::wstring {
+                    if(slot==4)return inspect_.og.remotePayloadVersion.empty()?inspect_.og.targetPayloadVersion:inspect_.og.remotePayloadVersion;
+                    if(slot==5) {
+                        const auto& offer=inspect_.secureUxOffer;
+                        if(!offer.releaseVersion.empty()&&(offer.localVersion.empty()||VersionOlder(offer.localVersion,offer.releaseVersion)))
+                            return offer.releaseVersion;
+                        return offer.localVersion;
+                    }
+                    const auto* rep=reportOf(slot);
+                    std::wstring target=rep?rep->targetVersion:L"";
+                    const auto& asset=releaseCatalog_.products[slot==6?5:slot];
+                    if(asset&&asset->downloadable) {
+                        const auto& v=asset->version.parts;
+                        const auto remote=std::to_wstring(v[0])+L"."+std::to_wstring(v[1])+L"."+std::to_wstring(v[2])+L"."+std::to_wstring(v[3]);
+                        if(target.empty()||VersionOlder(target,remote))target=remote;
+                    }
+                    return target;
+                };
+                const auto newer=[&](const std::wstring& installed,const std::wstring& other) {
+                    return !installed.empty()&&!other.empty()&&VersionOlder(other,installed);
+                };
+                for(const auto& e:manifest.entries) {
+                    if(e.slot>=7)continue;
                     const bool present=!GlassDownloadCache::Path(e.file).empty();
+                    const auto installed=installedOf(e.slot);
+                    const auto cached=GlassDownloadCache::Detail::WideAscii(e.version);
+                    aheadOfCache[e.slot]=newer(installed,cached);
+                    if(e.slot==4){catalogKnown[4]=true;continue;}
                     if(e.slot==5) {
                         const auto& offer=inspect_.secureUxOffer;
-                        if(offer.releaseTag.empty())continue; // офлайн: сравнить не с чем
-                        const bool releaseNewer=!offer.releaseVersion.empty()&&VersionOlder(offer.localVersion,offer.releaseVersion);
-                        const bool ok=present&&offer.localVerified&&!releaseNewer&&!inspect_.secureUxTheme.installed&&
+                        catalogKnown[5]=!offer.releaseVersion.empty()||!offer.releaseTag.empty();
+                        const bool releaseNewer=!offer.releaseVersion.empty()&&!offer.localVersion.empty()&&VersionOlder(offer.localVersion,offer.releaseVersion);
+                        current[5]=present&&offer.localVerified&&!releaseNewer&&
                             GlassDownloadCache::Detail::Narrow(offer.localVersion)==e.version;
-                        states[k]=ok?State::Valid:State::Stale;
                         continue;
                     }
-                    if(e.slot==4){states[k]=State::Stale;continue;} // OpenGlass не кэшируется
                     const auto& asset=releaseCatalog_.products[e.slot==6?5:e.slot];
-                    if(!asset||!asset->downloadable)continue;
-                    const GlassProductInspect::ProductReport& rep=e.slot==0?inspect_.x64:e.slot==1?inspect_.x86:
-                        e.slot==2?inspect_.settings64:e.slot==3?inspect_.settings32:inspect_.openGlassResources;
-                    GlassPackageRules::Version cached,target;
-                    const bool upToDate=rep.installed&&!rep.updateAvailable&&!rep.damaged;
-                    const bool ok=present&&!upToDate&&rep.sourceVerified&&
-                        GlassPackageRules::ParseVersion(e.version,cached)&&GlassPackageRules::Compare(cached,asset->version)==0&&
-                        GlassPackageRules::ParseVersion(GlassDownloadCache::Detail::Narrow(rep.targetVersion),target)&&
-                        GlassPackageRules::Compare(target,cached)==0;
-                    states[k]=ok?State::Valid:State::Stale;
+                    catalogKnown[e.slot]=asset&&asset->downloadable;
+                    const auto* rep=reportOf(e.slot);
+                    GlassPackageRules::Version cachedVersion,target;
+                    current[e.slot]=present&&catalogKnown[e.slot]&&rep&&rep->sourceVerified&&
+                        GlassPackageRules::ParseVersion(e.version,cachedVersion)&&GlassPackageRules::Compare(cachedVersion,asset->version)==0&&
+                        GlassPackageRules::ParseVersion(GlassDownloadCache::Detail::Narrow(rep->targetVersion),target)&&
+                        GlassPackageRules::Compare(target,cachedVersion)==0;
                 }
+                for(std::size_t slot=0;slot<7;++slot) aheadOfOffer[slot]=newer(installedOf(slot),offerOf(slot));
             }
-            bool allValid=true;
-            for(std::size_t k=0;k<states.size();++k) {
-                if(states[k]==State::Valid)continue;
-                allValid=false;
-                if(states[k]!=State::Stale)continue;
-                const auto& e=manifest.entries[k];
+            for(const auto& e:manifest.entries) {
+                if(e.slot>=7||!catalogKnown[e.slot]||current[e.slot])continue;
                 InstallLog::LineFormat(L"Download cache: stale entry removed slot=%u file=%s",e.slot,e.file.c_str());
                 if(!GlassDownloadCache::Remove(e.file))InstallLog::LineFormat(L"Download cache: cannot remove %s",e.file.c_str());
             }
-            if(!allValid||!manifest.hasSelection||selection_.removeMask||selection_.secureUxThemeRemove)return;
-            const auto& s=manifest.selection;
+            if(!manifest.hasSelection||selection_.removeMask||selection_.secureUxThemeRemove)return;
             const bool os64=GlassInstallUtil::IsOs64Bit();
-            selection_.platform64=os64&&s[0];
-            selection_.platform32=s[1];
-            selection_.settings64=os64&&s[2];
-            selection_.settings32=s[3];
+            const auto keep=[&](std::size_t slot) {
+                return GlassDownloadCache::RestoreInterruptedSelection(saved[slot],aheadOfCache[slot],aheadOfOffer[slot]);
+            };
+            selection_.platform64=os64&&keep(0);
+            selection_.platform32=keep(1);
+            selection_.settings64=os64&&keep(2);
+            selection_.settings32=keep(3);
             selection_.SyncSettings(os64);
-            selection_.openGlass=os64&&s[4];
-            selection_.openGlassResources=os64&&s[6];
+            selection_.openGlass=os64&&keep(4);
+            selection_.openGlassResources=os64&&keep(6);
             {
                 std::lock_guard<std::mutex> lock(inspectMutex_);
-                selection_.secureUxTheme=s[5]&&(!sutMetadataBlocked_||sutMetadataLocal_)&&
+                selection_.secureUxTheme=keep(5)&&(!sutMetadataBlocked_||sutMetadataLocal_)&&
                     !inspect_.secureUxTheme.installed&&!SecureUxThemeSelectionBlocked();
                 ClampSecureUxThemeSelection();
             }
-            InstallLog::LineFormat(L"Download cache: previous selection restored (%u entries) x64=%d x86=%d s64=%d s32=%d og=%d sut=%d res=%d",
-                static_cast<unsigned>(manifest.entries.size()),s[0]?1:0,s[1]?1:0,s[2]?1:0,s[3]?1:0,s[4]?1:0,s[5]?1:0,s[6]?1:0);
+            unsigned skipped=0;
+            for(std::size_t slot=0;slot<7;++slot) if(saved[slot]&&(aheadOfCache[slot]||aheadOfOffer[slot])) {
+                ++skipped;
+                InstallLog::LineFormat(L"Download cache: slot=%u not restored; installed version is newer than the cached or offered package",static_cast<unsigned>(slot));
+            }
+            InstallLog::LineFormat(L"Download cache: previous selection restored (%u entries, %u newer-than-cache skipped) x64=%d x86=%d s64=%d s32=%d og=%d sut=%d res=%d",
+                static_cast<unsigned>(manifest.entries.size()),skipped,selection_.platform64?1:0,selection_.platform32?1:0,
+                selection_.settings64?1:0,selection_.settings32?1:0,selection_.openGlass?1:0,selection_.secureUxTheme?1:0,selection_.openGlassResources?1:0);
             UpdateNextText();
+            SyncWebViewState();
         }catch(...){InstallLog::Line(L"Download cache: restore skipped (unexpected error)");}
     }
     void OnInspectReady() {
@@ -2936,7 +2978,6 @@ private:
             }
             ClampSecureUxThemeSelection();
         }
-        RestoreDownloadCache();
         inspectionApplied_=true;
         EnableWindow(next_,!failurePending_ && ComponentsReady());
         SyncWebViewState();
@@ -3724,6 +3765,9 @@ private:
         }
         if(!inspectionApplied_)return;
         releaseCatalog_=result.catalog;
+        // Inspection applies defaults before this catalog exists. Restore the
+        // interrupted session only now, so a known release can be compared.
+        RestoreDownloadCache();
         for(std::size_t i=0;i<GlassPackageCatalog::kCount;++i) {
             const auto& asset=releaseCatalog_.products[i];
             InstallLog::LineFormat(L"UI catalog source: product=%s fetched=%d entry=%d downloadable=%d",GlassReleaseClient::Wide(GlassPackageCatalog::kIds[i]).c_str(),result.fetched?1:0,asset?1:0,asset&&asset->downloadable?1:0);

@@ -44,6 +44,7 @@ struct App{Page page_=Page::Checking;std::mutex versionCheckMutex_;
  void ContinueAfterLicenseCheck(){++advances;page_=Page::Components;}
  void ShowInstallError(const std::wstring&){++errors;}
  void ShowSetupNetworkRecovery(){++errors;}
+ void RestoreDownloadCache() noexcept {}
 '''
 main=r'''
 };

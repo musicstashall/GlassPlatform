@@ -20,6 +20,12 @@ namespace GlassDownloadCache {
 inline constexpr wchar_t kManifest[] = L"downloads.json";
 inline constexpr std::size_t kSlots = 7; // слоты как у DownloadSelection (5 — SecureUxTheme)
 
+// Прерванная установка: восстановить выбор, кроме продукта, который уже новее
+// скачанного файла или новее версии, которую установка предложила бы сейчас.
+inline bool RestoreInterruptedSelection(bool saved, bool installedNewerThanCache, bool installedNewerThanOffer) noexcept {
+    return saved && !installedNewerThanCache && !installedNewerThanOffer;
+}
+
 struct Entry {
     unsigned slot = 0;
     std::wstring file;
