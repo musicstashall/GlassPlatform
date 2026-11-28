@@ -74,6 +74,9 @@ namespace GlassCore::Settings
     [[nodiscard]] bool RootPolicyUsesSwcaBackdrop(bool darkMode);
     void ApplyBorderEffect(HWND hWnd, bool darkMode, const BorderContext& border);
     void ApplyBackdropEffect(HWND hWnd, bool darkMode, const WindowBackdropEffectContext& backdropContext, bool skipNcRendering = false, bool flyoutBackdrop = false);
+    /// Win10 (<22000) post-uncloak: принудительный сброс SWCA (ACCENT_DISABLED + DwmFlush)
+    /// перед повторным ApplyBackdropEffect, чтобы dwmcore пересоздал CAccentAcrylicBlurBehind.
+    void ReapplyFlyoutBackdropAfterUncloakWin10(HWND hWnd, bool darkMode, const WindowBackdropEffectContext& backdropContext) noexcept;
     /// SWCA-prep для popup (DropDown/ComboLBox): полный сброс DWM/SWCA перед ApplyEffect (как OnRootDwmBackdropApply + SWCA root).
     void PreparePopupSwcaBackdropHwnd(HWND hWnd) noexcept;
     /// Popup всегда по SWCA-политике (ET 0–8 из реестра части): prep + ApplyBackdropEffect + ApplyBorderEffect.

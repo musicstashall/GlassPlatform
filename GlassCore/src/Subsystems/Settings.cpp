@@ -143,6 +143,37 @@ namespace GlassCore::Settings
         DwmTransitionOwnedWindow(hWnd, DWMTRANSITION_OWNEDWINDOW_REPOSITION);
     }
 
+    void ReapplyFlyoutBackdropAfterUncloakWin10(
+        HWND hWnd,
+        bool darkMode,
+        const WindowBackdropEffectContext& backdropContext) noexcept
+    {
+        if (Shared::SystemHelper::g_buildNumber >= 22000 || !hWnd || !IsWindow(hWnd))
+            return;
+
+        // Win10 (<22000): после DWMWA_CLOAK(TRUE→FALSE) + DwmpCreateSharedThumbnailVisual
+        // dwmcore теряет визуал CAccentAcrylicBlurBehind, а повторный SWCA с идентичной
+        // ACCENT_POLICY (и предшествующим DwmEnableBlurBehindWindow(FALSE)) схлопывается
+        // как no-op. Принудительный переход desired→ACCENT_DISABLED + DwmFlush() → desired
+        // заставляет dwmcore пересоздать CAccent на уже видимом uncloaked-окне.
+        EffectHelper::SetWindowBackdrop(
+            hWnd,
+            FALSE,
+            0,
+            EffectHelper::EffectType::None,
+            /*skipNcRendering=*/true,
+            /*flyoutBackdrop=*/true);
+        (void)DwmFlush();
+
+        ApplyBackdropEffect(
+            hWnd,
+            darkMode,
+            backdropContext,
+            /*skipNcRendering=*/true,
+            /*flyoutBackdrop=*/true);
+        (void)DwmFlush();
+    }
+
     void ApplyBorderEffect(HWND hWnd, bool darkMode, const BorderContext& border)
     {
         // Паритет TranslucentFlyouts ApiEx::ApplyBorderEffect — без TriggerWindowNCRendering (NC только из backdrop ET 6–8).

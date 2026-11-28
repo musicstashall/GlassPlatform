@@ -732,14 +732,13 @@ namespace GlassCore::DropDown
 
         PaintDeferredFlyoutBorderIfNeeded(hWnd);
 
-        // Win10 (<22000): SetWindowCompositionAttribute мог быть вызван до WS_VISIBLE / под DWMWA_CLOAK
-        // и до SWP_DRAWFRAME (PaintHostBorder). Повторяем SWCA уже на видимом uncloaked-окне.
+        // Win10 (<22000): после DWMWA_CLOAK(TRUE→FALSE) + shared thumbnail делаем
+        // полный цикл ACCENT_DISABLED + DwmFlush() → desired backdrop + DwmFlush().
         if (Shared::SystemHelper::g_buildNumber < 22000)
         {
             const auto& ctx = WndCompat::g_dropDownCtx;
-            GlassCore::Settings::ApplyBackdropEffect(
-                hWnd, ctx.useDarkMode, ctx.backdropEffect, /*skipNcRendering=*/true, /*flyoutBackdrop=*/true);
-            (void)DwmFlush();
+            GlassCore::Settings::ReapplyFlyoutBackdropAfterUncloakWin10(
+                hWnd, ctx.useDarkMode, ctx.backdropEffect);
         }
 
         RefreshFlyoutClientAfterUncloak(hWnd);

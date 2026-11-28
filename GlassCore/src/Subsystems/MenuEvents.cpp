@@ -246,8 +246,7 @@ namespace GlassCore::Menu
             const bool dark = MenuHandler::GetContext().useDarkMode;
             Settings::WindowBackdropEffectContext backdrop{};
             Settings::QueryBackdropEffectContext(L"Menu", dark, backdrop);
-            Settings::ApplyBackdropEffect(hWnd, dark, backdrop, /*skipNcRendering=*/true, /*flyoutBackdrop=*/true);
-            (void)DwmFlush();
+            Settings::ReapplyFlyoutBackdropAfterUncloakWin10(hWnd, dark, backdrop);
             FlyoutFrame::LogWin10PostUncloakSurfaceDiag(hWnd, L"Menu");
         }
 

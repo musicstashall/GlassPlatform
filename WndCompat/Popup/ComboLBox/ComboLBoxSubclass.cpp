@@ -215,11 +215,20 @@ namespace
                         | ((argb & 0x000000FFu) << 16);
                     Shared::SwcaBackdrop::SetWindowBackdrop(
                         hWnd,
+                        FALSE,
+                        0,
+                        0,
+                        /*skipNcRendering=*/true,
+                        /*flyoutBackdrop=*/true);
+                    (void)::DwmFlush();
+                    Shared::SwcaBackdrop::SetWindowBackdrop(
+                        hWnd,
                         ctx.backdropEffect.enableDropShadow ? TRUE : FALSE,
                         abgr,
                         static_cast<int>(ctx.backdropEffect.effectType),
                         /*skipNcRendering=*/true,
                         /*flyoutBackdrop=*/true);
+                    (void)::DwmFlush();
                 }
             }
 
