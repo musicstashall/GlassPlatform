@@ -149,5 +149,24 @@ for(const locale of ['ru','en']){
   ['settings64','x64','secureUxTheme','openglassResources','openglass']);
  assert.ok(!/cannot be applied|нельзя применить/.test(d.getElementById('components-plan-notices').textContent));
  send([source],locale,{componentsLoading:true});assert.match(dom.window.componentDropText(drag,'installed'),/Проверяются|Checking/);
+ const catalogFail={id:'x64',title:'Glass',installed:false,checked:false,applySupported:true,operation:'install',
+  targetVersion:'1.2.3',remoteVersion:'1.2.3',catalogBlocked:true,catalogError:'GitHub request failed (12007)',
+  catalogHint:locale==='ru'?'Проверка выпуска не выполнена. Локальные проверенные пакеты сохраняют доверие.':'The release check did not finish. Verified local packages stay trusted.',
+  catalogRetryLabel:locale==='ru'?'Повторить проверку':'Retry check'};
+ send([catalogFail],locale);
+ const catalogCard=d.querySelector('#components-grid [data-product="x64"]');
+ const catalogNote=catalogCard.querySelector('.catalog-check-note');
+ assert.ok(catalogNote.classList.contains('metadata-error-label'));
+ const catalogStyle=dom.window.getComputedStyle(catalogNote);
+ assert.equal(catalogStyle.top,'50%');
+ assert.equal(catalogStyle.textAlign,'center');
+ assert.equal(catalogStyle.transform,'translateY(-50%)');
+ assert.ok(catalogStyle.bottom==='auto'||catalogStyle.bottom==='');
+ assert.equal(catalogStyle.color,'rgb(240, 215, 164)');
+ assert.equal(catalogNote.textContent,locale==='ru'?'Проверка выпуска не выполнена (12007)':'The release check did not finish (12007)');
+ assert.ok(!/сохраняют доверие|stay trusted/.test(catalogNote.textContent));
+ assert.equal(dom.window.getComputedStyle(catalogCard.querySelector('.c-meta')).visibility,'hidden');
+ assert.ok(catalogCard.querySelector('.download-retry').dataset.tooltip.includes('12007'));
+ assert.ok(catalogCard.querySelector('.download-retry').dataset.tooltip.includes(locale==='ru'?'сохраняют доверие':'stay trusted'));
 }
 assert.deepEqual(errors,[]);dom.window.close();console.log('PASS: risk red-state/icon/dialog, removal/undo, no installed overflow hint, unavailable vs pending source diagnostics and gate retained');

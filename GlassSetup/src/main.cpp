@@ -1368,6 +1368,7 @@ private:
     std::wstring checkingStatus_;
     bool versionCheckStarted_ = false, versionCheckHandled_ = false, controllerCheckHandled_ = false;
     bool errorRecoverable_ = false; // Page::Error offers Retry and Continue
+    bool suppressFooterButtons_ = false; // Cache handoff blocks the UI thread; no footer captions until it returns
     bool selfUpdateSkipped_ = false; // Continue already chose the current Setup this launch
     std::thread catalogRetryThread_;
     std::atomic_bool catalogRetrying_{false};
@@ -2654,6 +2655,7 @@ private:
         webState_.SendState(web_,std::move(json));
     }
     void FocusPage() {
+        if (suppressFooterButtons_) return;
         if (page_==Page::ConfirmCancel) { SetFocus(back_); return; }
         if (webReady_ && (page_==Page::License || page_==Page::Components || page_==Page::Certificate)) { SetFocus(webHost_); return; }
         SetFocus(page_==Page::ModulesBusy || page_==Page::ProcessesStuck || page_==Page::SettingsBusy || page_==Page::Conflicts ? next_ :
@@ -2913,32 +2915,7 @@ private:
         WizardTheme::SetSystemCloseEnabled(window,!closeBlocked);
         ShowWindow(eula_,SW_HIDE); ShowWindow(accept_,SW_HIDE);
         Layout();
-        const bool demoControlsLocked=DebugDemoLocksControls();
-        const bool recoveryNow=RecoveryPage();
-        const bool terminal=(page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error) && !recoveryNow;
-        const bool inProgress=page_==Page::Checking || page_==Page::Installing || page_==Page::Cancelling ||
-            page_==Page::Launching || (page_==Page::Welcome && StartupLoading());
-        UpdateNextText();
-        SetWindowTextW(back_,Text(RecoveryPage()?IDS_SETUP_NET_CONTINUE:page_==Page::ModulesBusy?IDS_CONTINUE_RISK:page_==Page::ConfirmCancel?IDS_CONFIRM_RESUME:IDS_BACK).c_str());
-        SetWindowTextW(cancel_,Text(IDS_CANCEL).c_str());
-        const bool confirm=page_==Page::ConfirmCancel;
-        const bool recovery=recoveryNow;
-        const bool backVisible=recovery || ((page_==Page::License || page_==Page::Components || page_==Page::Certificate || page_==Page::FullCleanup || page_==Page::ModulesBusy || confirm)
-            && !(MaintenanceUi() && (page_==Page::Components || (page_==Page::License && !accepted_))));
-        const bool nextVisible=!inProgress;
-        // Правый угол занят другой кнопкой на готовых и подтверждающих страницах.
-        // На откате и запуске отменять уже нечего: откат и есть отмена, запуск идёт после фиксации.
-        // Recovery uses only Retry and Continue; Cancel stays hidden.
-        const bool cancelVisible=!terminal && !recovery && !confirm && page_!=Page::Cancelling && page_!=Page::Launching;
-        const bool demoLocked=demoControlsLocked && !terminal;
-        ShowWindow(back_,backVisible?SW_SHOWNA:SW_HIDE);
-        ShowWindow(next_,nextVisible?SW_SHOWNA:SW_HIDE);
-        ShowWindow(cancel_,cancelVisible?SW_SHOWNA:SW_HIDE);
-        EnableWindow(next_,!failurePending_ && !demoLocked && (page_!=Page::License || accepted_) && ComponentsReady());
-        EnableWindow(back_,!demoLocked && !(MaintenanceUi() && (page_==Page::Components || (page_==Page::License && !accepted_))));
-        EnableWindow(cancel_,cancelVisible && !demoLocked && !runtimeCancel_.load());
-        const int defaultId=confirm?IDC_BACK:IDC_NEXT;
-        SendMessageW(window,DM_SETDEFID,defaultId,0);
+        ApplyFooterButtons();
         if (!webReady_ && (page_!=Page::Checking||FAILED(webError_)) && ((oldPage==Page::Welcome && (page_==Page::Checking || page_==Page::License)) ||
             (oldPage==Page::Checking && page_==Page::License))) BeginTransition();
         ShowContentControls();
@@ -3013,7 +2990,48 @@ private:
 #endif
         ContinueVersionCheck();
     }
+    void ApplyFooterButtons() {
+        const bool demoControlsLocked=DebugDemoLocksControls();
+        const bool recoveryNow=RecoveryPage();
+        const bool terminal=(page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error) && !recoveryNow;
+        const bool inProgress=page_==Page::Checking || page_==Page::Installing || page_==Page::Cancelling ||
+            page_==Page::Launching || (page_==Page::Welcome && StartupLoading());
+        UpdateNextText();
+        SetWindowTextW(back_,Text(RecoveryPage()?IDS_SETUP_NET_CONTINUE:page_==Page::ModulesBusy?IDS_CONTINUE_RISK:page_==Page::ConfirmCancel?IDS_CONFIRM_RESUME:IDS_BACK).c_str());
+        SetWindowTextW(cancel_,Text(IDS_CANCEL).c_str());
+        const bool confirm=page_==Page::ConfirmCancel;
+        const bool recovery=recoveryNow;
+        // A cached-controller restart waits on this thread. Painting must finish
+        // before that wait, and no footer caption may appear while it runs.
+        const bool handoff=suppressFooterButtons_;
+        const bool backVisible=!handoff && (recovery || ((page_==Page::License || page_==Page::Components || page_==Page::Certificate || page_==Page::FullCleanup || page_==Page::ModulesBusy || confirm)
+            && !(MaintenanceUi() && (page_==Page::Components || (page_==Page::License && !accepted_)))));
+        const bool nextVisible=!handoff && !inProgress;
+        // Правый угол занят другой кнопкой на готовых и подтверждающих страницах.
+        // На откате и запуске отменять уже нечего: откат и есть отмена, запуск идёт после фиксации.
+        // Recovery uses only Retry and Continue; Cancel stays hidden.
+        const bool cancelVisible=!handoff && !terminal && !recovery && !confirm && page_!=Page::Cancelling && page_!=Page::Launching;
+        const bool demoLocked=demoControlsLocked && !terminal;
+        ShowWindow(back_,backVisible?SW_SHOWNA:SW_HIDE);
+        ShowWindow(next_,nextVisible?SW_SHOWNA:SW_HIDE);
+        ShowWindow(cancel_,cancelVisible?SW_SHOWNA:SW_HIDE);
+        EnableWindow(next_,!failurePending_ && !demoLocked && (page_!=Page::License || accepted_) && ComponentsReady());
+        EnableWindow(back_,!demoLocked && !(MaintenanceUi() && (page_==Page::Components || (page_==Page::License && !accepted_))));
+        EnableWindow(cancel_,cancelVisible && !demoLocked && !runtimeCancel_.load());
+        const int defaultId=confirm?IDC_BACK:IDC_NEXT;
+        SendMessageW(window,DM_SETDEFID,defaultId,0);
+    }
+    void ConcealFooterForHandoff() {
+        suppressFooterButtons_=true;
+        ApplyFooterButtons();
+        if(!window)return;
+        // ShowWindow only hides the controls. The previous captions stay on the
+        // glass until this thread paints, and the handoff wait does not pump.
+        InvalidateRect(window,nullptr,FALSE);
+        UpdateWindow(window);
+    }
     void ShowInstallError(const std::wstring& reason) noexcept {
+        suppressFooterButtons_=false;
         errorRecoverable_ = false;
         errorReason_ = reason;
         KillTimer(window, kInstallTimer);
@@ -3502,15 +3520,19 @@ private:
     }
     bool TransitionController(const std::wstring& prepared) {
         std::wstring error;
+        ConcealFooterForHandoff();
         const auto result=EnsureCurrentController(prepared,maintenanceMode_,maintenanceFocusProduct_,error);
         if(result==ControllerTransition::Transferred) {
+            suppressFooterButtons_=false;
             DestroyWindow(window);return true;
         }
+        suppressFooterButtons_=false;
         if(result==ControllerTransition::Failed) {
             InstallLog::LineFormat(L"Controller publication/transition failed; no product changes: %s",error.c_str());
             ShowInstallError(Text(IDS_ERR_CONTROLLER_PREPARE_PREFIX)+error);
             return true;
         }
+        ApplyFooterButtons();
         return false;
     }
     void ClearVersionCheckWorkspace() {
@@ -3529,6 +3551,7 @@ private:
             std::lock_guard<std::mutex> lock(versionCheckMutex_);
             result=versionCheckResult_;
         }
+        suppressFooterButtons_=false;
         errorRecoverable_=true;
         errorReason_=result.diagnostic.empty()?Text(IDS_SETUP_NET_BODY):result.diagnostic;
         InstallLog::Line(L"Setup update network failure; retry or continue with this Setup");
@@ -3581,6 +3604,7 @@ private:
         selfUpdateSkipped_=true;
         versionCheckHandled_=false;
         controllerCheckHandled_=false;
+        suppressFooterButtons_=true;
         InstallLog::Line(result.fetched
             ?L"Setup update skipped for this launch; product check will reuse the validated catalog"
             :L"Setup update skipped for this launch; product check will request the catalog");
@@ -3588,7 +3612,10 @@ private:
         CompleteVersionCheck();
     }
     void CompleteVersionCheck() {
-        if (page_ != Page::Checking) return;
+        if (page_ != Page::Checking) {
+            if(suppressFooterButtons_){suppressFooterButtons_=false;ApplyFooterButtons();}
+            return;
+        }
         VersionCheckResult result;
         {
             std::lock_guard<std::mutex> lock(versionCheckMutex_);

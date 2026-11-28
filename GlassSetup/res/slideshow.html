@@ -780,7 +780,6 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 #components-panel .c-card.download-local{border:1px solid #83d9a685;background:var(--component-green-surface)}
 #components-panel .c-card.download-failed{border-color:#e57a7a;border-style:dashed}
 #components-panel .c-card.catalog-check-failed{border-color:#e0b15a;border-style:dashed}
-#components-panel .catalog-check-note{position:absolute;left:8px;right:8px;bottom:6px;font-size:9px;line-height:1.2;color:#f0d7a4;pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #stage[data-mode="full-cleanup"] .error-copy{top:var(--page-heading-top);left:var(--page-heading-left);right:48px;bottom:30px;width:auto;overflow:auto;justify-content:flex-start;pointer-events:auto;opacity:1;transform:none;animation:none}
 #stage[data-mode="full-cleanup"] .complete-visual,#stage[data-mode="full-cleanup"] .confirm-ambient{display:none}
 /* Same offline banner and readability treatment as the maintenance page. */
@@ -831,6 +830,8 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 #components-panel .c-card.compatibility-risk,#components-panel .c-card.compatibility-risk:hover{opacity:1;border-color:#f18383;background:linear-gradient(130deg,#5b272f,#321d2a);box-shadow:inset 0 1px #ffffff0a}
 #components-panel .c-card.compatibility-risk .comp-warning-button{color:#ff6b6b}
 .metadata-error-label{position:absolute;left:8px;right:8px;top:50%;transform:translateY(-50%);text-align:center;font-size:10px;color:#f5ccd0;pointer-events:none;white-space:nowrap}
+/* Same centered short line. Amber, not the critical tint, and clipped to the card. */
+.metadata-error-label.catalog-check-note{color:#f0d7a4;overflow:hidden;text-overflow:ellipsis}
 #components-panel .c-card:has(.metadata-error-label) .c-meta{visibility:hidden}
 .acrylic-tooltip{position:fixed;z-index:10000;max-width:260px;padding:7px 10px;border:1px solid #d3c8ff45;border-radius:8px;background:#24273bd9;backdrop-filter:blur(22px) saturate(150%);-webkit-backdrop-filter:blur(22px) saturate(150%);box-shadow:0 8px 24px #0005,inset 0 1px #ffffff14;color:#f0edf9;font-size:11px;line-height:1.4;pointer-events:none;white-space:normal}
 .acrylic-tooltip[hidden]{display:none}
@@ -1356,6 +1357,14 @@ document.addEventListener('pointerover',e=>showAcrylicTooltip(e.target));documen
 for(const type of ['pointerout','focusout','pointerdown','keydown','wheel'])document.addEventListener(type,hideAcrylicTooltip,{capture:true,passive:true});
 window.addEventListener('resize',hideAcrylicTooltip);document.addEventListener('scroll',hideAcrylicTooltip,true);
 function metadataBlockText(item){return (item?.metadataError||'HTTP 403')+' — '+(locale==='ru'?'Установка недоступна: не удалось получить версию продукта. Нажмите ▶ для повторной проверки.':'Installation unavailable: could not retrieve the product version. Press ▶ to retry.');}
+function catalogCheckLine(item){
+ const hint=String(item?.catalogHint||'').trim();
+ let sentence=(hint.split(/\.\s+/)[0]||hint).replace(/\.$/,'').trim();
+ if(!sentence)sentence=locale==='ru'?'Проверка не выполнена':'Check failed';
+ const code=String(item?.catalogError||'').match(/\((\d+)\)\s*$/);
+ if(code&&!sentence.includes(code[1]))sentence+=' ('+code[1]+')';
+ return sentence;
+}
 function componentSize(bytes){return new Intl.NumberFormat(locale==='ru'?'ru':'en',{minimumFractionDigits:1,maximumFractionDigits:1}).format(bytes/1048576)+(locale==='ru'?' МБ':' MB');}
 function componentUsesPayload(item){return ['openglass','settings64','settings32'].includes(item.id);}
 function componentTargetVersion(item){return componentUsesPayload(item)?(item.targetPayloadVersion||(item.id==='openglass'?item.remotePayloadVersion:'')||''):(item.targetVersion||'');}
@@ -1768,8 +1777,8 @@ function syncDownloadVisuals(){
   const planned=!!(input?.checked&&input.dataset.intent!=='remove'&&hostState.appMode!=='unins'&&card.closest('#components-installed-grid'));
   const d=selected.find(d=>d.id===card.dataset.product);
   let bar=card.querySelector('.product-transfer'),retry=card.querySelector('.download-retry');
-  let errorLabel=card.querySelector('.metadata-error-label');
   let catalogNote=card.querySelector('.catalog-check-note');
+  let errorLabel=card.querySelector('.metadata-error-label:not(.catalog-check-note)');
   // Server-unavailable belongs only to the Available catalogue, including the
   // mirror of a product already placed in the plan. The plan card stays a normal install.
   const catalogCard=!!card.closest('#components-grid');
@@ -1783,11 +1792,12 @@ function syncDownloadVisuals(){
    if(!retry){retry=document.createElement('button');retry.type='button';retry.className='download-retry';card.append(retry);}
    retry.disabled=!!item.catalogRetrying;
    const retryLabel=item.catalogRetryLabel||(ru?'Повторить проверку':'Retry check');
-   const detail=item.catalogError?retryLabel+' — '+item.catalogError:retryLabel;
+   const detail=[retryLabel,item.catalogError,item.catalogHint].filter(Boolean).join(' — ');
    retry.dataset.tooltip=detail;retry.setAttribute('aria-label',detail);
    retry.onclick=e=>{e.stopPropagation();if(!item.catalogRetrying)window.chrome?.webview?.postMessage('catalog-retry');};
-   if(!catalogNote){catalogNote=document.createElement('span');catalogNote.className='catalog-check-note';card.append(catalogNote);}
-   catalogNote.textContent=item.catalogHint||'';
+   if(!catalogNote){catalogNote=document.createElement('span');catalogNote.className='metadata-error-label catalog-check-note';card.append(catalogNote);}
+   else catalogNote.classList.add('metadata-error-label');
+   catalogNote.textContent=catalogCheckLine(item);
    continue;
   }
   card.classList.remove('catalog-check-failed');
