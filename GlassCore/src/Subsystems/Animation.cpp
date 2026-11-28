@@ -938,49 +938,64 @@ namespace GlassCore::Animation
 
         if (uMsg == GetAnimationFinishedMsg())
         {
+            const bool isMenu = IsWindowClass(hWnd, L"#32768");
             HWND overlayWnd = (GetBuildNumber() < 22000) ? reinterpret_cast<HWND>(wParam) : nullptr;
             if (overlayWnd && IsWindow(overlayWnd))
             {
-                // Win10 (<22000): ставим overlayWnd ровно под hWnd (пока hWnd ещё cloaked),
-                // затем атомарно на GUI-потоке без единого промежуточного DwmFlush() выполняем:
-                // RemoveVisual/DwmUnregisterThumbnail(m_thumbnail) → CloakWindow(hWnd, FALSE) →
-                // ApplyBackdropEffect(0 → desired) → PaintHostBorder → единый DwmFlush() →
-                // CloakWindow(overlayWnd, TRUE). Так в композитор попадает сразу готовый кадр
-                // без чёрного кадра AccentState=0 и без пропадания текста.
+                // Win10 (<22000):
+                // Фаза 1: для DropDown/ComboLBox/ViewControl рисуем 1px рамку и клиентский
+                // контент (включая WM_ERASEBKGND BLACKNESS + SysListView32) ДО uncloak,
+                // пока hWnd ещё скрыто за overlayWnd с живой анимацией.
+                if (!isMenu)
+                    GlassCore::DropDown::PrepareForWin10Uncloak(hWnd);
+
+                // Фаза 2: атомарный swap на GUI-потоке без GDI-перерисовки и без
+                // промежуточного DwmFlush() между UnregisterThumbnail / Uncloak / SWCA(0 → desired).
                 const bool targetTopmost = (GetWindowLongPtrW(hWnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
                 if (!targetTopmost)
                 {
                     SetWindowPos(
                         overlayWnd, HWND_NOTOPMOST, 0, 0, 0, 0,
-                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOSENDCHANGING);
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER
+                            | SWP_NOSENDCHANGING | SWP_NOREDRAW);
                 }
                 SetWindowPos(
                     overlayWnd, hWnd, 0, 0, 0, 0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOSENDCHANGING);
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER
+                        | SWP_NOSENDCHANGING | SWP_NOREDRAW);
 
                 ReleaseWin10PendingThumb(overlayWnd);
-            }
 
-            // Гарантируем uncloak на GUI-потоке владельца: на Win10 DWMWA_CLOAK с worker-потока
-            // до закрытия оверлея/thumbnail может оставить окно скрытым в DWM.
-            Utils::CloakWindow(hWnd, FALSE);
+                Utils::CloakWindow(hWnd, FALSE);
 
-            // Post-uncloak: на Win10 первым делом применяет SWCA (0 → desired), затем
-            // однократная отрисовка рамки на real flyout (sync, без WM_GLASS).
-            // #32768 — меню (L"Menu"); остальные flyout (ComboLBox/DropDown/Listviewpopup/ViewControl) — L"DropDown".
-            const bool isMenu = IsWindowClass(hWnd, L"#32768");
-            if (isMenu)
-                GlassCore::Menu::PaintDeferredFlyoutBorderIfNeeded(hWnd);
-            else
-                GlassCore::DropDown::OnFlyoutAnimationFinished(hWnd);
+                if (isMenu)
+                    GlassCore::Menu::PaintDeferredFlyoutBorderIfNeeded(hWnd);
+                else
+                    GlassCore::DropDown::ApplyBackdropForWin10Uncloak(hWnd);
 
-            if (overlayWnd && IsWindow(overlayWnd))
-            {
+                // Фаза 3: единый DwmFlush() фиксирует uncloak + SWCA(0 → desired),
+                // затем скрываем overlayWnd позади готового hWnd.
                 (void)DwmFlush();
                 Utils::CloakWindow(overlayWnd, TRUE);
+
+                if (!isMenu)
+                    GlassCore::DropDown::FinalizeAfterWin10Uncloak(hWnd);
+
                 (void)DwmFlush();
                 GlassCore::FlyoutFrame::LogWin10PostUncloakSurfaceDiag(
                     hWnd, isMenu ? L"Menu" : (IsWindowClass(hWnd, L"ComboLBox") ? L"ComboLBox" : L"DropDown"));
+            }
+            else
+            {
+                // Гарантируем uncloak на GUI-потоке владельца.
+                Utils::CloakWindow(hWnd, FALSE);
+
+                // Post-uncloak: однократная отрисовка рамки на real flyout (sync, без WM_GLASS).
+                // #32768 — меню (L"Menu"); остальные flyout (ComboLBox/DropDown/Listviewpopup/ViewControl) — L"DropDown".
+                if (isMenu)
+                    GlassCore::Menu::PaintDeferredFlyoutBorderIfNeeded(hWnd);
+                else
+                    GlassCore::DropDown::OnFlyoutAnimationFinished(hWnd);
             }
 
             RemoveWindowSubclass(hWnd, SubclassProc, 0);

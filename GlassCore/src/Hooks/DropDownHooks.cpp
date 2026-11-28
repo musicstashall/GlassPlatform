@@ -732,6 +732,64 @@ namespace GlassCore::DropDown
         return true;
     }
 
+    void PrepareForWin10Uncloak(HWND hWnd) noexcept
+    {
+        if (!hWnd || !::IsWindow(hWnd))
+            return;
+
+        // Win10 (<22000): выполняем всю GDI-отрисовку рамки и клиентского контента
+        // (включая WM_ERASEBKGND BLACKNESS + SysListView32) ДО CloakWindow(hWnd, FALSE),
+        // пока hWnd скрыто за overlayWnd и не может выдать чёрный кадр на экран.
+        PaintDeferredFlyoutBorderIfNeeded(hWnd);
+
+        if (IsViewControlClass(hWnd))
+        {
+            SyncViewControlClientPaint(hWnd);
+        }
+        else if (!IsComboLBoxClass(hWnd))
+        {
+            std::vector<HWND> targets;
+            CollectChildWindowsByClass(hWnd, L"ListviewPopup", targets);
+            if (targets.empty())
+                CollectChildWindowsByClass(hWnd, L"SysListView32", targets);
+            if (targets.empty())
+                targets.push_back(hWnd);
+
+            for (HWND const target : targets)
+                RedrawFlyoutContentHwnd(target);
+        }
+
+        FlyoutFrame::ClearHostBorderDeferred(hWnd);
+    }
+
+    void ApplyBackdropForWin10Uncloak(HWND hWnd) noexcept
+    {
+        if (!hWnd || !::IsWindow(hWnd))
+            return;
+
+        if (Shared::SystemHelper::g_buildNumber < 22000)
+        {
+            auto ctx = WndCompat::g_dropDownCtx;
+            if (ctx.backdropEffect.effectType == 0)
+            {
+                FillDropDownContext(ctx);
+            }
+            GlassCore::Settings::ReapplyFlyoutBackdropAfterUncloakWin10(
+                hWnd, ctx.useDarkMode, ctx.backdropEffect);
+        }
+    }
+
+    void FinalizeAfterWin10Uncloak(HWND hWnd) noexcept
+    {
+        if (!hWnd || !::IsWindow(hWnd))
+            return;
+
+        if (IsComboLBoxClass(hWnd))
+        {
+            SyncComboLBoxClientPaint(hWnd, /*skipWin10Swca=*/true);
+        }
+    }
+
     void OnFlyoutAnimationFinished(HWND hWnd) noexcept
     {
         if (!hWnd || !::IsWindow(hWnd))
