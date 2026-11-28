@@ -1067,14 +1067,18 @@ namespace GlassCore::Animation
         {
             Finish();
 
-            // Сначала отпускаем DComp-визуалы, отрегистрируем DWM thumbnail и закрываем
-            // оверлей/backdrop-окна, и только затем уведомляем real flyout синхронно —
+            // Сначала отпускаем DComp-визуалы, коммитим teardown в DWM, отрегистрируем DWM thumbnail
+            // и закрываем оверлей/backdrop-окна, и только затем уведомляем real flyout синхронно —
             // иначе PaintHostBorder/SWCA/WM_PRINTCLIENT в OnFlyoutAnimationFinished
             // выполняются поверх живого DWM thumbnail и оверлея.
+            if (m_dcompTarget)
+                (void)m_dcompTarget->SetRoot(nullptr);
             m_dcompTarget.reset();
             m_rootVisual.reset();
             m_thumbnailVisual.reset();
             m_backdropThumbnailVisual.reset();
+            if (auto dev = Shared::DXHelper::LazyDComposition::GetInstance().GetDCompositionDevice())
+                (void)dev->Commit();
 
             if (m_thumbnail)
             {

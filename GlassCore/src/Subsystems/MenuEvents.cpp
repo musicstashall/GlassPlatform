@@ -248,6 +248,7 @@ namespace GlassCore::Menu
             Settings::QueryBackdropEffectContext(L"Menu", dark, backdrop);
             Settings::ApplyBackdropEffect(hWnd, dark, backdrop, /*skipNcRendering=*/true, /*flyoutBackdrop=*/true);
             (void)DwmFlush();
+            FlyoutFrame::LogWin10PostUncloakSurfaceDiag(hWnd, L"Menu");
         }
 
         DebugLog(DBG_IMPORTANT,

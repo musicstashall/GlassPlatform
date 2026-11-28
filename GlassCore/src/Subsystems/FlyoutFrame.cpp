@@ -2,6 +2,7 @@
 #include <Subsystems/FlyoutFrame.h>
 #include <Subsystems/Settings.h>
 #include <Subsystems/EffectHelper.h>
+#include <Helpers/SystemHelper.h>
 #include <MenuUtils.h>
 #include <dwmapi.h>
 
@@ -27,6 +28,13 @@ namespace GlassCore::FlyoutFrame
 
         void RefreshDwmNc(HWND hwnd, unsigned effectType, DWM_WINDOW_CORNER_PREFERENCE cornerType) noexcept
         {
+            // На Windows 10 (<22000) нет ни DWMSBT_* (effectType 6..8), ни DWMWA_WINDOW_CORNER_PREFERENCE.
+            // При cornerType == DWMWCP_DONOTROUND (1 != DWMWCP_DEFAULT) вызов TriggerWindowNCRendering
+            // (SetWindowPos SWP_DRAWFRAME) после uncloak синхронно шлёт WM_NCCALCSIZE/WM_ERASEBKGND,
+            // стирая клиентский контент #32768/ComboLBox в 0x00000000 без перерисовки.
+            if (Shared::SystemHelper::g_buildNumber < 22000)
+                return;
+
             if (effectType >= 6 && effectType <= 8)
             {
                 (void)DefWindowProcW(hwnd, WM_NCACTIVATE, TRUE, 0);
@@ -81,11 +89,20 @@ namespace GlassCore::FlyoutFrame
                 (void)DwmFlush();
                 break;
             case FlyoutHostBorderFlush::FrameOnly:
-                (void)RedrawWindow(
-                    hwnd,
-                    nullptr,
-                    nullptr,
-                    RDW_FRAME | RDW_NOCHILDREN);
+                if (Shared::SystemHelper::g_buildNumber < 22000)
+                {
+                    // Win10 (<22000): синхронно отрисовываем отложенное 1-px NC-кольцо
+                    // без SWP_DRAWFRAME / WM_ERASEBKGND, не затрагивая клиентскую область.
+                    (void)SendMessageW(hwnd, WM_NCPAINT, static_cast<WPARAM>(1), 0);
+                }
+                else
+                {
+                    (void)RedrawWindow(
+                        hwnd,
+                        nullptr,
+                        nullptr,
+                        RDW_FRAME | RDW_NOCHILDREN);
+                }
                 (void)DwmFlush();
                 break;
             case FlyoutHostBorderFlush::Full:
@@ -189,5 +206,121 @@ namespace GlassCore::FlyoutFrame
             static_cast<int>(border.cornerType),
             effectType,
             static_cast<unsigned>(flush));
+    }
+
+    void LogWin10PostUncloakSurfaceDiag(HWND hWnd, const wchar_t* tag) noexcept
+    {
+        if (Shared::SystemHelper::g_buildNumber >= 22000 || !hWnd || !IsWindow(hWnd))
+            return;
+
+        RECT wr{};
+        if (!GetWindowRect(hWnd, &wr))
+            return;
+        const int w = wr.right - wr.left;
+        const int h = wr.bottom - wr.top;
+
+        DWORD cloaked = 0;
+        const HRESULT hrCloak = DwmGetWindowAttribute(hWnd, DWMWA_CLOAKED, &cloaked, sizeof(cloaked));
+        const LONG_PTR style = GetWindowLongPtrW(hWnd, GWL_STYLE);
+        const LONG_PTR exStyle = GetWindowLongPtrW(hWnd, GWL_EXSTYLE);
+
+        HWND overlapHwnd = nullptr;
+        wchar_t overlapCls[64]{};
+        for (HWND prev = GetWindow(hWnd, GW_HWNDPREV); prev; prev = GetWindow(prev, GW_HWNDPREV))
+        {
+            if (!IsWindowVisible(prev))
+                continue;
+            RECT pr{};
+            RECT inter{};
+            if (GetWindowRect(prev, &pr) && IntersectRect(&inter, &wr, &pr))
+            {
+                overlapHwnd = prev;
+                GetClassNameW(prev, overlapCls, static_cast<int>(std::size(overlapCls)));
+                break;
+            }
+        }
+
+        uint32_t px00 = 0;
+        uint32_t pxMid = 0;
+        unsigned clientNzRgb = 0;
+        unsigned clientNzAlpha = 0;
+
+        if (w > 0 && h > 0 && w <= 4096 && h <= 4096)
+        {
+            HDC hdcWin = GetWindowDC(hWnd);
+            if (hdcWin)
+            {
+                HDC hdcMem = CreateCompatibleDC(hdcWin);
+                if (hdcMem)
+                {
+                    BITMAPINFO bmi{};
+                    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+                    bmi.bmiHeader.biWidth = w;
+                    bmi.bmiHeader.biHeight = -h;
+                    bmi.bmiHeader.biPlanes = 1;
+                    bmi.bmiHeader.biBitCount = 32;
+                    bmi.bmiHeader.biCompression = BI_RGB;
+
+                    void* bits = nullptr;
+                    HBITMAP hbmp = CreateDIBSection(hdcWin, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+                    if (hbmp && bits)
+                    {
+                        HGDIOBJ oldBmp = SelectObject(hdcMem, hbmp);
+                        if (BitBlt(hdcMem, 0, 0, w, h, hdcWin, 0, 0, SRCCOPY))
+                        {
+                            const auto* px = static_cast<const uint32_t*>(bits);
+                            px00 = px[0];
+                            pxMid = px[static_cast<size_t>(h / 2) * static_cast<size_t>(w) + static_cast<size_t>(w / 2)];
+                            const int x0 = (w > 4) ? 2 : 0;
+                            const int x1 = (w > 4) ? (w - 2) : w;
+                            const int y0 = (h > 4) ? 2 : 0;
+                            const int y1 = (h > 4) ? (h - 2) : h;
+                            for (int y = y0; y < y1; ++y)
+                            {
+                                const uint32_t* row = px + static_cast<size_t>(y) * static_cast<size_t>(w);
+                                for (int x = x0; x < x1; ++x)
+                                {
+                                    const uint32_t p = row[x];
+                                    if ((p & 0x00FFFFFFu) != 0)
+                                        ++clientNzRgb;
+                                    if ((p & 0xFF000000u) != 0)
+                                        ++clientNzAlpha;
+                                }
+                            }
+                        }
+                        SelectObject(hdcMem, oldBmp);
+                    }
+                    if (hbmp)
+                        DeleteObject(hbmp);
+                    DeleteDC(hdcMem);
+                }
+                ReleaseDC(hWnd, hdcWin);
+            }
+        }
+
+        COLORREF scrMid = CLR_INVALID;
+        if (HDC hdcScr = GetDC(nullptr))
+        {
+            scrMid = GetPixel(hdcScr, wr.left + w / 2, wr.top + h / 2);
+            ReleaseDC(nullptr, hdcScr);
+        }
+
+        DebugLog(DBG_IMPORTANT,
+            L"[GlassCore][Win10Diag] %s hwnd=0x%p %dx%d vis=%d cloaked=0x%X(hr=0x%08X) style=0x%08X ex=0x%08X px00=0x%08X pxMid=0x%08X nzRgb=%u nzA=%u scrMid=0x%08X overlap=0x%p(%s)",
+            tag ? tag : L"?",
+            hWnd,
+            w, h,
+            IsWindowVisible(hWnd) ? 1 : 0,
+            cloaked,
+            hrCloak,
+            static_cast<unsigned>(style),
+            static_cast<unsigned>(exStyle),
+            px00,
+            pxMid,
+            clientNzRgb,
+            clientNzAlpha,
+            static_cast<unsigned>(scrMid),
+            overlapHwnd,
+            overlapCls[0] ? overlapCls : L"-");
     }
 }
