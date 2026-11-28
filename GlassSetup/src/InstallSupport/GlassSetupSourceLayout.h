@@ -21,5 +21,9 @@ inline void SetPrepared(std::size_t i,const std::wstring& path) {std::lock_guard
 inline std::string catalogText;
 inline bool catalogInherited=false;
 inline bool catalogChecked=false;
+// Explicit user retry of the release catalog. Consumed by the next FetchCatalog
+// so a failed automatic check can be requested again without dropping a snapshot
+// that is still valid. Not a trust flag.
+inline bool catalogRetryPending=false;
 inline std::mutex catalogMutex;
 }

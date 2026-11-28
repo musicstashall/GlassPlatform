@@ -47,9 +47,10 @@ namespace InstallLog{void Line(const wchar_t*){}}
 bool CopyLocked(HANDLE,const std::wstring&,const std::atomic<bool>&){return copy;}
 namespace GlassProductInspect{bool FileHasSameSignerAsSetup(const std::wstring&){return publisher;}}
 namespace GlassReleaseClient{
+ enum class Failure : unsigned {None=0,Transport=1};
  HANDLE CreatePrivateFile(const std::wstring&){if(!created)return -1;++handles;return 1;}
- bool Get(const std::wstring&,HANDLE,std::string*,std::uint64_t limit,const std::atomic<bool>&,std::wstring&){
-  ++gets;assert(limit==1024);if(failGets>0){--failGets;return false;}return download;}
+ bool Get(const std::wstring&,HANDLE,std::string*,std::uint64_t limit,const std::atomic<bool>&,std::wstring&,Failure* failure=nullptr){
+  ++gets;if(failure)*failure=Failure::None;assert(limit==1024);if(failGets>0){--failGets;return false;}return download;}
  bool VerifyHash(HANDLE,std::uint64_t,const std::string&,const std::atomic<bool>&,std::wstring&){return hash;}
  std::wstring Wide(const std::string& text){return {text.begin(),text.end()};}
 }
@@ -69,7 +70,7 @@ int main(){
   if(i==4)opened=false;if(i==5)hash=false;if(i==6)signature=false;if(i==7)publisher=false;
   if(i==8)moved=false;if(i==9)cancel=true;if(i==10)candidate.url="https://evil.invalid/GlassSetup.exe";
   prepared=L"stale";error=L"stale";
-  const bool ok=PrepareSetup(candidate,L"private-workspace",cancel,prepared,error);
+  const bool ok=PrepareSetup(candidate,L"private-workspace",cancel,prepared,error,nullptr);
   assert(ok==(i==11));assert(handles==0);assert(trustCalls==0||trustCalls==2);
   if(ok){assert(prepared==L"private-workspace\\GlassSetup.exe");assert(error.empty());assert(moves==1);}
   else {assert(prepared.empty());assert(!error.empty());}
@@ -78,12 +79,12 @@ int main(){
   if(i==5||i==6||i==7)assert(moves==0&&deletes==2);
  }
  failGets=1;gets=deletes=handles=0;prepared.clear();error.clear();
- assert(PrepareSetup(asset,L"private-workspace",cancel,prepared,error));
+ assert(PrepareSetup(asset,L"private-workspace",cancel,prepared,error,nullptr));
  assert(gets==2&&deletes==1&&handles==0&&prepared==L"private-workspace\\GlassSetup.exe"&&error.empty());
  cached=L"protected-cache\\GlassSetup.exe";trusted=created=download=flush=opened=hash=signature=publisher=moved=true;cancel=false;
- gets=0;assert(PrepareSetup(asset,L"private-workspace",cancel,prepared,error));assert(gets==0&&handles==0);
- signature=false;gets=0;assert(!PrepareSetup(asset,L"private-workspace",cancel,prepared,error));assert(gets==0&&handles==0);
- signature=true;copy=false;gets=0;assert(PrepareSetup(asset,L"private-workspace",cancel,prepared,error));assert(gets==1&&handles==0);
+ gets=0;assert(PrepareSetup(asset,L"private-workspace",cancel,prepared,error,nullptr));assert(gets==0&&handles==0);
+ signature=false;gets=0;assert(!PrepareSetup(asset,L"private-workspace",cancel,prepared,error,nullptr));assert(gets==0&&handles==0);
+ signature=true;copy=false;gets=0;assert(PrepareSetup(asset,L"private-workspace",cancel,prepared,error,nullptr));assert(gets==1&&handles==0);
 }
 '''
 with tempfile.TemporaryDirectory(prefix='GlassSetupDownload-') as temp:

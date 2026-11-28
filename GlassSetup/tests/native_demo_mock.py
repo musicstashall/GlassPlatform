@@ -29,12 +29,18 @@ harness=r'''
 constexpr int BM_SETCHECK=1,BST_UNCHECKED=0,kDebugDemoTimer=4,kDebugDemoPageMs=1800;
 int timerMs=0; void SendMessageW(int,int,int,int){} void SetTimer(int,int,int ms,void*){timerMs=ms;}
 void KillTimer(int,int){} namespace InstallLog {void Line(const wchar_t*){}}
+bool StartupLoading(){return false;}
 enum class Page {Welcome,Checking,Conflicts,License,Components,Certificate,Installing,ModulesBusy,ProcessesStuck,ConfirmCancel,Cancelling,Cancelled,Launching,Complete,Error};
 struct Wizard {
  bool debugDemoPending_=true,debugDemoStarted_=false,debugDemoActive_=false,debugNativeDemo_=false;
  bool webReady_=false,webBridgeReady_=false,accepted_=true;
  struct WebState {bool sent=true; void Reset(){sent=false;}} webState_;
- size_t debugDemoStep_=0;int accept_=1,window=1,finishes=0,changes=0;Page page=Page::Welcome;
+ size_t debugDemoStep_=0;unsigned debugDemoHold_=0;int accept_=1,window=1,finishes=0,changes=0;Page page=Page::Welcome;
+ static constexpr Page kDebugDemoSequence[]={
+  Page::Welcome,Page::Checking,Page::Conflicts,Page::License,
+  Page::Components,Page::Certificate,Page::Installing,Page::Installing,
+  Page::ModulesBusy,Page::ModulesBusy,Page::ProcessesStuck,Page::ConfirmCancel,Page::Cancelling,
+  Page::Cancelled,Page::Launching,Page::Complete,Page::Error};
  void SetPage(Page p){page=p;++changes;}void SetDebugDemoPage(Page p){SetPage(p);}
  void FinishDebugDemo(){++finishes;debugDemoActive_=false;}
  // METHODS

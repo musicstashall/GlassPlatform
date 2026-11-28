@@ -10,10 +10,19 @@
 namespace GlassReleaseClient {
 // Worker-local observer; catalogue requests never count as package bytes.
 inline thread_local std::function<void(std::uint64_t,std::uint64_t)> packageProgress;
+// Structured result of Get. Transport is only a WinHTTP request or read that
+// failed with a transport code. Callers must not infer it by parsing `error`.
+enum class Failure : unsigned {
+    None = 0,
+    Transport = 1,
+};
 HANDLE CreatePrivateFile(const std::wstring& path);
 std::wstring Wide(const std::string& text);
+// `failure` is optional so package, vendor and WebView downloads keep their
+// existing handling. It is never set for cancel, local I/O, HTTP status or
+// a later content check.
 bool Get(const std::wstring& url, HANDLE output, std::string* text, std::uint64_t limit,
-    const std::atomic<bool>& cancel, std::wstring& error);
+    const std::atomic<bool>& cancel, std::wstring& error, Failure* failure = nullptr);
 bool VerifyHash(HANDLE file, std::uint64_t size, const std::string& sha256,
     const std::atomic<bool>& cancel, std::wstring& error);
 }

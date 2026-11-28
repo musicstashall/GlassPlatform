@@ -32,8 +32,9 @@ bool IsControllerChild(){return false;}
 #include "resource.h"
 std::wstring Text(unsigned){return L"Setup diagnostic";}
 enum class Page{Checking,Components};
-struct VersionCheckResult{bool completed=false,fetched=false,newer=false,setupDownloadFailed=false;GlassPackageCatalog::Catalog catalog=7;
- std::wstring self=L"2.0.0.90",latest=L"2.0.0.70",preparedSetup;};
+enum class VersionCheckStage : unsigned {None,Catalog,Download};
+struct VersionCheckResult{bool completed=false,fetched=false,newer=false,setupDownloadFailed=false,recoverable=false;VersionCheckStage stage=VersionCheckStage::None;GlassPackageCatalog::Catalog catalog=7;
+ std::wstring self=L"2.0.0.90",latest=L"2.0.0.70",preparedSetup,diagnostic,workspace;};
 struct App{Page page_=Page::Checking;std::mutex versionCheckMutex_;
  VersionCheckResult versionCheckResult_;bool versionCheckHandled_=false,inspectionApplied_=false,controllerCheckHandled_=false;
  GlassPackageCatalog::Catalog releaseCatalog_;int scans=0,advances=0,transitions=0,errors=0;bool transfer=false;
@@ -42,6 +43,7 @@ struct App{Page page_=Page::Checking;std::mutex versionCheckMutex_;
  bool RunPreflightChecks(){return true;}
  void ContinueAfterLicenseCheck(){++advances;page_=Page::Components;}
  void ShowInstallError(const std::wstring&){++errors;}
+ void ShowSetupNetworkRecovery(){++errors;}
 '''
 main=r'''
 };
@@ -60,6 +62,8 @@ int main(){
  {App a;a.inspectionApplied_=true;a.versionCheckResult_.completed=true;a.versionCheckResult_.fetched=true;
   a.versionCheckResult_.newer=true;a.versionCheckResult_.setupDownloadFailed=true;
   a.CompleteVersionCheck();assert(a.advances==0&&a.errors==1&&a.versionCheckHandled_);}
+ {App a;a.inspectionApplied_=true;a.versionCheckResult_.completed=true;a.versionCheckResult_.recoverable=true;
+  a.CompleteVersionCheck();assert(a.advances==0&&a.transitions==0&&a.scans==0&&a.errors==1&&a.versionCheckHandled_);}
  std::cout<<"PASS: actual Checking completion gate: inspection/network in both orders, failed/offline catalog, one advance\n";
 }
 '''

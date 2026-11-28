@@ -86,6 +86,7 @@ constexpr ULONGLONG kMarqueePeriodMs = 1400;
 constexpr double kProgressSmoothTauMs = 120.0;
 constexpr ULONGLONG kRollbackFinishMs = 900;
 constexpr UINT kVendorMetadataReady = WM_APP + 10;
+constexpr UINT kCatalogRetryReady = WM_APP + 11;
 constexpr UINT kInitWebView = WM_APP + 1;
 constexpr UINT kVersionCheckComplete = WM_APP + 2;
 constexpr UINT kSetupDownloadStarted = WM_APP + 8;
@@ -1213,6 +1214,7 @@ public:
         if (startupThread_.joinable()) startupThread_.join();
         if (inspectThread_.joinable()) inspectThread_.join();
         if(vendorMetadataThread_.joinable())vendorMetadataThread_.join();
+        if(catalogRetryThread_.joinable())catalogRetryThread_.join();
         downloads_.Join();
     }
     // Бит 1 — кнопка мыши, бит 2 — перетаскивание окна. Таймер тура стоит, пока захват не отпущен.
@@ -1338,6 +1340,7 @@ private:
     mutable std::mutex inspectMutex_;
     std::wstring footerSetupVersion_; // Actual running EXE FileVersion; not catalog/bundle.
     std::wstring preflightX64Root_,preflightX86Root_,preflightOpenGlassRoot_;
+    enum class VersionCheckStage : unsigned { None, Catalog, Download };
     struct VersionCheckResult {
         bool completed = false;
         bool fetched = false;
@@ -1347,7 +1350,10 @@ private:
         std::wstring self;
         GlassPackageCatalog::Catalog catalog;
         std::wstring workspace, preparedSetup;
-        bool setupDownloadFailed = false;
+        bool setupDownloadFailed = false; // terminal: not a classified transport failure
+        bool recoverable = false;         // explicit WinHTTP transport failure only
+        VersionCheckStage stage = VersionCheckStage::None;
+        std::wstring diagnostic;
     };
     std::mutex versionCheckMutex_;
     std::thread versionCheckThread_;
@@ -1361,6 +1367,11 @@ private:
     std::atomic<std::uint64_t> setupDownloadBytes_{0},setupDownloadTotal_{0};
     std::wstring checkingStatus_;
     bool versionCheckStarted_ = false, versionCheckHandled_ = false, controllerCheckHandled_ = false;
+    bool errorRecoverable_ = false; // Page::Error offers Retry and Continue
+    bool selfUpdateSkipped_ = false; // Continue already chose the current Setup this launch
+    std::thread catalogRetryThread_;
+    std::atomic_bool catalogRetrying_{false};
+    HWND catalogRetry_ = nullptr;
 
     bool failurePending_ = false;
     bool transitioning_ = false;
@@ -1398,6 +1409,11 @@ private:
         SetTimer(window,kComponentNoticeTimer,50,nullptr);InvalidateContent();
     }
     std::wstring errorReason_;
+    [[nodiscard]] bool RecoveryPage() const noexcept { return page_==Page::Error && errorRecoverable_; }
+    [[nodiscard]] std::wstring CatalogCheckDetail() const {
+        std::lock_guard<std::mutex> lock(inspectMutex_);
+        return inspect_.catalogError;
+    }
     // Post-commit notes captured when the Complete page is entered.
     std::vector<InstallEngine::FinishWarning> finishWarnings_;
     // Windows 11 certificate page: queried once when leaving Components.
@@ -1435,7 +1451,7 @@ private:
         font_ = create(14,FW_NORMAL); small_ = create(12,FW_NORMAL);
         footerFont_ = create(8.5,FW_NORMAL);
         heading_ = create(28,FW_NORMAL); title_ = create(39,FW_LIGHT);
-        for (HWND c : {back_,next_,cancel_,eula_,accept_,cleanupOg_,component64_,component32_,componentSettings_,componentSettings32_,componentOpenGlass_,componentSecureUxTheme_,componentResources_,certInstall_,certSkip_,errorDetails_.Get()})
+        for (HWND c : {back_,next_,cancel_,eula_,accept_,cleanupOg_,component64_,component32_,componentSettings_,componentSettings32_,componentOpenGlass_,componentSecureUxTheme_,componentResources_,catalogRetry_,certInstall_,certSkip_,errorDetails_.Get()})
             if (c) SendMessageW(c,WM_SETFONT,reinterpret_cast<WPARAM>(font_),FALSE);
     }
     void InitializeLoading() {
@@ -1464,6 +1480,7 @@ private:
         componentSettings32_ = Control(L"BUTTON",Text(IDS_COMP_GS32_TITLE),BS_AUTOCHECKBOX | WS_TABSTOP,IDC_COMPONENT_SETTINGS32);
         componentSettings_ = Control(L"BUTTON",Text(IDS_COMP_GS64_TITLE),BS_AUTOCHECKBOX | WS_TABSTOP,IDC_COMPONENT_SETTINGS);
         componentResources_ = Control(L"BUTTON",Text(IDS_COMP_OGR_TITLE),BS_AUTOCHECKBOX | WS_TABSTOP,IDC_COMPONENT_OGR);
+        catalogRetry_ = Control(L"BUTTON",Text(IDS_COMP_CATALOG_RETRY),BS_PUSHBUTTON | WS_TABSTOP,IDC_CATALOG_RETRY);
         componentOpenGlass_ = Control(L"BUTTON",Text(IDS_COMP_OG_TITLE),BS_AUTOCHECKBOX | WS_TABSTOP,IDC_COMPONENT_OG);
         componentSecureUxTheme_ = Control(L"BUTTON",Text(IDS_COMP_SUT_TITLE),BS_AUTOCHECKBOX | WS_TABSTOP,IDC_COMPONENT_SUT);
         certInstall_ = Control(L"BUTTON",Text(IDS_CERT_OPT_INSTALL_TITLE),BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP,IDC_CERT_INSTALL);
@@ -1632,6 +1649,7 @@ private:
         InitializeControls();
         if (!workerStarted) {
             startupPending_=false;
+            errorRecoverable_=false;
             errorReason_=Text(IDS_STARTUP_FAILED);
             SetPage(Page::Error);
             return;
@@ -1680,12 +1698,13 @@ private:
         if (runtimeInstalled) PostWebViewInit();
         if (!result.ok) {
             (void)FinalizeControllerStartup(false);
+            errorRecoverable_=false;
             errorReason_=Text(IDS_STARTUP_FAILED);
             SetPage(Page::Error);
             return;
         }
         if(!FinalizeControllerStartup(true)) {
-            errorReason_=Text(IDS_STARTUP_FAILED);SetPage(Page::Error);return;
+            errorRecoverable_=false;errorReason_=Text(IDS_STARTUP_FAILED);SetPage(Page::Error);return;
         }
         platformVersion_=std::move(result.platformVersion);
         eulaText_=std::move(result.eulaText);
@@ -1742,10 +1761,11 @@ private:
         const bool modules=page_==Page::ModulesBusy;
         const bool wideNext=page_==Page::ProcessesStuck || page_==Page::SettingsBusy || page_==Page::Conflicts;
         const bool confirm=page_==Page::ConfirmCancel;
-        const bool terminal=page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error;
+        const bool recovery=RecoveryPage();
+        const bool terminal=(page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error) && !recovery;
         WizardUi::LayoutFooter(window,dpi_,kContentHeight,
-            {back_,confirm?568:modules?510:644,confirm?190:modules?230:96},
-            {next_,confirm?778:wideNext?694:750,confirm?190:wideNext?160:104},cancel_,terminal,false);
+            {back_,recovery?620:confirm?568:modules?510:644,recovery?160:confirm?190:modules?230:96},
+            {next_,recovery?800:confirm?778:wideNext?694:750,recovery?140:confirm?190:wideNext?160:104},cancel_,terminal,false);
         Move(eula_,48,142,904,285);
         Move(accept_,48,page_==Page::FullCleanup?360:447,904,32);
         Move(cleanupOg_,48,405,904,32);
@@ -1757,6 +1777,7 @@ private:
         Move(componentSettings_,60,273,400,32); Move(componentSettings32_,510,273,400,32); Move(componentOpenGlass_,60,343,400,32);
         Move(componentSecureUxTheme_,510,343,420,28);
         Move(componentResources_,60,410,870,28);
+        Move(catalogRetry_,760,148,180,28);
         Move(certInstall_,60,318,560,28); Move(certSkip_,60,386,560,28);
     }
     void InvalidateContent() {
@@ -1776,7 +1797,7 @@ private:
             errorDetails_.Update(false,{});
             EnableWindow(next_,FALSE);EnableWindow(back_,FALSE);
             for(HWND control:{back_,next_,eula_,accept_,cleanupOg_,component64_,component32_,componentSettings_,
-                componentSettings32_,componentOpenGlass_,componentSecureUxTheme_,componentResources_,certInstall_,certSkip_,progress_})
+                componentSettings32_,componentOpenGlass_,componentSecureUxTheme_,componentResources_,catalogRetry_,certInstall_,certSkip_,progress_})
                 if(control)ShowWindow(control,SW_HIDE);
             if (webHost_) ShowWindow(webHost_, SW_SHOWNA);
             web_.SetVisible(true);
@@ -1842,9 +1863,15 @@ private:
             EnableWindow(componentResources_,os64);
             EnableWindow(componentSettings_,TRUE); EnableWindow(componentSettings32_,TRUE);
             EnableWindow(component64_,os64); EnableWindow(component32_,TRUE);
-        }
+            const bool catalogFailed=!CatalogCheckDetail().empty();
+            ShowWindow(catalogRetry_,catalogFailed?SW_SHOWNA:SW_HIDE);
+            if(catalogFailed){
+                SetWindowTextW(catalogRetry_,Text(IDS_COMP_CATALOG_RETRY).c_str());
+                EnableWindow(catalogRetry_,!catalogRetrying_.load()&&!DebugDemoLocksControls());
+            }
+        } else if(catalogRetry_) ShowWindow(catalogRetry_,SW_HIDE);
         if (DebugDemoLocksControls()) {
-            for (HWND control:{accept_,component64_,component32_,componentSettings_,componentSettings32_,componentOpenGlass_,componentSecureUxTheme_,componentResources_})
+            for (HWND control:{accept_,component64_,component32_,componentSettings_,componentSettings32_,componentOpenGlass_,componentSecureUxTheme_,componentResources_,catalogRetry_})
                 EnableWindow(control,FALSE);
         }
         const bool nativeCertificate=!webVisible && page_==Page::Certificate && !transitioning_;
@@ -2108,6 +2135,8 @@ private:
             if (json.size()>1) json+=L",";
             auto condition=ConditionOf(rep,rep!=nullptr&&rep->installed);
             const int catalogIndex=wcscmp(id,L"x64")==0?0:wcscmp(id,L"x86")==0?1:wcscmp(id,L"settings64")==0?2:wcscmp(id,L"settings32")==0?3:wcscmp(id,L"openglass")==0?4:wcscmp(id,L"openglassResources")==0?5:-1;
+            const bool catalogProduct=catalogIndex>=0&&wcscmp(id,L"openglass")!=0;
+            const bool catalogFailed=catalogProduct&&!inspect_.catalogError.empty();
             std::wstring remoteVersion,targetVersion=rep?rep->targetVersion:L"";
             std::uint64_t packageSize=0;
             if(catalogIndex>=0){const auto& asset=releaseCatalog_.products[catalogIndex];if(asset&&asset->downloadable){
@@ -2198,6 +2227,12 @@ private:
             if(resources&&!resourcesReady) {
                 if(!firstReason)reasons+=L",";
                 reasons+=JsStringLiteral(Text((selection_.openGlass||selection_.Removes(3)||resourcesPrerequisiteReady_)?IDS_COMP_OGR_SEPARATE:IDS_COMP_OGR_NEEDS_OG));
+                firstReason=false;
+            }
+            if(catalogFailed) {
+                if(!firstReason)reasons+=L",";
+                reasons+=JsStringLiteral(Text(IDS_COMP_CATALOG_CHECK)+(inspect_.catalogError.empty()?L"":L" "+inspect_.catalogError));
+                firstReason=false;
             }
             reasons+=L"]";
             std::wstring description=(desc==IDS_COMP_P64_DESC||desc==IDS_COMP_P32_DESC)?
@@ -2210,6 +2245,11 @@ private:
                 L",\"metadataBlocked\":"+(openGlass&&ogMetadataBlocked_?L"true":L"false")+
                 L",\"metadataRetrying\":"+(openGlass&&vendorMetadataRetry_==L"openglass"?L"true":L"false")+
                 L",\"metadataError\":"+JsStringLiteral(openGlass?inspect_.openGlassDiscoveryError:L"")+
+                L",\"catalogBlocked\":"+(catalogFailed?L"true":L"false")+
+                L",\"catalogError\":"+JsStringLiteral(catalogFailed?inspect_.catalogError:L"")+
+                L",\"catalogHint\":"+JsStringLiteral(catalogFailed?Text(IDS_COMP_CATALOG_CHECK):L"")+
+                L",\"catalogRetryLabel\":"+JsStringLiteral(catalogFailed?Text(IDS_COMP_CATALOG_RETRY):L"")+
+                L",\"catalogRetrying\":"+(catalogRetrying_.load()?L"true":L"false")+
                 L",\"compatibilityRisk\":"+(compatibilityRisk?L"true":L"false")+
                 L",\"legacyWindows\":"+(legacyWindows?L"true":L"false")+
                 L",\"offerWarning\":"+JsStringLiteral(offerWarning)+
@@ -2578,6 +2618,10 @@ private:
             L",\"checkingStatus\":"+JsStringLiteral(checkingStatus_)+
             L",\"conflicts\":"+ConflictsJson()+
             L",\"errorReason\":"+JsStringLiteral(errorReason_)+
+            L",\"errorRecovery\":"+(errorRecoverable_?L"true":L"false")+
+            L",\"errorTag\":"+JsStringLiteral(errorRecoverable_?Text(IDS_SETUP_NET_TAG):L"")+
+            L",\"errorTitle\":"+JsStringLiteral(errorRecoverable_?Text(IDS_SETUP_NET_TITLE):L"")+
+            L",\"errorBody\":"+JsStringLiteral(errorRecoverable_?Text(IDS_SETUP_NET_BODY):L"")+
             L",\"finishWarnings\":"+FinishWarningsJson()+
             L",\"cancellationIsRemoval\":"+((selection_.removeMask||selection_.secureUxThemeRemove)?L"true":L"false")+
             L",\"cancelledDetail\":"+JsStringLiteral(cancelledDetail_)+
@@ -2700,6 +2744,7 @@ private:
     // Единственный источник подписи next_: SetPage, правка плана, готовность загрузок.
     // Не const: CertificatePageApplies лениво опрашивает подпись (certQueried_).
     [[nodiscard]] UINT NextTextId() noexcept {
+        if(RecoveryPage())return IDS_SETUP_NET_RETRY;
         const bool terminal=page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error;
         return page_==Page::FullCleanup?IDS_APPLY:
             page_==Page::ConfirmCancel?IDS_CONFIRM_ABORT:
@@ -2869,19 +2914,22 @@ private:
         ShowWindow(eula_,SW_HIDE); ShowWindow(accept_,SW_HIDE);
         Layout();
         const bool demoControlsLocked=DebugDemoLocksControls();
-        const bool terminal=page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error;
+        const bool recoveryNow=RecoveryPage();
+        const bool terminal=(page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error) && !recoveryNow;
         const bool inProgress=page_==Page::Checking || page_==Page::Installing || page_==Page::Cancelling ||
             page_==Page::Launching || (page_==Page::Welcome && StartupLoading());
         UpdateNextText();
-        SetWindowTextW(back_,Text(page_==Page::ModulesBusy?IDS_CONTINUE_RISK:page_==Page::ConfirmCancel?IDS_CONFIRM_RESUME:IDS_BACK).c_str());
+        SetWindowTextW(back_,Text(RecoveryPage()?IDS_SETUP_NET_CONTINUE:page_==Page::ModulesBusy?IDS_CONTINUE_RISK:page_==Page::ConfirmCancel?IDS_CONFIRM_RESUME:IDS_BACK).c_str());
         SetWindowTextW(cancel_,Text(IDS_CANCEL).c_str());
         const bool confirm=page_==Page::ConfirmCancel;
-        const bool backVisible=(page_==Page::License || page_==Page::Components || page_==Page::Certificate || page_==Page::FullCleanup || page_==Page::ModulesBusy || confirm)
-            && !(MaintenanceUi() && (page_==Page::Components || (page_==Page::License && !accepted_)));
+        const bool recovery=recoveryNow;
+        const bool backVisible=recovery || ((page_==Page::License || page_==Page::Components || page_==Page::Certificate || page_==Page::FullCleanup || page_==Page::ModulesBusy || confirm)
+            && !(MaintenanceUi() && (page_==Page::Components || (page_==Page::License && !accepted_))));
         const bool nextVisible=!inProgress;
         // Правый угол занят другой кнопкой на готовых и подтверждающих страницах.
         // На откате и запуске отменять уже нечего: откат и есть отмена, запуск идёт после фиксации.
-        const bool cancelVisible=!terminal && !confirm && page_!=Page::Cancelling && page_!=Page::Launching;
+        // Recovery uses only Retry and Continue; Cancel stays hidden.
+        const bool cancelVisible=!terminal && !recovery && !confirm && page_!=Page::Cancelling && page_!=Page::Launching;
         const bool demoLocked=demoControlsLocked && !terminal;
         ShowWindow(back_,backVisible?SW_SHOWNA:SW_HIDE);
         ShowWindow(next_,nextVisible?SW_SHOWNA:SW_HIDE);
@@ -2966,6 +3014,7 @@ private:
         ContinueVersionCheck();
     }
     void ShowInstallError(const std::wstring& reason) noexcept {
+        errorRecoverable_ = false;
         errorReason_ = reason;
         KillTimer(window, kInstallTimer);
         SetPage(Page::Error);
@@ -3010,6 +3059,7 @@ private:
             reason += L"\r\n\r\n";
             reason += detail;
         }
+        errorRecoverable_ = false;
         errorReason_ = reason;
         failurePending_ = !finished;
         if (finished) {
@@ -3236,8 +3286,42 @@ private:
         SendMessageW(accept_,BM_SETCHECK,accepted_?BST_CHECKED:BST_UNCHECKED,0);
         SetPage(accepted_?Page::Components:Page::License);
     }
+    void RetryProductCatalog() {
+        if(closing_||catalogRetrying_.load()||!inspectReady_.load()||!vendorMetadataRetry_.empty()||DebugDemoLocksControls())return;
+        if(inspectThread_.joinable())inspectThread_.join();
+        if(catalogRetryThread_.joinable())catalogRetryThread_.join();
+        catalogRetrying_.store(true,std::memory_order_release);
+        if(catalogRetry_)EnableWindow(catalogRetry_,FALSE);
+        SyncWebViewState();InvalidateContent();
+        const bool os64=GlassInstallUtil::IsOs64Bit();
+        const HWND target=window;
+        try {
+            catalogRetryThread_=std::thread([this,os64,target]{
+                GlassPackageAcquisition::PrepareCatalogRetry();
+                GlassProductInspect::Inputs inspectIn;
+                inspectIn.signerSha1=GlassProductInspect::QuerySelfSignerSha1();
+                inspectIn.os64=os64;
+                inspectIn.cancelled=&inspectStop_;
+                inspectIn.inspectSources=true;
+                auto report=GlassProductInspect::Run(inspectIn);
+                {
+                    std::lock_guard<std::mutex> lock(inspectMutex_);
+                    inspect_=std::move(report);
+                    ogMetadataLocal_=inspect_.og.sourceVerified&&!inspect_.og.targetPayloadVersion.empty();
+                    sutMetadataLocal_=inspect_.secureUxOffer.localVerified;
+                    ogMetadataBlocked_=inspect_.openGlassDiscoveryError.find(L"403")!=std::wstring::npos;
+                    sutMetadataBlocked_=inspect_.secureUxDiscoveryError.find(L"403")!=std::wstring::npos;
+                }
+                catalogRetrying_.store(false,std::memory_order_release);
+                if(target)PostMessageW(target,kCatalogRetryReady,0,0);
+            });
+        }catch(...){
+            catalogRetrying_.store(false,std::memory_order_release);
+            SyncWebViewState();
+        }
+    }
     void RetryVendorMetadata(const std::wstring& id) {
-        if(!vendorMetadataRetry_.empty()||!inspectReady_.load()||closing_)return;
+        if(!vendorMetadataRetry_.empty()||catalogRetrying_.load()||!inspectReady_.load()||closing_)return;
         if(id!=L"openglass"&&id!=L"secureUxTheme")return;
         if(id==L"openglass"?!ogMetadataBlocked_:!sutMetadataBlocked_)return;
         if(vendorMetadataThread_.joinable())vendorMetadataThread_.join();
@@ -3294,6 +3378,7 @@ private:
             if (window) PostMessageW(window,kInspectReady,0,0);
         });
         } catch(...) {
+            errorRecoverable_=false;
             errorReason_=Text(IDS_ERR_PRODUCT_INSPECTION_START);
             SetPage(Page::Error);
             return false;
@@ -3322,18 +3407,25 @@ private:
         if(IsControllerChild()&&!BeginProductInspection())return;
         const HWND target = window;
         const bool checkSetup=!IsControllerChild();
-        const bool allowSetupDownload=checkSetup&&!HasCommandLineSwitch(L"--no-self-update");
+        const bool allowSetupDownload=checkSetup&&!selfUpdateSkipped_&&!HasCommandLineSwitch(L"--no-self-update");
         try {
             versionCheckThread_ = std::thread([this, target, checkSetup, allowSetupDownload]() {
                 VersionCheckResult result;
                 try {
                     std::wstring diagnostic;
-                    result.fetched = GlassPackageAcquisition::FetchCatalog(versionCheckCancel_,result.catalog,diagnostic);
+                    GlassReleaseClient::Failure failure=GlassReleaseClient::Failure::None;
+                    result.fetched = GlassPackageAcquisition::FetchCatalog(versionCheckCancel_,result.catalog,diagnostic,&failure);
                     if(result.fetched&&result.catalog.setupVersion){
                         const auto& v=result.catalog.setupVersion->parts;
                         result.latest=std::to_wstring(v[0])+L"."+std::to_wstring(v[1])+L"."+std::to_wstring(v[2])+L"."+std::to_wstring(v[3]);
                     }
                     if(!diagnostic.empty())InstallLog::Line(diagnostic.c_str());
+                    result.diagnostic=diagnostic;
+                    // Child, offline servicing and other Get callers never take this branch.
+                    if(!result.fetched&&failure==GlassReleaseClient::Failure::Transport&&checkSetup){
+                        result.recoverable=true;
+                        result.stage=VersionCheckStage::Catalog;
+                    }
                     if (result.fetched&&checkSetup) {
                         result.self = SelfFileVersion();
                         result.newer = !result.self.empty() && VersionOlder(result.self, result.latest);
@@ -3346,25 +3438,39 @@ private:
                                 const auto now=GetTickCount64();
                                 if(now-lastProgress>=100||bytes==total){lastProgress=now;PostMessageW(target,kSetupDownloadProgress,0,0);}
                             };
+                            GlassReleaseClient::Failure downloadFailure=GlassReleaseClient::Failure::None;
                             const bool workspaceReady=GlassPackageAcquisition::CreateWorkspace(result.workspace);
                             const bool downloaded=workspaceReady&&
-                               GlassPackageAcquisition::PrepareSetup(*result.catalog.setup,result.workspace,versionCheckCancel_,result.preparedSetup,diagnostic);
+                               GlassPackageAcquisition::PrepareSetup(*result.catalog.setup,result.workspace,versionCheckCancel_,result.preparedSetup,diagnostic,&downloadFailure);
                             if(downloaded){
                                 ParsedVersion actualVersion{},expectedVersion{};
                                 if(!TryParseVersion(ReadSetupFileVersion(result.preparedSetup),actualVersion)||
                                    !TryParseVersion(result.latest,expectedVersion)||actualVersion.fields!=expectedVersion.fields){
                                     DeleteFileW(result.preparedSetup.c_str());result.preparedSetup.clear();
                                     diagnostic=L"Downloaded Setup FileVersion differs from release catalog";
+                                    result.setupDownloadFailed=true;
+                                    result.recoverable=false;
+                                    result.stage=VersionCheckStage::Download;
                                 }
-                            }else if(!versionCheckCancel_.load(std::memory_order_acquire))
-                                result.setupDownloadFailed=true;
+                            }else if(!versionCheckCancel_.load(std::memory_order_acquire)){
+                                result.stage=VersionCheckStage::Download;
+                                if(downloadFailure==GlassReleaseClient::Failure::Transport){
+                                    result.recoverable=true;
+                                    result.setupDownloadFailed=false;
+                                }else{
+                                    result.setupDownloadFailed=true;
+                                    result.recoverable=false;
+                                }
+                            }
                             GlassReleaseClient::packageProgress={};
                             if(!diagnostic.empty())InstallLog::Line(diagnostic.c_str());
+                            if(!diagnostic.empty())result.diagnostic=diagnostic;
                         }
                     }
                 } catch (...) {
                     result.fetched = false;
                     result.newer = false;
+                    result.recoverable = false;
                 }
                 GlassReleaseClient::packageProgress={};
                 result.completed = true;
@@ -3407,6 +3513,80 @@ private:
         }
         return false;
     }
+    void ClearVersionCheckWorkspace() {
+        std::wstring workspace;
+        {
+            std::lock_guard<std::mutex> lock(versionCheckMutex_);
+            workspace=std::move(versionCheckResult_.workspace);
+            versionCheckResult_.workspace.clear();
+            versionCheckResult_.preparedSetup.clear();
+        }
+        if(!workspace.empty())GlassMaintenanceCache::RemoveFlat(workspace);
+    }
+    void ShowSetupNetworkRecovery() {
+        VersionCheckResult result;
+        {
+            std::lock_guard<std::mutex> lock(versionCheckMutex_);
+            result=versionCheckResult_;
+        }
+        errorRecoverable_=true;
+        errorReason_=result.diagnostic.empty()?Text(IDS_SETUP_NET_BODY):result.diagnostic;
+        InstallLog::Line(L"Setup update network failure; retry or continue with this Setup");
+        SetPage(Page::Error);
+    }
+    void RetrySetupNetworkFailure() {
+        if(!errorRecoverable_||page_!=Page::Error||closing_||DebugDemoLocksControls())return;
+        if(versionCheckThread_.joinable())versionCheckThread_.join();
+        VersionCheckStage stage=VersionCheckStage::Catalog;
+        {
+            std::lock_guard<std::mutex> lock(versionCheckMutex_);
+            stage=versionCheckResult_.stage;
+        }
+        ClearVersionCheckWorkspace();
+        {
+            std::lock_guard<std::mutex> lock(versionCheckMutex_);
+            versionCheckResult_=VersionCheckResult{};
+        }
+        versionCheckCancel_.store(false,std::memory_order_release);
+        errorRecoverable_=false;
+        errorReason_.clear();
+        versionCheckHandled_=false;
+        versionCheckStarted_=false;
+        if(stage!=VersionCheckStage::Download)GlassPackageAcquisition::PrepareCatalogRetry();
+        InstallLog::Line(stage==VersionCheckStage::Download
+            ?L"Setup download retry: reusing the validated catalog"
+            :L"Setup catalog retry: requesting version.json again");
+        ContinueVersionCheck();
+    }
+    void ContinueAfterSetupNetworkFailure() {
+        if(!errorRecoverable_||page_!=Page::Error||closing_||DebugDemoLocksControls())return;
+        if(versionCheckThread_.joinable())versionCheckThread_.join();
+        VersionCheckResult result;
+        {
+            std::lock_guard<std::mutex> lock(versionCheckMutex_);
+            result=versionCheckResult_;
+        }
+        if(!result.workspace.empty())GlassMaintenanceCache::RemoveFlat(result.workspace);
+        result.workspace.clear();
+        result.preparedSetup.clear();
+        result.recoverable=false;
+        result.setupDownloadFailed=false;
+        result.completed=true;
+        if(!result.fetched)GlassPackageAcquisition::ReleaseFailedCatalogAttempt();
+        {
+            std::lock_guard<std::mutex> lock(versionCheckMutex_);
+            versionCheckResult_=result;
+        }
+        errorRecoverable_=false;
+        selfUpdateSkipped_=true;
+        versionCheckHandled_=false;
+        controllerCheckHandled_=false;
+        InstallLog::Line(result.fetched
+            ?L"Setup update skipped for this launch; product check will reuse the validated catalog"
+            :L"Setup update skipped for this launch; product check will request the catalog");
+        SetPage(Page::Checking);
+        CompleteVersionCheck();
+    }
     void CompleteVersionCheck() {
         if (page_ != Page::Checking) return;
         VersionCheckResult result;
@@ -3415,10 +3595,20 @@ private:
             if (!versionCheckResult_.completed) return;
             result = versionCheckResult_;
         }
+        if (result.recoverable) {
+            versionCheckHandled_ = true;
+            ShowSetupNetworkRecovery();
+            return;
+        }
         if (result.setupDownloadFailed) {
             versionCheckHandled_ = true;
-            InstallLog::Line(L"Setup download interrupted; not continuing with this Setup");
-            ShowInstallError(Text(IDS_ERR_SETUP_DOWNLOAD_INTERRUPTED));
+            InstallLog::Line(L"Setup update rejected; not continuing with the unverified file");
+            std::wstring reason=Text(IDS_ERR_SETUP_UPDATE_REJECTED);
+            if(!result.diagnostic.empty()){
+                reason+=L"\r\n\r\n";
+                reason+=result.diagnostic;
+            }
+            ShowInstallError(reason);
             return;
         }
         // Bootstrapper checks the controller first. Only the final controller
@@ -3814,6 +4004,7 @@ private:
             if(message==L"metadata-retry:openglass"||message==L"metadata-retry:secureUxTheme") {
                 RetryVendorMetadata(message.substr(15));return S_OK;
             }
+            if(message==L"catalog-retry"){RetryProductCatalog();return S_OK;}
             if((ogMetadataBlocked_&&!ogMetadataLocal_&&message==L"component:openglass:1")||
                (sutMetadataBlocked_&&!sutMetadataLocal_&&message==L"component:secureUxTheme:1")){SyncWebViewState();return S_OK;}
             const bool planEdited=message.rfind(L"component:",0)==0||message==L"components:select-all";
@@ -4221,7 +4412,10 @@ private:
             if (!inspectReady_.load(std::memory_order_acquire)) {
                 DrawLabel(dc,Text(IDS_COMP_ANALYZING),Box(60,238,800,40),font_,muted);
             } else {
-            DrawLabel(dc,nativeComponentNotice_.empty()?Text(IDS_COMP_INTRO):nativeComponentNotice_,Box(48,142,840,58),small_,nativeComponentNotice_.empty()?muted:nativeComponentNoticeDanger_?RGB(255,160,177):RGB(245,207,130));
+            const std::wstring catalogDetail=CatalogCheckDetail();
+            const std::wstring componentIntro=!catalogDetail.empty()?Text(IDS_COMP_CATALOG_CHECK)+L" "+catalogDetail:
+                nativeComponentNotice_.empty()?Text(IDS_COMP_INTRO):nativeComponentNotice_;
+            DrawLabel(dc,componentIntro,Box(48,142,700,58),small_,!catalogDetail.empty()||nativeComponentNoticeDanger_?RGB(245,207,130):muted,DT_LEFT|DT_TOP|DT_WORDBREAK|DT_END_ELLIPSIS|DT_NOPREFIX);
             const bool os64=GlassInstallUtil::IsOs64Bit();
             const auto state=[&](bool selected, bool installed, bool mandatory, int x, int y) {
                 DrawLabel(dc,Text(ComponentStateId(selected,installed?GlassProducts::ProductCondition::Healthy:GlassProducts::ProductCondition::NotInstalled)),Box(x,y,mandatory?220:250,38),small_,accent);
@@ -4294,12 +4488,13 @@ private:
                 DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
             DrawSuccessIllustration(dc);
         } else if (page_ == Page::Error) {
+            const bool recovery=errorRecoverable_;
             DrawBanner(dc,true);
-            DrawHeroPanel(dc,32,120,558,408,RGB(255,112,140));
+            DrawHeroPanel(dc,32,120,558,408,recovery?RGB(226,186,120):RGB(255,112,140));
             DrawLabel(dc,Text(IDS_BRAND),Box(48,34,300,35),heading_,white);
-            DrawLabel(dc,Text(IDS_ERROR_TAG),Box(48,139,400,25),small_,RGB(255,142,163));
-            DrawLabel(dc,Text(IDS_ERROR_TITLE),Box(48,177,440,104),title_,white);
-            DrawLabel(dc,Text(IDS_ERROR_BODY),Box(48,301,390,54),font_,muted);
+            DrawLabel(dc,Text(recovery?IDS_SETUP_NET_TAG:IDS_ERROR_TAG),Box(48,139,400,25),small_,recovery?RGB(245,207,130):RGB(255,142,163));
+            DrawLabel(dc,Text(recovery?IDS_SETUP_NET_TITLE:IDS_ERROR_TITLE),Box(48,177,440,104),title_,white);
+            DrawLabel(dc,Text(recovery?IDS_SETUP_NET_BODY:IDS_ERROR_BODY),Box(48,301,390,54),font_,muted);
             if (!errorDetails_.Get()) DrawLabel(dc,errorReason_,Box(48,362,520,92),font_,white,DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
             DrawLabel(dc,Text(IDS_ERROR_LOG_HINT),Box(48,476,450,50),small_,muted);
             DrawFailureIllustration(dc);
@@ -4423,7 +4618,7 @@ private:
         // Do not rely on WM_ERASEBKGND: Windows may give it a clipped update region.
         // Terminal pages have no progress strip, so align the footer's single divider
         // with the bottom edge of the HTML content instead of drawing a second line.
-        const bool terminalPage=page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error;
+        const bool terminalPage=(page_==Page::Complete || page_==Page::Cancelled || page_==Page::Error) && !errorRecoverable_;
         const int footerTop=terminalPage?kHtmlHeight:kContentHeight;
         WizardTheme::PaintFooterBar(dc,Scale(kWidth),Scale(footerTop),Scale(kHeight),
             kFooterTop,kFooterBottom,RGB(74,71,109));
@@ -4450,6 +4645,8 @@ private:
         if (runtimeThread_.joinable()) runtimeThread_.join();
         versionCheckCancel_.store(true,std::memory_order_release);
         if (versionCheckThread_.joinable()) versionCheckThread_.join();
+        inspectStop_.store(true,std::memory_order_release);
+        if (catalogRetryThread_.joinable()) catalogRetryThread_.join();
         if(!versionCheckResult_.workspace.empty())GlassMaintenanceCache::RemoveFlat(versionCheckResult_.workspace);
         frame_.Reset(); fadeFrame_.Reset();
         web_.Close();
@@ -4476,6 +4673,11 @@ private:
         case WM_CREATE: InitializeLoading(); return 0;
         case kBeginStartup: BeginStartup(); return 0;
         case kStartupComplete: CompleteStartupIfReady(); return 0;
+        case kCatalogRetryReady:
+            if(catalogRetryThread_.joinable())catalogRetryThread_.join();
+            catalogRetrying_.store(false,std::memory_order_release);
+            if(!closing_){ShowContentControls();EnableWindow(next_,!failurePending_&&!DebugDemoLocksControls()&&ComponentsReady());SyncWebViewState();InvalidateContent();}
+            return 0;
         case kVendorMetadataReady:
             if(vendorMetadataThread_.joinable())vendorMetadataThread_.join();
             vendorMetadataRetry_.clear();
@@ -4646,7 +4848,11 @@ private:
                     InvalidateContent();
                 }
                 return 0;
+            case IDC_CATALOG_RETRY:
+                if(page_==Page::Components && !webReady_ && !DebugDemoLocksControls())RetryProductCatalog();
+                return 0;
             case IDC_BACK:
+                if(page_==Page::Error && errorRecoverable_){ContinueAfterSetupNetworkFailure();return 0;}
                 if(MaintenanceUi()&&page_==Page::Components)return 0;
                 if(MaintenanceUi()&&page_==Page::License&&!accepted_)return 0;
                 if(page_==Page::FullCleanup){fullCleanupReviewed_=false;selection_.cleanupUserData=selection_.cleanupOpenGlassConfig=false;SetPage(Page::Components);return 0;}
@@ -4677,6 +4883,7 @@ private:
                 }
 #endif
                 if (transitioning_) return 0;
+                if(page_==Page::Error && errorRecoverable_){RetrySetupNetworkFailure();return 0;}
                 if(page_==Page::FullCleanup){fullCleanupReviewed_=true;SetPage(Page::Components);StartInstallation();return 0;}
                 if (page_==Page::ConfirmCancel) {
 #ifdef _DEBUG

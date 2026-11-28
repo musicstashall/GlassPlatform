@@ -194,6 +194,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 .error-copy{position:absolute;left:48px;top:96px;bottom:18px;width:445px;display:flex;flex-direction:column;min-height:0;z-index:5;opacity:0;transform:translateY(13px);animation:complete-enter .72s .08s cubic-bezier(.2,.75,.25,1) forwards}
 .error-tag{display:inline-flex;align-items:center;gap:8px;margin:0;color:#ffb0bc;letter-spacing:2px;font-size:10px;text-transform:uppercase;font-weight:650}
 .error-tag:before{content:"";width:7px;height:7px;border-radius:50%;background:#ff829a;box-shadow:0 0 14px #ff829a99;animation:error-beacon 2.6s ease-in-out infinite}
+#stage.is-recovery .error-tag{color:#f0d7a4}#stage.is-recovery .error-tag:before{background:#e0b15a;box-shadow:0 0 14px #e0b15a99}#stage.is-recovery .error-title{color:#fff8ea}
 @keyframes error-beacon{50%{opacity:.48;box-shadow:0 0 5px #ff829955}}
 .error-copy>.error-tag,.error-copy>.error-title,.error-copy>.error-body{flex-shrink:0}
 .error-title{margin:20px 0 15px;color:#fff2f4;font-size:42px;line-height:1.08;font-weight:350;letter-spacing:-1.2px}
@@ -753,6 +754,8 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 #components-panel .c-card.dragging.download-progress:hover,#components-panel .c-card.drag-ghost.download-progress:hover{background:linear-gradient(130deg,#22253c,#181b2d)}
 #components-panel .c-card.download-local{border:1px solid #83d9a685;background:var(--component-green-surface)}
 #components-panel .c-card.download-failed{border-color:#e57a7a;border-style:dashed}
+#components-panel .c-card.catalog-check-failed{border-color:#e0b15a;border-style:dashed}
+#components-panel .catalog-check-note{position:absolute;left:8px;right:8px;bottom:6px;font-size:9px;line-height:1.2;color:#f0d7a4;pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #stage[data-mode="full-cleanup"] .error-copy{top:var(--page-heading-top);left:var(--page-heading-left);right:48px;bottom:30px;width:auto;overflow:auto;justify-content:flex-start;pointer-events:auto;opacity:1;transform:none;animation:none}
 #stage[data-mode="full-cleanup"] .complete-visual,#stage[data-mode="full-cleanup"] .confirm-ambient{display:none}
 /* Same offline banner and readability treatment as the maintenance page. */
@@ -1706,7 +1709,7 @@ function renderComponentsPanel(){
  const items=Array.isArray(hostState.components)?hostState.components:[],loading=hostState.componentsLoading===true;
  // metadataRetrying only disables the pressed play control. Including it would
  // rebuild every card and replay the red border transition on all 403 offers.
- const panelItems=items.map(item=>{if(!item||typeof item!=='object')return item;const copy={...item};delete copy.metadataRetrying;return copy;});
+ const panelItems=items.map(item=>{if(!item||typeof item!=='object')return item;const copy={...item};delete copy.metadataRetrying;delete copy.catalogRetrying;return copy;});
  const signature=JSON.stringify([locale,hostState.appMode,loading,panelItems]);
  const changed=signature!==componentSignature,shelfScroll=changed?captureComponentShelfScroll():null;
  if(changed){endComponentDrag(false);const focusId=document.activeElement&&document.activeElement.dataset.component;componentSignature=signature;grid.replaceChildren();installedGrid.replaceChildren();extra.replaceChildren();
@@ -1736,9 +1739,29 @@ function syncDownloadVisuals(){
   const d=selected.find(d=>d.id===card.dataset.product);
   let bar=card.querySelector('.product-transfer'),retry=card.querySelector('.download-retry');
   let errorLabel=card.querySelector('.metadata-error-label');
+  let catalogNote=card.querySelector('.catalog-check-note');
   // Server-unavailable belongs only to the Available catalogue, including the
   // mirror of a product already placed in the plan. The plan card stays a normal install.
   const catalogCard=!!card.closest('#components-grid');
+  // Release-catalog check failure is host-classified. It marks the Available card
+  // and offers ▶, without hiding a verified local offer or changing its trust.
+  if(catalogCard&&item?.catalogBlocked&&hostState.appMode!=='unins'){
+   card.classList.add('catalog-check-failed');
+   card.classList.remove('download-failed','download-planned','download-progress');
+   if(bar){bar.remove();bar=null;}
+   if(errorLabel){errorLabel.remove();errorLabel=null;}
+   if(!retry){retry=document.createElement('button');retry.type='button';retry.className='download-retry';card.append(retry);}
+   retry.disabled=!!item.catalogRetrying;
+   const retryLabel=item.catalogRetryLabel||(ru?'Повторить проверку':'Retry check');
+   const detail=item.catalogError?retryLabel+' — '+item.catalogError:retryLabel;
+   retry.dataset.tooltip=detail;retry.setAttribute('aria-label',detail);
+   retry.onclick=e=>{e.stopPropagation();if(!item.catalogRetrying)window.chrome?.webview?.postMessage('catalog-retry');};
+   if(!catalogNote){catalogNote=document.createElement('span');catalogNote.className='catalog-check-note';card.append(catalogNote);}
+   catalogNote.textContent=item.catalogHint||'';
+   continue;
+  }
+  card.classList.remove('catalog-check-failed');
+  if(catalogNote){catalogNote.remove();catalogNote=null;}
   if((!item?.metadataBlocked||!catalogCard)&&errorLabel){errorLabel.remove();errorLabel=null;}
   if(catalogCard&&item?.metadataBlocked&&hostState.appMode!=='unins'&&input?.dataset.intent!=='remove'){
    if(bar)bar.remove();
@@ -1900,7 +1923,7 @@ function syncModeText(){const x=uiResources[locale],hostUi=hostState.ui||{},done
  const finishWarnings=Array.isArray(hostState.finishWarnings)?hostState.finishWarnings.filter(w=>w&&typeof w.title==='string'&&w.title):[],hasWarnings=finishWarnings.length>0;document.getElementById('complete-panel').classList.toggle('has-warnings',hasWarnings);
  document.getElementById('complete-tag').textContent=hasWarnings?(hostUi.doneWarnTag||x.doneWarnTag):(done.doneTag||x.doneTag);document.getElementById('complete-title').textContent=hasWarnings?(hostUi.doneWarnTitle||x.doneWarnTitle):(done.doneTitle||x.doneTitle);document.getElementById('complete-body').textContent=hasWarnings?(hostUi.doneWarnBody||x.doneWarnBody):(done.doneBody||x.doneBody);document.getElementById('complete-ready-text').textContent=done.doneReady||x.doneReady;document.getElementById('complete-note').textContent=done.doneNote||x.doneNote;
  document.getElementById('complete-warn-label').textContent=hostUi.doneWarnLabel||x.doneWarnLabel;syncFinishWarnings(finishWarnings);
- document.getElementById('error-tag').textContent=failed.errorTag||hostUi.errorTag||'';document.getElementById('error-title').textContent=failed.errorTitle||x.errorTitle;document.getElementById('error-body').textContent=failed.errorBody||x.errorBody;document.getElementById('error-reason-label').textContent=failed.errorDetails||hostUi.errorDetails||'';syncErrorDetail(String(hostState.errorReason??failed.errorReason??x.errorReason??''));syncDetailCopyCaption(hostUi.errorCopy);document.getElementById('error-note').textContent=(hostState.page==='error'&&hostState.status)?(hostState.status+'\n'+(failed.errorNote||x.errorNote)):(failed.errorNote||x.errorNote);
+ document.getElementById('stage').classList.toggle('is-recovery',hostState.errorRecovery===true&&hostState.appMode!=='unins');document.getElementById('error-tag').textContent=hostState.errorTag||failed.errorTag||hostUi.errorTag||'';document.getElementById('error-title').textContent=hostState.errorTitle||failed.errorTitle||x.errorTitle;document.getElementById('error-body').textContent=hostState.errorBody||failed.errorBody||x.errorBody;document.getElementById('error-reason-label').textContent=failed.errorDetails||hostUi.errorDetails||'';syncErrorDetail(String(hostState.errorReason??failed.errorReason??x.errorReason??''));syncDetailCopyCaption(hostUi.errorCopy);document.getElementById('error-note').textContent=(hostState.page==='error'&&hostState.status)?(hostState.status+'\n'+(failed.errorNote||x.errorNote)):(failed.errorNote||x.errorNote);
  setModeText('conflicts-kicker',hostUi.conflictsTag);setModeText('conflicts-title',hostUi.conflictsTitle);setModeText('conflicts-body',hostUi.conflictsBody);setModeText('conflicts-instructions',hostUi.conflictsInstructions);
  const conflictList=document.getElementById('conflict-list');conflictList.replaceChildren();for(const item of Array.isArray(hostState.conflicts)?hostState.conflicts:[]){if(!item||typeof item.name!=='string'||typeof item.detail!=='string')continue;const li=document.createElement('li');li.className='conflict-item';const dot=document.createElement('span');dot.className='conflict-dot';dot.setAttribute('aria-hidden','true');const copy=document.createElement('div');copy.className='conflict-copy';const name=document.createElement('strong');name.className='conflict-name';name.textContent=item.name;const detail=document.createElement('span');detail.className='conflict-detail';detail.textContent=item.detail;copy.append(name,detail);li.append(dot,copy);conflictList.append(li)}
  setModeText('license-brand',hostUi.brand||'GlassPlatform');setModeText('license-title',hostUi.licenseTitle);setModeText('license-intro',hostUi.licenseIntro);setModeText('license-accept-text',hostUi.licenseAccept);setModeText('eula-content',hostState.eula);

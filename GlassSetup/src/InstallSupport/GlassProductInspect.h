@@ -60,6 +60,10 @@ struct Report {
     ProductReport secureUxTheme;
     GlassSecureUxPackage::Offer secureUxOffer;
     std::wstring openGlassDiscoveryError,secureUxDiscoveryError;
+    // FetchCatalog diagnostic. Independent of updateAvailable and of local trust.
+    // catalogTransport is set only from GlassReleaseClient::Failure::Transport.
+    std::wstring catalogError;
+    bool catalogTransport = false;
     bool openGlassRetiredMsi = false, openGlassRetiredReceipt = false;
     ProductReport og;
     // Graphics MSI inventory is independent of upstream OG, its files/services.

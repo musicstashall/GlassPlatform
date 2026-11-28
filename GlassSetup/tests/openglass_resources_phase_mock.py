@@ -24,8 +24,9 @@ unsigned prepares=0,snapshots=0,installs=0,rollbacks=0,publishes=0;bool upstream
 namespace InstallLog {void Line(const wchar_t*){}}
 namespace GlassInstallUtil {bool ResolveOpenGlassResourcesRoot(std::wstring& r){r=L"fixed-resources";return rootOk;}}
 namespace GlassPackageCatalog {enum class Product{OpenGlassResources};struct Catalog{};}
+namespace GlassReleaseClient {enum class Failure : unsigned {None,Transport};}
 namespace GlassPackageAcquisition {
-bool FetchCatalog(const std::atomic_bool&,GlassPackageCatalog::Catalog&,std::wstring&){return true;}
+bool FetchCatalog(const std::atomic_bool&,GlassPackageCatalog::Catalog&,std::wstring&,GlassReleaseClient::Failure* =nullptr){return true;}
 bool Prepare(GlassPackageCatalog::Product,const GlassPackageCatalog::Catalog&,const std::wstring&,const std::atomic_bool&,std::wstring&){++prepares;return prepareOk;}
 }
 namespace GlassInstallMsi {

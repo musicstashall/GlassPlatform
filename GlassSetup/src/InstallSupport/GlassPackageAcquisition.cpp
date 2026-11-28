@@ -130,6 +130,19 @@ void PauseSetupDownloadRetry(int attempt) noexcept {
     Sleep(500u<<shift);
 }
 }
+void PrepareCatalogRetry() noexcept {
+    try {
+        std::lock_guard<std::mutex> lock(GlassSetupSourceLayout::catalogMutex);
+        GlassSetupSourceLayout::catalogRetryPending=true;
+        GlassSetupSourceLayout::catalogChecked=false;
+    }catch(...){}
+}
+void ReleaseFailedCatalogAttempt() noexcept {
+    try {
+        std::lock_guard<std::mutex> lock(GlassSetupSourceLayout::catalogMutex);
+        if(GlassSetupSourceLayout::catalogText.empty())GlassSetupSourceLayout::catalogChecked=false;
+    }catch(...){}
+}
 bool CreateWorkspace(std::wstring& directory) noexcept {
     directory.clear();
     try {
@@ -142,8 +155,13 @@ bool CreateWorkspace(std::wstring& directory) noexcept {
     }catch(...){return false;}
 }
 bool PrepareSetup(const GlassPackageCatalog::Asset& asset,const std::wstring& workspace,
-    const std::atomic<bool>& cancel,std::wstring& prepared,std::wstring& error) noexcept {
+    const std::atomic<bool>& cancel,std::wstring& prepared,std::wstring& error,
+    GlassReleaseClient::Failure* failure) noexcept {
     prepared.clear();error.clear();
+    GlassReleaseClient::Failure ignored=GlassReleaseClient::Failure::None;
+    if(!failure)failure=&ignored;
+    *failure=GlassReleaseClient::Failure::None;
+    GlassReleaseClient::Failure downloadFailure=GlassReleaseClient::Failure::None;
     const auto part=workspace+L"\\GlassSetup.exe.part",file=workspace+L"\\GlassSetup.exe";
     try {
         if(!asset.downloadable||asset.file!="GlassSetup.exe"||
@@ -174,7 +192,9 @@ bool PrepareSetup(const GlassPackageCatalog::Asset& asset,const std::wstring& wo
                     if(cancel.load())break;
                     error.clear();
                 }
-                ok=GlassReleaseClient::Get(Wide(asset.url),out.h,nullptr,asset.size,cancel,error)&&FlushFileBuffers(out.h);
+                GlassReleaseClient::Failure got=GlassReleaseClient::Failure::None;
+                ok=GlassReleaseClient::Get(Wide(asset.url),out.h,nullptr,asset.size,cancel,error,&got)&&FlushFileBuffers(out.h);
+                downloadFailure=ok?GlassReleaseClient::Failure::None:got;
             }
         }
         if(ok){
@@ -198,14 +218,22 @@ bool PrepareSetup(const GlassPackageCatalog::Asset& asset,const std::wstring& wo
     }catch(...){error=L"Cannot prepare new Setup";}
     DeleteFileW(part.c_str()); // Only this freshly-created workspace's .part.
     if(error.empty())error=L"Setup preparation failed or cancelled";
+    // Content, Authenticode and local write failures stay None even if an earlier
+    // attempt was a dropped connection. Only an exhausted transport read/request does.
+    if(downloadFailure==GlassReleaseClient::Failure::Transport)*failure=downloadFailure;
     return false;
 }
-bool FetchCatalog(const std::atomic<bool>& cancel,GlassPackageCatalog::Catalog& catalog,std::wstring& diagnostic) noexcept {
+bool FetchCatalog(const std::atomic<bool>& cancel,GlassPackageCatalog::Catalog& catalog,std::wstring& diagnostic,GlassReleaseClient::Failure* failure) noexcept {
     catalog={};
+    GlassReleaseClient::Failure ignored=GlassReleaseClient::Failure::None;
+    if(!failure)failure=&ignored;
+    *failure=GlassReleaseClient::Failure::None;
     try {
         std::lock_guard<std::mutex> lock(GlassSetupSourceLayout::catalogMutex);
         std::string text,error;
-        const bool reuse=!GlassSetupSourceLayout::catalogText.empty();
+        const bool refresh=GlassSetupSourceLayout::catalogRetryPending;
+        if(refresh)GlassSetupSourceLayout::catalogRetryPending=false;
+        const bool reuse=!refresh&&!GlassSetupSourceLayout::catalogText.empty();
         if(reuse) {
             text=GlassSetupSourceLayout::catalogText;
             if(GlassPackageCatalog::Parse(text,catalog,error)){diagnostic.clear();return true;}
@@ -214,12 +242,23 @@ bool FetchCatalog(const std::atomic<bool>& cancel,GlassPackageCatalog::Catalog& 
         // A failed parent check is not a usable source snapshot. The final
         // controller gets one bounded recovery request; concurrent inspection
         // shares its outcome under this mutex, with no repeat Setup handoff.
-        if(GlassSetupSourceLayout::catalogChecked)
+        // An explicit retry bypasses that latch without deleting a valid snapshot.
+        if(!refresh&&GlassSetupSourceLayout::catalogChecked)
             return Fail(diagnostic,L"Release catalog unavailable after this process's check; local sources remain available");
         GlassSetupSourceLayout::catalogChecked=true;
         text.clear();
+        GlassReleaseClient::Failure transport=GlassReleaseClient::Failure::None;
         if(!GlassReleaseClient::Get(L"https://github.com/musicstashall/GlassPlatform/releases/latest/download/version.json",
-            INVALID_HANDLE_VALUE,&text,1024*1024,cancel,diagnostic))return false;
+            INVALID_HANDLE_VALUE,&text,1024*1024,cancel,diagnostic,&transport)){
+            if(failure)*failure=transport;
+            // A failed retry must not discard a snapshot the previous check already accepted.
+            if(refresh&&!GlassSetupSourceLayout::catalogText.empty()){
+                std::string savedError;
+                GlassPackageCatalog::Catalog saved;
+                if(GlassPackageCatalog::Parse(GlassSetupSourceLayout::catalogText,saved,savedError))catalog=std::move(saved);
+            }
+            return false;
+        }
         if(!GlassPackageCatalog::Parse(text,catalog,error))return Fail(diagnostic,Wide(error));
         GlassSetupSourceLayout::catalogText=text;
         diagnostic.clear();return true;
