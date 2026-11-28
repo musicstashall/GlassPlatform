@@ -4294,39 +4294,42 @@ private:
             DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
     }
 
-    void DrawFailureIllustration(HDC dc) {
+    void DrawFailureIllustration(HDC dc, bool warning) {
         const ULONGLONG now=GetTickCount64();
         const double phase=static_cast<double>(now%6100)/6100.0;
         const double wave=0.5+0.5*std::sin(phase*6.283185307179586);
         const Gdiplus::REAL cx=static_cast<Gdiplus::REAL>(Scale(795));
         const Gdiplus::REAL cy=static_cast<Gdiplus::REAL>(Scale(261));
         const Gdiplus::REAL outer=static_cast<Gdiplus::REAL>(Scale(165));
+        const BYTE accentR=warning?240:255,accentG=warning?194:127,accentB=warning?122:151;
+        const BYTE softR=warning?255:255,softG=warning?217:197,softB=warning?166:207;
+        const BYTE glowR=warning?226:229,glowG=warning?186:80,glowB=warning?120:111;
         Gdiplus::Graphics g(dc);
         g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
-        Gdiplus::SolidBrush glow(Gdiplus::Color(static_cast<BYTE>(20+14*wave),229,80,111));
+        Gdiplus::SolidBrush glow(Gdiplus::Color(static_cast<BYTE>(20+14*wave),glowR,glowG,glowB));
         g.FillEllipse(&glow,GdiReal(cx-outer),GdiReal(cy-outer),GdiReal(outer*2),GdiReal(outer*2));
-        Gdiplus::Pen orbit(Gdiplus::Color(92,255,127,151),static_cast<Gdiplus::REAL>(Scale(1)));
+        Gdiplus::Pen orbit(Gdiplus::Color(92,accentR,accentG,accentB),static_cast<Gdiplus::REAL>(Scale(1)));
         orbit.SetDashStyle(Gdiplus::DashStyleDash);
         g.DrawEllipse(&orbit,GdiReal(cx-outer),GdiReal(cy-outer),GdiReal(outer*2),GdiReal(outer*2));
-        Gdiplus::Pen innerOrbit(Gdiplus::Color(54,220,153,169),static_cast<Gdiplus::REAL>(Scale(1)));
+        Gdiplus::Pen innerOrbit(Gdiplus::Color(54,softR,softG,softB),static_cast<Gdiplus::REAL>(Scale(1)));
         g.DrawEllipse(&innerOrbit,GdiReal(cx-outer*0.78f),GdiReal(cy-outer*0.78f),GdiReal(outer*1.56f),GdiReal(outer*1.56f));
         const double angle=phase*6.283185307179586+0.6;
         const Gdiplus::REAL px=cx+static_cast<Gdiplus::REAL>(std::cos(angle))*outer;
         const Gdiplus::REAL py=cy+static_cast<Gdiplus::REAL>(std::sin(angle))*outer*0.72f;
-        Gdiplus::SolidBrush orbitGlow(Gdiplus::Color(58,255,127,151));
-        Gdiplus::SolidBrush orbitDot(Gdiplus::Color(250,255,197,207));
+        Gdiplus::SolidBrush orbitGlow(Gdiplus::Color(58,accentR,accentG,accentB));
+        Gdiplus::SolidBrush orbitDot(Gdiplus::Color(250,softR,softG,softB));
         g.FillEllipse(&orbitGlow,GdiReal(px-Scale(11)),GdiReal(py-Scale(11)),GdiReal(Scale(22)),GdiReal(Scale(22)));
         g.FillEllipse(&orbitDot,GdiReal(px-Scale(3)),GdiReal(py-Scale(3)),GdiReal(Scale(6)),GdiReal(Scale(6)));
-        Gdiplus::SolidBrush disc(Gdiplus::Color(228,31,23,47));
+        Gdiplus::SolidBrush disc(Gdiplus::Color(228,warning?42:31,warning?36:23,warning?24:47));
         g.FillEllipse(&disc,GdiReal(cx-Scale(82)),GdiReal(cy-Scale(82)),GdiReal(Scale(164)),GdiReal(Scale(164)));
-        Gdiplus::Pen ring(Gdiplus::Color(230,255,127,151),static_cast<Gdiplus::REAL>(Scale(2)));
+        Gdiplus::Pen ring(Gdiplus::Color(230,accentR,accentG,accentB),static_cast<Gdiplus::REAL>(Scale(2)));
         g.DrawEllipse(&ring,GdiReal(cx-Scale(82)),GdiReal(cy-Scale(82)),GdiReal(Scale(164)),GdiReal(Scale(164)));
-        Gdiplus::Pen cross(Gdiplus::Color(255,255,220,226),static_cast<Gdiplus::REAL>(Scale(8)));
+        Gdiplus::Pen cross(Gdiplus::Color(255,warning?255:255,warning?236:220,warning?214:226),static_cast<Gdiplus::REAL>(Scale(8)));
         cross.SetStartCap(Gdiplus::LineCapRound); cross.SetEndCap(Gdiplus::LineCapRound);
         cross.SetLineJoin(Gdiplus::LineJoinRound);
         g.DrawLine(&cross,GdiReal(cx-Scale(30)),GdiReal(cy-Scale(30)),GdiReal(cx+Scale(30)),GdiReal(cy+Scale(30)));
         g.DrawLine(&cross,GdiReal(cx+Scale(30)),GdiReal(cy-Scale(30)),GdiReal(cx-Scale(30)),GdiReal(cy+Scale(30)));
-        Gdiplus::SolidBrush spark(Gdiplus::Color(232,255,171,185));
+        Gdiplus::SolidBrush spark(Gdiplus::Color(232,accentR,accentG,accentB));
         g.FillEllipse(&spark,GdiReal(cx+Scale(119)),GdiReal(cy-Scale(73)),GdiReal(Scale(7)),GdiReal(Scale(7)));
         g.FillEllipse(&spark,GdiReal(cx-Scale(127)),GdiReal(cy+Scale(81)),GdiReal(Scale(5)),GdiReal(Scale(5)));
     }
@@ -4492,12 +4495,12 @@ private:
             DrawBanner(dc,true);
             DrawHeroPanel(dc,32,120,558,408,recovery?RGB(226,186,120):RGB(255,112,140));
             DrawLabel(dc,Text(IDS_BRAND),Box(48,34,300,35),heading_,white);
-            DrawLabel(dc,Text(recovery?IDS_SETUP_NET_TAG:IDS_ERROR_TAG),Box(48,139,400,25),small_,recovery?RGB(245,207,130):RGB(255,142,163));
+            DrawLabel(dc,Text(recovery?IDS_SETUP_NET_TAG:IDS_ERROR_TAG),Box(48,139,400,25),small_,recovery?RGB(255,217,166):RGB(255,142,163));
             DrawLabel(dc,Text(recovery?IDS_SETUP_NET_TITLE:IDS_ERROR_TITLE),Box(48,177,440,104),title_,white);
             DrawLabel(dc,Text(recovery?IDS_SETUP_NET_BODY:IDS_ERROR_BODY),Box(48,301,390,54),font_,muted);
             if (!errorDetails_.Get()) DrawLabel(dc,errorReason_,Box(48,362,520,92),font_,white,DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
             DrawLabel(dc,Text(IDS_ERROR_LOG_HINT),Box(48,476,450,50),small_,muted);
-            DrawFailureIllustration(dc);
+            DrawFailureIllustration(dc,recovery);
         } else if (page_ == Page::Installing && !webReady_) {
             DrawBanner(dc,true);
             DrawLabel(dc,Text(IDS_BRAND),Box(48,34,500,44),heading_,white);

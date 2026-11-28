@@ -186,7 +186,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 .complete-ready svg{width:14px;height:14px;fill:none;stroke:#a7dddf;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 
 
-/* Failure is the success composition in a restrained coral palette, with a clear reason card. */
+/* Critical failure is the success composition in a restrained coral palette, with a clear reason card. */
 .error-scene .banner-portrait{opacity:.36;filter:saturate(.62) hue-rotate(320deg)}
 .error-ambient{position:absolute;right:36px;top:30px;width:505px;height:465px;border-radius:50%;background:radial-gradient(ellipse,#ff6c8a20 0%,#b94b6930 37%,transparent 72%);filter:blur(9px);animation:error-breathe 5.8s ease-in-out infinite alternate;z-index:1;pointer-events:none}
 @keyframes error-breathe{to{transform:scale(1.055);opacity:.62}}
@@ -194,7 +194,6 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 .error-copy{position:absolute;left:48px;top:96px;bottom:18px;width:445px;display:flex;flex-direction:column;min-height:0;z-index:5;opacity:0;transform:translateY(13px);animation:complete-enter .72s .08s cubic-bezier(.2,.75,.25,1) forwards}
 .error-tag{display:inline-flex;align-items:center;gap:8px;margin:0;color:#ffb0bc;letter-spacing:2px;font-size:10px;text-transform:uppercase;font-weight:650}
 .error-tag:before{content:"";width:7px;height:7px;border-radius:50%;background:#ff829a;box-shadow:0 0 14px #ff829a99;animation:error-beacon 2.6s ease-in-out infinite}
-#stage.is-recovery .error-tag{color:#f0d7a4}#stage.is-recovery .error-tag:before{background:#e0b15a;box-shadow:0 0 14px #e0b15a99}#stage.is-recovery .error-title{color:#fff8ea}
 @keyframes error-beacon{50%{opacity:.48;box-shadow:0 0 5px #ff829955}}
 .error-copy>.error-tag,.error-copy>.error-title,.error-copy>.error-body{flex-shrink:0}
 .error-title{margin:20px 0 15px;color:#fff2f4;font-size:42px;line-height:1.08;font-weight:350;letter-spacing:-1.2px}
@@ -226,6 +225,27 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 .error-spark{fill:#ffc2cc;filter:url(#errorSoftGlow);animation:node-pulse 2.3s ease-in-out infinite alternate}
 .error-spark.s2{animation-delay:.7s}.error-spark.s3{animation-delay:1.2s}
 @media(prefers-reduced-motion:reduce){.error-ambient,.error-sheen,.error-copy,.error-tag:before,.error-visual,.error-orbit,.error-ring,.error-mark,.error-spark{animation-duration:.01ms!important;animation-iteration-count:1!important}.error-copy,.error-visual{opacity:1;transform:none}.error-ring,.error-mark{stroke-dashoffset:0}}
+/* A dropped update server is not a critical failure. Same page, amber warning standard, never coral. */
+@keyframes recovery-beacon{50%{opacity:.48;box-shadow:0 0 5px #f0c27a55}}
+#stage.is-recovery .error-scene .banner-portrait{filter:saturate(.72) sepia(.42)}
+#stage.is-recovery .error-ambient{background:radial-gradient(ellipse,#f0c27a28 0%,#8a6a3238 37%,transparent 72%)}
+#stage.is-recovery .error-sheen{background:linear-gradient(112deg,transparent 40%,#f0c27a12 49%,#ffe3b016 51%,transparent 61%)}
+#stage.is-recovery .error-tag{color:#ffd9a6}#stage.is-recovery .error-tag:before{background:#f0c27a;box-shadow:0 0 14px #f0c27aa0;animation-name:recovery-beacon}
+#stage.is-recovery .error-title{color:#f5f4fc}#stage.is-recovery .error-body{color:#c1c5d9}
+#stage.is-recovery .error-reason{border-color:#f0c27a38;border-left-color:#f0c27a;background:linear-gradient(110deg,#5e462446,#2d263238)}
+#stage.is-recovery .error-reason-label{color:#ffd9a6}
+#stage.is-recovery .error-detail{color:#f3ecdf;scrollbar-color:#8a7a5e #2a2430}
+#stage.is-recovery .error-detail:focus-visible{outline-color:#f0c27a}
+#stage.is-recovery .error-detail::-webkit-scrollbar-track{background:#2a2430}
+#stage.is-recovery .error-detail::-webkit-scrollbar-thumb{background:#8a7a5e;border-color:#2a2430}
+#stage.is-recovery #error-copy-menu{border-color:#8a7a5e}
+#stage.is-recovery #error-copy-command:not([aria-disabled="true"]):is(:hover,:focus-visible){background:#5e4624}
+#stage.is-recovery .error-orbit{stroke:#f0c27a55}#stage.is-recovery .error-orbit.inner{stroke:#ffd9a655}#stage.is-recovery .error-orbit.dashed{stroke:#fff1d430}
+#stage.is-recovery .error-halo{fill:url(#recoveryGlow)}
+#stage.is-recovery .error-ring{fill:#2a2418de;stroke:url(#recoveryRingGradient)}
+#stage.is-recovery .error-inner{fill:url(#recoveryFace);stroke:#f0c27a4f}
+#stage.is-recovery .error-mark{stroke:url(#recoveryMarkGradient)}
+#stage.is-recovery .error-spark{fill:#f0c27a}
 
 /* Host-controlled states: the slideshow and every interstitial are strictly offline. */
 #stage:not([data-mode="welcome"]):not([data-mode="installing"]) .slideshow-only{display:none!important}
@@ -874,9 +894,13 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 <linearGradient id="errorRingGradient" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ffb7c4"/><stop offset=".54" stop-color="#ffc1c8"/><stop offset="1" stop-color="#ef6d8a"/></linearGradient>
 <linearGradient id="errorMarkGradient" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fff0f2"/><stop offset="1" stop-color="#ff8da2"/></linearGradient>
 <linearGradient id="errorFace" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ffafbd" stop-opacity=".12"/><stop offset=".56" stop-color="#d96a85" stop-opacity=".08"/><stop offset="1" stop-color="#2b1724" stop-opacity=".18"/></linearGradient>
+<radialGradient id="recoveryGlow"><stop offset="0" stop-color="#f0c27a" stop-opacity=".34"/><stop offset=".62" stop-color="#8a6a32" stop-opacity=".15"/><stop offset="1" stop-color="#8a6a32" stop-opacity="0"/></radialGradient>
+<linearGradient id="recoveryRingGradient" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ffe3b0"/><stop offset=".54" stop-color="#f0c27a"/><stop offset="1" stop-color="#c4923e"/></linearGradient>
+<linearGradient id="recoveryMarkGradient" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fff8ea"/><stop offset="1" stop-color="#f0c27a"/></linearGradient>
+<linearGradient id="recoveryFace" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f0c27a" stop-opacity=".12"/><stop offset=".56" stop-color="#c4923e" stop-opacity=".08"/><stop offset="1" stop-color="#2b2417" stop-opacity=".18"/></linearGradient>
 <filter id="errorSoftGlow" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="3" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
 <circle class="error-halo" cx="200" cy="200" r="157"/><circle class="error-orbit" cx="200" cy="200" r="158"/><circle class="error-orbit inner" cx="200" cy="200" r="132"/><circle class="error-orbit dashed" cx="200" cy="200" r="107"/><circle class="error-ring" cx="200" cy="200" r="86"/><circle class="error-inner" cx="200" cy="200" r="71"/><path class="error-mark" d="M171 171l58 58M229 171l-58 58"/>
-<circle class="error-spark" cx="91" cy="146" r="3.4"/><circle class="error-spark s2" cx="310" cy="119" r="3"/><circle class="error-spark s3" cx="319" cy="269" r="2.6"/><circle cx="96" cy="273" r="1.8" fill="#ffc2cc" opacity=".65"/><circle cx="277" cy="324" r="1.6" fill="#ff9bad" opacity=".55"/></svg></div></section>
+<circle class="error-spark" cx="91" cy="146" r="3.4"/><circle class="error-spark s2" cx="310" cy="119" r="3"/><circle class="error-spark s3" cx="319" cy="269" r="2.6"/><circle class="error-spark" cx="96" cy="273" r="1.8" opacity=".65"/><circle class="error-spark" cx="277" cy="324" r="1.6" opacity=".55"/></svg></div></section>
 <section id="components-panel" class="mode-panel components-scene" aria-labelledby="components-title">
 <img id="components-banner" class="components-banner" alt="" aria-hidden="true"><div class="components-overlay"></div><div id="components-brand" class="native-brand">GlassPlatform</div>
 <div class="components-heading"><div id="components-kicker" class="components-kicker"></div><h1 id="components-title" class="components-title"></h1><p id="components-intro" class="components-intro"></p></div>
@@ -1923,7 +1947,7 @@ function syncModeText(){const x=uiResources[locale],hostUi=hostState.ui||{},done
  const finishWarnings=Array.isArray(hostState.finishWarnings)?hostState.finishWarnings.filter(w=>w&&typeof w.title==='string'&&w.title):[],hasWarnings=finishWarnings.length>0;document.getElementById('complete-panel').classList.toggle('has-warnings',hasWarnings);
  document.getElementById('complete-tag').textContent=hasWarnings?(hostUi.doneWarnTag||x.doneWarnTag):(done.doneTag||x.doneTag);document.getElementById('complete-title').textContent=hasWarnings?(hostUi.doneWarnTitle||x.doneWarnTitle):(done.doneTitle||x.doneTitle);document.getElementById('complete-body').textContent=hasWarnings?(hostUi.doneWarnBody||x.doneWarnBody):(done.doneBody||x.doneBody);document.getElementById('complete-ready-text').textContent=done.doneReady||x.doneReady;document.getElementById('complete-note').textContent=done.doneNote||x.doneNote;
  document.getElementById('complete-warn-label').textContent=hostUi.doneWarnLabel||x.doneWarnLabel;syncFinishWarnings(finishWarnings);
- document.getElementById('stage').classList.toggle('is-recovery',hostState.errorRecovery===true&&hostState.appMode!=='unins');document.getElementById('error-tag').textContent=hostState.errorTag||failed.errorTag||hostUi.errorTag||'';document.getElementById('error-title').textContent=hostState.errorTitle||failed.errorTitle||x.errorTitle;document.getElementById('error-body').textContent=hostState.errorBody||failed.errorBody||x.errorBody;document.getElementById('error-reason-label').textContent=failed.errorDetails||hostUi.errorDetails||'';syncErrorDetail(String(hostState.errorReason??failed.errorReason??x.errorReason??''));syncDetailCopyCaption(hostUi.errorCopy);document.getElementById('error-note').textContent=(hostState.page==='error'&&hostState.status)?(hostState.status+'\n'+(failed.errorNote||x.errorNote)):(failed.errorNote||x.errorNote);
+ const serverRecovery=hostState.errorRecovery===true&&hostState.appMode!=='unins';document.getElementById('stage').classList.toggle('is-recovery',serverRecovery);const errorPanel=document.getElementById('error-panel');if(errorPanel){errorPanel.setAttribute('role',serverRecovery?'status':'alert');errorPanel.setAttribute('aria-live',serverRecovery?'polite':'assertive');}document.getElementById('error-tag').textContent=hostState.errorTag||failed.errorTag||hostUi.errorTag||'';document.getElementById('error-title').textContent=hostState.errorTitle||failed.errorTitle||x.errorTitle;document.getElementById('error-body').textContent=hostState.errorBody||failed.errorBody||x.errorBody;document.getElementById('error-reason-label').textContent=failed.errorDetails||hostUi.errorDetails||'';syncErrorDetail(String(hostState.errorReason??failed.errorReason??x.errorReason??''));syncDetailCopyCaption(hostUi.errorCopy);document.getElementById('error-note').textContent=(hostState.page==='error'&&hostState.status)?(hostState.status+'\n'+(failed.errorNote||x.errorNote)):(failed.errorNote||x.errorNote);
  setModeText('conflicts-kicker',hostUi.conflictsTag);setModeText('conflicts-title',hostUi.conflictsTitle);setModeText('conflicts-body',hostUi.conflictsBody);setModeText('conflicts-instructions',hostUi.conflictsInstructions);
  const conflictList=document.getElementById('conflict-list');conflictList.replaceChildren();for(const item of Array.isArray(hostState.conflicts)?hostState.conflicts:[]){if(!item||typeof item.name!=='string'||typeof item.detail!=='string')continue;const li=document.createElement('li');li.className='conflict-item';const dot=document.createElement('span');dot.className='conflict-dot';dot.setAttribute('aria-hidden','true');const copy=document.createElement('div');copy.className='conflict-copy';const name=document.createElement('strong');name.className='conflict-name';name.textContent=item.name;const detail=document.createElement('span');detail.className='conflict-detail';detail.textContent=item.detail;copy.append(name,detail);li.append(dot,copy);conflictList.append(li)}
  setModeText('license-brand',hostUi.brand||'GlassPlatform');setModeText('license-title',hostUi.licenseTitle);setModeText('license-intro',hostUi.licenseIntro);setModeText('license-accept-text',hostUi.licenseAccept);setModeText('eula-content',hostState.eula);
