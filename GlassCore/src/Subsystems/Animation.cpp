@@ -791,10 +791,19 @@ namespace GlassCore::Animation
             {
                 // Fix 2: полная очистка ресурсов при ошибке (как в BWM)
                 Finish();
-                if (m_menuWindow)
+                m_dcompTarget.reset();
+                m_rootVisual.reset();
+                m_thumbnailVisual.reset();
+                m_backdropThumbnailVisual.reset();
+                if (m_thumbnail)
                 {
-                    SendNotifyMessageW(m_menuWindow, GetAnimationFinishedMsg(), 0, 0);
-                    m_menuWindow = nullptr;
+                    DwmUnregisterThumbnail(m_thumbnail);
+                    m_thumbnail = nullptr;
+                }
+                if (m_backdropThumbnail)
+                {
+                    DwmUnregisterThumbnail(m_backdropThumbnail);
+                    m_backdropThumbnail = nullptr;
                 }
                 if (window)
                 {
@@ -806,15 +815,11 @@ namespace GlassCore::Animation
                     SendNotifyMessageW(m_backdropWindow, WM_CLOSE, 0, 0);
                     m_backdropWindow = nullptr;
                 }
-                if (m_thumbnail)
+                (void)DwmFlush();
+                if (m_menuWindow)
                 {
-                    DwmUnregisterThumbnail(m_thumbnail);
-                    m_thumbnail = nullptr;
-                }
-                if (m_backdropThumbnail)
-                {
-                    DwmUnregisterThumbnail(m_backdropThumbnail);
-                    m_backdropThumbnail = nullptr;
+                    SendNotifyMessageW(m_menuWindow, GetAnimationFinishedMsg(), 0, 0);
+                    m_menuWindow = nullptr;
                 }
                 LOG_CAUGHT_EXCEPTION();
             }
@@ -896,6 +901,10 @@ namespace GlassCore::Animation
 
         if (uMsg == GetAnimationFinishedMsg())
         {
+            // Гарантируем uncloak на GUI-потоке владельца: на Win10 DWMWA_CLOAK с worker-потока
+            // до закрытия оверлея/thumbnail может оставить окно скрытым в DWM.
+            Utils::CloakWindow(hWnd, FALSE);
+
             // Post-uncloak: однократная отрисовка рамки на real flyout (sync, без WM_GLASS).
             // #32768 — меню (L"Menu"); остальные flyout (ComboLBox/DropDown/Listviewpopup/ViewControl) — L"DropDown".
             if (IsWindowClass(hWnd, L"#32768"))
@@ -1057,6 +1066,38 @@ namespace GlassCore::Animation
         virtual ~PopupIn() noexcept
         {
             Finish();
+
+            // Сначала отпускаем DComp-визуалы, отрегистрируем DWM thumbnail и закрываем
+            // оверлей/backdrop-окна, и только затем уведомляем real flyout синхронно —
+            // иначе PaintHostBorder/SWCA/WM_PRINTCLIENT в OnFlyoutAnimationFinished
+            // выполняются поверх живого DWM thumbnail и оверлея.
+            m_dcompTarget.reset();
+            m_rootVisual.reset();
+            m_thumbnailVisual.reset();
+            m_backdropThumbnailVisual.reset();
+
+            if (m_thumbnail)
+            {
+                DwmUnregisterThumbnail(m_thumbnail);
+                m_thumbnail = nullptr;
+            }
+            if (m_backdropThumbnail)
+            {
+                DwmUnregisterThumbnail(m_backdropThumbnail);
+                m_backdropThumbnail = nullptr;
+            }
+            if (window)
+            {
+                SendNotifyMessageW(window, WM_CLOSE, 0, 0);
+                window = nullptr;
+            }
+            if (m_backdropWindow)
+            {
+                SendNotifyMessageW(m_backdropWindow, WM_CLOSE, 0, 0);
+                m_backdropWindow = nullptr;
+            }
+            (void)DwmFlush();
+
             if (m_menuWindow)
             {
                 HWND menuWnd = m_menuWindow;
@@ -1070,26 +1111,6 @@ namespace GlassCore::Animation
                 SendMessageTimeoutW(
                     menuWnd, GetAnimationFinishedMsg(), 0, 0,
                     SMTO_ABORTIFHUNG, 1000, &sendResult);
-            }
-            if (window)
-            {
-                SendNotifyMessageW(window, WM_CLOSE, 0, 0);
-                window = nullptr;
-            }
-            if (m_backdropWindow)
-            {
-                SendNotifyMessageW(m_backdropWindow, WM_CLOSE, 0, 0);
-                m_backdropWindow = nullptr;
-            }
-            if (m_thumbnail)
-            {
-                DwmUnregisterThumbnail(m_thumbnail);
-                m_thumbnail = nullptr;
-            }
-            if (m_backdropThumbnail)
-            {
-                DwmUnregisterThumbnail(m_backdropThumbnail);
-                m_backdropThumbnail = nullptr;
             }
         }
 
@@ -1463,6 +1484,12 @@ namespace GlassCore::Animation
                             DebugLog(DBG_IMPORTANT,
                                 L"[GlassCore][Animation] MenuPopupIn finished hwnd=0x%p",
                                 menuAnim->FlyoutHwnd());
+                        }
+                        else if (auto* ddAnim = dynamic_cast<DropDownPopupIn*>(info.get()))
+                        {
+                            DebugLog(DBG_IMPORTANT,
+                                L"[GlassCore][Animation] DropDownPopupIn finished hwnd=0x%p",
+                                ddAnim->FlyoutHwnd());
                         }
                         it = localStorage.erase(it);
                     }

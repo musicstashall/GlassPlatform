@@ -744,6 +744,52 @@ namespace GlassCore::DropDown
 
         RefreshFlyoutClientAfterUncloak(hWnd);
         FlyoutFrame::ClearHostBorderDeferred(hWnd);
+
+        if (GlassCore::Utils::IsWindowClass(hWnd, L"ComboLBox"))
+        {
+            DWORD cloaked = 0;
+            const HRESULT hrCloak = ::DwmGetWindowAttribute(hWnd, DWMWA_CLOAKED, &cloaked, sizeof(cloaked));
+            const LONG_PTR style = ::GetWindowLongPtrW(hWnd, GWL_STYLE);
+            const LONG_PTR exStyle = ::GetWindowLongPtrW(hWnd, GWL_EXSTYLE);
+            const HWND owner = ::GetWindow(hWnd, GW_OWNER);
+            RECT wr{};
+            ::GetWindowRect(hWnd, &wr);
+
+            struct DiagAccentPolicy
+            {
+                DWORD AccentState;
+                DWORD AccentFlags;
+                DWORD GradientColor;
+                DWORD AnimationId;
+            };
+            struct DiagWcaData
+            {
+                DWORD Attrib;
+                PVOID pvData;
+                SIZE_T cbData;
+            };
+            using GetWcaFn = BOOL(WINAPI*)(HWND, DiagWcaData*);
+            static const auto s_getWca = reinterpret_cast<GetWcaFn>(
+                ::GetProcAddress(::GetModuleHandleW(L"user32.dll"), "GetWindowCompositionAttribute"));
+            DiagAccentPolicy ap{};
+            DiagWcaData wca{ 19 /*WCA_ACCENT_POLICY*/, &ap, sizeof(ap) };
+            const BOOL wcaOk = s_getWca ? s_getWca(hWnd, &wca) : FALSE;
+
+            DebugLog(DBG_IMPORTANT,
+                L"[GlassCore][DropDown] PostUncloakState hwnd=0x%p vis=%d cloaked=0x%X(hr=0x%08X) style=0x%08X ex=0x%08X rect=[%ld,%ld,%ld,%ld] owner=0x%p accent=(state=%lu flags=0x%lX grad=0x%08lX ok=%d)",
+                hWnd,
+                ::IsWindowVisible(hWnd) ? 1 : 0,
+                cloaked,
+                hrCloak,
+                static_cast<unsigned>(style),
+                static_cast<unsigned>(exStyle),
+                wr.left, wr.top, wr.right, wr.bottom,
+                owner,
+                ap.AccentState,
+                ap.AccentFlags,
+                ap.GradientColor,
+                wcaOk ? 1 : 0);
+        }
     }
 
     void ClearFlyoutBorderDeferred(HWND hWnd) noexcept

@@ -1708,7 +1708,7 @@ public sealed partial class PopupHubPage : Page
         }
 
         SetAnimationControlsEnabled(true);
-        if (_isSeparateScope && _kind is FlyoutKind.Menu or FlyoutKind.DropDown)
+        if (!_isSeparateScope || _kind is FlyoutKind.Menu or FlyoutKind.DropDown)
             WriteAnim("EnableFluentAnimation", 1);
         SettingsSession.Current.MarkDirty();
         UpdateAnimationDefaultState();

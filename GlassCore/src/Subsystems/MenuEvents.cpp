@@ -125,9 +125,6 @@ namespace GlassCore::Menu
         Settings::QueryMenuCustomRenderingContext(merged.useDarkMode, merged.customRendering);
         Settings::QueryMenuIconBackgroundColorRemovalContext(merged.iconBackgroundColorRemoval);
 
-        DebugLog(DBG_IMPORTANT, L"[GlassCore][MenuEvents] OnPopupSized: customRendering.enable=%d separator_disabled=%d separator_width=%u",
-            merged.customRendering.enable, merged.customRendering.separator_disabled, merged.customRendering.separator_width);
-
         // SetContext вызываем ПОСЛЕ заполнения всех полей merged (включая customRendering)
         MenuHandler::SetContext(merged);
         MenuHandler::SetBorderContext(settingsBorder);
@@ -135,6 +132,14 @@ namespace GlassCore::Menu
         // Паритет TranslucentFlyouts MenuHandler: ApplyEffect на real до cloak; NC refresh при ET 6–8 на show.
         GlassCore::Settings::FlyoutAnimationContext animation{};
         GlassCore::Settings::QueryFlyoutAnimationContext(L"Menu", animation);
+
+        DebugLog(DBG_IMPORTANT,
+            L"[GlassCore][MenuEvents] OnPopupSized: hwnd=0x%p animEnable=%d customRendering.enable=%d separator_disabled=%d separator_width=%u",
+            hWnd,
+            animation.enable ? 1 : 0,
+            merged.customRendering.enable,
+            merged.customRendering.separator_disabled,
+            merged.customRendering.separator_width);
 
         Settings::ApplyPopupSwcaEffect(
             hWnd, merged.useDarkMode, backdrop, settingsBorder, false);

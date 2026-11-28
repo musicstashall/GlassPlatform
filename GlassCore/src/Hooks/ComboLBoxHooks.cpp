@@ -718,8 +718,28 @@ namespace GlassCore::ComboLBox
                 dwTextFlags |= DT_RTLREADING;
 
             int result = 0;
-            const bool lbTextOk = lpString && !FAILED(GlassCore::Text::DrawTextWithAlpha(
-                    hdc, lpString, static_cast<int>(c), &textRect, dwTextFlags, result));
+            const HRESULT hrText = lpString
+                ? GlassCore::Text::DrawTextWithAlpha(
+                    hdc, lpString, static_cast<int>(c), &textRect, dwTextFlags, result)
+                : E_INVALIDARG;
+            const bool lbTextOk = !FAILED(hrText);
+            static std::atomic<int> s_etoDiagBudget{ 16 };
+            if (s_etoDiagBudget.load(std::memory_order_relaxed) > 0
+                && s_etoDiagBudget.fetch_sub(1, std::memory_order_relaxed) > 0)
+            {
+                wchar_t modPath[MAX_PATH]{};
+                if (callerMod)
+                    GetModuleFileNameW(callerMod, modPath, MAX_PATH);
+                const wchar_t* modBase = wcsrchr(modPath, L'\\');
+                DebugLog(DBG_IMPORTANT,
+                    L"[GlassCore][ComboLBox] Overall_MyExtTextOutW hwnd=0x%p caller=%s c=%u opt=0x%X bk=0x%08X hr=0x%08X",
+                    h_combolbox,
+                    modBase ? (modBase + 1) : modPath,
+                    c,
+                    options,
+                    static_cast<unsigned>(GetBkColor(hdc)),
+                    hrText);
+            }
             if (lbTextOk)
             {
                 if (options & ETO_CLIPPED)
@@ -1523,6 +1543,24 @@ namespace GlassCore::ComboLBox
         h_combolbox = hWnd;
         ++g_paintRef;
         ArmSessionHooks(hWnd, callerMod);
+
+        static std::atomic<int> s_paintBeginDiagBudget{ 16 };
+        if (s_paintBeginDiagBudget.load(std::memory_order_relaxed) > 0
+            && s_paintBeginDiagBudget.fetch_sub(1, std::memory_order_relaxed) > 0)
+        {
+            wchar_t modPath[MAX_PATH]{};
+            if (callerMod)
+                GetModuleFileNameW(callerMod, modPath, MAX_PATH);
+            const wchar_t* modBase = wcsrchr(modPath, L'\\');
+            DebugLog(DBG_IMPORTANT,
+                L"[GlassCore][ComboLBox] OnPaintBeginGlobal hwnd=0x%p caller=%s(0x%p) comctl=0x%p legacy=0x%p armed=%d",
+                hWnd,
+                modBase ? (modBase + 1) : modPath,
+                callerMod,
+                g_comctl32Module,
+                g_comctl32ModuleLegacy,
+                g_hooksArmed ? 1 : 0);
+        }
     }
 
     static void OnPaintEndGlobal(HWND hWnd, HMODULE callerMod)
