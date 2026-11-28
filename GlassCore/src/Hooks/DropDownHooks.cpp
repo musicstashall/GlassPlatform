@@ -745,7 +745,7 @@ namespace GlassCore::DropDown
         RefreshFlyoutClientAfterUncloak(hWnd);
         FlyoutFrame::ClearHostBorderDeferred(hWnd);
 
-        if (GlassCore::Utils::IsWindowClass(hWnd, L"ComboLBox"))
+        if (IsComboLBoxClass(hWnd))
         {
             DWORD cloaked = 0;
             const HRESULT hrCloak = ::DwmGetWindowAttribute(hWnd, DWMWA_CLOAKED, &cloaked, sizeof(cloaked));
