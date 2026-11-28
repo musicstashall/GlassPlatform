@@ -126,6 +126,132 @@ namespace GlassCore::Animation
             (void)DwmUnregisterThumbnail(pending.thumbnail);
     }
 
+    // Win10 (<22000): захватывает текущий GDI-буфер hWnd в статический IDCompositionSurface,
+    // атомарно подменяет им m_thumbnailVisual на overlayWnd и отрегистрирует m_thumbnail.
+    // Это позволяет держать overlayWnd ПОВЕРХ hWnd (полностью скрывая 1–2 кадра прогрева
+    // CAccentAcrylicBlurBehind на Win10 — без единого чёрного кадра и без пропадания текста).
+    static void SwapWin10PendingThumbToSnapshot(
+        HWND overlayWnd,
+        HWND flyoutHwnd,
+        wil::com_ptr<IDCompositionVisual2>& outRootVisual,
+        wil::com_ptr<IDCompositionVisual2>& outSnapshotVisual,
+        wil::com_ptr<IDCompositionSurface>& outSnapshotSurface) noexcept
+    {
+        if (!overlayWnd)
+            return;
+
+        Win10PendingThumb pending{};
+        {
+            std::lock_guard lock(g_win10PendingThumbMutex);
+            auto it = g_win10PendingThumbs.find(overlayWnd);
+            if (it == g_win10PendingThumbs.end())
+                return;
+            pending = std::move(it->second);
+            g_win10PendingThumbs.erase(it);
+        }
+
+        auto dev = Shared::DXHelper::LazyDComposition::GetInstance().GetDCompositionDevice();
+        auto d3dDev = Shared::DXHelper::LazyD3D::GetInstance().GetD3DDevice();
+
+        RECT wr{};
+        if (dev && d3dDev && pending.rootVisual && flyoutHwnd && IsWindow(flyoutHwnd)
+            && GetWindowRect(flyoutHwnd, &wr))
+        {
+            const int w = wr.right - wr.left;
+            const int h = wr.bottom - wr.top;
+            if (w > 0 && h > 0 && w <= 4096 && h <= 4096)
+            {
+                HDC hdcWin = GetWindowDC(flyoutHwnd);
+                if (hdcWin)
+                {
+                    HDC hdcMem = CreateCompatibleDC(hdcWin);
+                    if (hdcMem)
+                    {
+                        BITMAPINFO bmi{};
+                        bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+                        bmi.bmiHeader.biWidth = w;
+                        bmi.bmiHeader.biHeight = -h;
+                        bmi.bmiHeader.biPlanes = 1;
+                        bmi.bmiHeader.biBitCount = 32;
+                        bmi.bmiHeader.biCompression = BI_RGB;
+
+                        void* bits = nullptr;
+                        HBITMAP hbmp = CreateDIBSection(hdcWin, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+                        if (hbmp && bits)
+                        {
+                            HGDIOBJ oldBmp = SelectObject(hdcMem, hbmp);
+                            if (BitBlt(hdcMem, 0, 0, w, h, hdcWin, 0, 0, SRCCOPY))
+                            {
+                                auto* px = static_cast<uint32_t*>(bits);
+                                const size_t count = static_cast<size_t>(w) * static_cast<size_t>(h);
+                                for (size_t i = 0; i < count; ++i)
+                                {
+                                    const uint32_t v = px[i];
+                                    if ((v & 0xFF000000u) == 0 && (v & 0x00FFFFFFu) != 0)
+                                        px[i] = v | 0xFF000000u;
+                                }
+
+                                wil::com_ptr<IDCompositionSurface> surface;
+                                if (SUCCEEDED(dev->CreateSurface(
+                                    static_cast<UINT>(w),
+                                    static_cast<UINT>(h),
+                                    DXGI_FORMAT_B8G8R8A8_UNORM,
+                                    DXGI_ALPHA_MODE_PREMULTIPLIED,
+                                    &surface)))
+                                {
+                                    wil::com_ptr<ID3D11Texture2D> tex;
+                                    POINT offset{};
+                                    if (SUCCEEDED(surface->BeginDraw(nullptr, IID_PPV_ARGS(&tex), &offset)))
+                                    {
+                                        wil::com_ptr<ID3D11DeviceContext> ctx;
+                                        d3dDev->GetImmediateContext(&ctx);
+                                        if (ctx)
+                                        {
+                                            D3D11_BOX box{};
+                                            box.left = static_cast<UINT>(offset.x);
+                                            box.top = static_cast<UINT>(offset.y);
+                                            box.right = box.left + static_cast<UINT>(w);
+                                            box.bottom = box.top + static_cast<UINT>(h);
+                                            box.front = 0;
+                                            box.back = 1;
+                                            ctx->UpdateSubresource(
+                                                tex.get(), 0, &box, bits, static_cast<UINT>(w * 4), 0);
+                                        }
+                                        (void)surface->EndDraw();
+
+                                        wil::com_ptr<IDCompositionVisual2> snapVis;
+                                        if (SUCCEEDED(dev->CreateVisual(&snapVis))
+                                            && SUCCEEDED(snapVis->SetContent(surface.get()))
+                                            && SUCCEEDED(pending.rootVisual->AddVisual(snapVis.get(), TRUE, nullptr)))
+                                        {
+                                            outRootVisual = pending.rootVisual;
+                                            outSnapshotVisual = std::move(snapVis);
+                                            outSnapshotSurface = std::move(surface);
+                                        }
+                                    }
+                                }
+                            }
+                            SelectObject(hdcMem, oldBmp);
+                        }
+                        if (hbmp)
+                            DeleteObject(hbmp);
+                        DeleteDC(hdcMem);
+                    }
+                    ReleaseDC(flyoutHwnd, hdcWin);
+                }
+            }
+        }
+
+        if (pending.rootVisual && pending.thumbnailVisual)
+            (void)pending.rootVisual->RemoveVisual(pending.thumbnailVisual.get());
+        pending.thumbnailVisual.reset();
+        pending.rootVisual.reset();
+        if (dev)
+            (void)dev->Commit();
+        if (pending.thumbnail)
+            (void)DwmUnregisterThumbnail(pending.thumbnail);
+    }
+
     static bool IsWindowClass(HWND hWnd, const wchar_t* className)
     {
         if (!hWnd) return false;
@@ -944,27 +1070,29 @@ namespace GlassCore::Animation
             {
                 // Win10 (<22000):
                 // Фаза 1: для DropDown/ComboLBox/ViewControl рисуем 1px рамку и клиентский
-                // контент (включая WM_ERASEBKGND BLACKNESS + SysListView32) ДО uncloak,
-                // пока hWnd ещё скрыто за overlayWnd с живой анимацией.
+                // контент ДО uncloak, пока hWnd полностью скрыто за overlayWnd.
                 if (!isMenu)
                     GlassCore::DropDown::PrepareForWin10Uncloak(hWnd);
 
-                // Фаза 2: атомарный swap на GUI-потоке без GDI-перерисовки и без
-                // промежуточного DwmFlush() между UnregisterThumbnail / Uncloak / SWCA(0 → desired).
-                const bool targetTopmost = (GetWindowLongPtrW(hWnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
-                if (!targetTopmost)
+                // Фаза 2: держим overlayWnd ПОВЕРХ hWnd (HWND_TOPMOST в точной геометрии hWnd),
+                // атомарно подменяем живой m_thumbnailVisual на статический IDCompositionSurface-снапшот
+                // hWnd и отрегистрируем m_thumbnail. После этого hWnd uncloak-ится и включает
+                // SWCA(0 → desired) ПОЗАДИ overlayWnd — 1–2 кадра прогрева CAccentAcrylicBlurBehind
+                // полностью скрыты оверлеем с готовым акрилом и контентом (нулевой чёрный кадр!).
+                RECT wr{};
+                if (GetWindowRect(hWnd, &wr))
                 {
                     SetWindowPos(
-                        overlayWnd, HWND_NOTOPMOST, 0, 0, 0, 0,
-                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER
-                            | SWP_NOSENDCHANGING | SWP_NOREDRAW);
+                        overlayWnd, HWND_TOPMOST,
+                        wr.left, wr.top, wr.right - wr.left, wr.bottom - wr.top,
+                        SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOSENDCHANGING | SWP_NOREDRAW);
                 }
-                SetWindowPos(
-                    overlayWnd, hWnd, 0, 0, 0, 0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER
-                        | SWP_NOSENDCHANGING | SWP_NOREDRAW);
+                (void)SetLayeredWindowAttributes(overlayWnd, 0, 255, LWA_ALPHA);
 
-                ReleaseWin10PendingThumb(overlayWnd);
+                wil::com_ptr<IDCompositionVisual2> snapRoot;
+                wil::com_ptr<IDCompositionVisual2> snapVisual;
+                wil::com_ptr<IDCompositionSurface> snapSurface;
+                SwapWin10PendingThumbToSnapshot(overlayWnd, hWnd, snapRoot, snapVisual, snapSurface);
 
                 Utils::CloakWindow(hWnd, FALSE);
 
@@ -973,10 +1101,23 @@ namespace GlassCore::Animation
                 else
                     GlassCore::DropDown::ApplyBackdropForWin10Uncloak(hWnd);
 
-                // Фаза 3: единый DwmFlush() фиксирует uncloak + SWCA(0 → desired),
-                // затем скрываем overlayWnd позади готового hWnd.
+                // Ждём 2 кадра DWM позади overlayWnd, чтобы CAccentAcrylicBlurBehind
+                // полностью прогрелся и стабилизировался ДО показа hWnd пользователю.
                 (void)DwmFlush();
+                (void)DwmFlush();
+
+                // Фаза 3: мгновенно скрываем overlayWnd, открывая уже полностью готовый hWnd.
                 Utils::CloakWindow(overlayWnd, TRUE);
+
+                if (snapRoot && snapVisual)
+                {
+                    (void)snapRoot->RemoveVisual(snapVisual.get());
+                    if (auto dev = Shared::DXHelper::LazyDComposition::GetInstance().GetDCompositionDevice())
+                        (void)dev->Commit();
+                }
+                snapVisual.reset();
+                snapSurface.reset();
+                snapRoot.reset();
 
                 if (!isMenu)
                     GlassCore::DropDown::FinalizeAfterWin10Uncloak(hWnd);
