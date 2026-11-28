@@ -619,7 +619,8 @@ bool InstallEngine::OfficialResourcesPhase(bool preparing) noexcept {
         if(preparing) {
             GlassPackageCatalog::Catalog catalog;std::wstring diagnostic,error;
             if(!EnsureTempWorkspace()){SetFailure(L"Cannot create protected Resources workspace",GetLastError());return false;}
-            (void)GlassPackageAcquisition::FetchCatalog(cancelRequested_,catalog,diagnostic);
+            GlassReleaseClient::Failure catalogFailure=GlassReleaseClient::Failure::None;
+            (void)GlassPackageAcquisition::FetchCatalog(cancelRequested_,catalog,diagnostic,&catalogFailure);
             if(!GlassPackageAcquisition::Prepare(GlassPackageCatalog::Product::OpenGlassResources,
                 catalog,tempDir_,cancelRequested_,error)) {
                 SetFailure(error,ERROR_INSTALL_PACKAGE_REJECTED);return false;
@@ -1452,7 +1453,8 @@ bool InstallEngine::ExtractPayload(HINSTANCE instance) noexcept {
     SetStatus(labels_.extract, 0);
     GlassPackageCatalog::Catalog catalog;
     std::wstring diagnostic;
-    if (!GlassPackageAcquisition::FetchCatalog(cancelRequested_,catalog,diagnostic)) {
+    GlassReleaseClient::Failure catalogFailure=GlassReleaseClient::Failure::None;
+    if (!GlassPackageAcquisition::FetchCatalog(cancelRequested_,catalog,diagnostic,&catalogFailure)) {
         if (IsCancelRequested()) return false;
         InstallLog::LineFormat(L"Release catalog unavailable; checking independent local/cache sources: %s",diagnostic.c_str());
     }

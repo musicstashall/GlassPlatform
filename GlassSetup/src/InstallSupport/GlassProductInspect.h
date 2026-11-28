@@ -2,7 +2,6 @@
 
 #include <Windows.h>
 #include "GlassSecureUxPackage.h"
-#include "GlassReleaseClient.h"
 #include <atomic>
 #include <string>
 #include <vector>
@@ -51,10 +50,6 @@ struct ProductReport {
 
 struct Report {
     bool ran = false;
-    bool catalogChecked = false;
-    bool catalogCheckFailed = false;
-    GlassReleaseClient::FailureInfo catalogFailure;
-    std::wstring catalogDiagnostic;
     // UI capability hint only; execution re-enumerates and verifies the cache.
     std::wstring officialSecureUxThemeCode;
     std::wstring secureUxThemePresenceDetail;
@@ -65,6 +60,10 @@ struct Report {
     ProductReport secureUxTheme;
     GlassSecureUxPackage::Offer secureUxOffer;
     std::wstring openGlassDiscoveryError,secureUxDiscoveryError;
+    // FetchCatalog diagnostic. Independent of updateAvailable and of local trust.
+    // catalogTransport is set only from GlassReleaseClient::Failure::Transport.
+    std::wstring catalogError;
+    bool catalogTransport = false;
     bool openGlassRetiredMsi = false, openGlassRetiredReceipt = false;
     ProductReport og;
     // Graphics MSI inventory is independent of upstream OG, its files/services.

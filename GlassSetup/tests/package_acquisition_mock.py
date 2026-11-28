@@ -6,9 +6,9 @@ import subprocess
 import tempfile
 root=Path(__file__).resolve().parents[2]
 source=(root/'GlassSetup/src/InstallSupport/GlassPackageAcquisition.cpp').read_text()
-prepare=source[source.index('static bool Discover('):source.rfind('\n}')]
+prepare=source[source.index('static bool Discover('):source.index('\n}\n}', source.index('bool Prepare('))+2]
 start=source.index('bool CopyLocked(')
-copy=source[start:source.index('\n}\n}',start)+2]
+copy=source[start:source.index('\n// Pause before another Range request',start)]
 prefix=r'''
 #include "GlassSetup/src/InstallSupport/GlassPackageCatalog.h"
 #include <cassert>
@@ -64,17 +64,20 @@ namespace GlassMaintenanceCache{
  bool MatchesInstalled(const std::wstring& path,const std::wstring&,const std::wstring&){return s.installed&&s.files.at(path).bytes.find("|INSTALLED|")!=std::string::npos;}
 }
 namespace GlassReleaseClient{
+ enum class Failure : unsigned {None=0,Transport=1};
  HANDLE CreatePrivateFile(const std::wstring& path){return CreateFileW(path.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);}
  std::wstring Wide(const std::string& text){return {text.begin(),text.end()};}
  bool VerifyHash(HANDLE h,std::uint64_t size,const std::string& hash,const std::atomic<bool>& cancel,std::wstring&){
   return !cancel.load()&&F(h).bytes.size()==size&&hash==std::string(64,'a')&&F(h).bytes.find("|HASH|")!=std::string::npos;
  }
- bool Get(const std::wstring&,HANDLE out,std::string*,std::uint64_t,const std::atomic<bool>&,std::wstring&){
+ bool Get(const std::wstring&,HANDLE out,std::string*,std::uint64_t,const std::atomic<bool>&,std::wstring&,Failure* =nullptr){
   ++s.downloads;if(s.cancelDownload)cancelled=true;if(s.downloadFails)return false;F(out).bytes=s.download;return true;
  }
 }
+namespace GlassDownloadCache{inline std::wstring Path(const std::wstring& name){return L"C:\\cache\\Downloads\\"+name;}}
 namespace GlassPackageAcquisition{
 using namespace GlassPackageRules;using GlassReleaseClient::Wide;
+void Sleep(unsigned long){}
 bool NativeProductSupported(GlassPackageCatalog::Product){return true;}
 struct Handle{HANDLE h=INVALID_HANDLE_VALUE;~Handle(){if(h!=INVALID_HANDLE_VALUE)CloseHandle(h);}};
 struct Spec{const wchar_t* code;};const Spec specs[]={{L"code"},{L"code"},{L"code"},{L"code"},{L"code"}};

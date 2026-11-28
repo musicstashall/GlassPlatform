@@ -8,9 +8,12 @@ namespace GlassPackageAcquisition {
 // All writes stay in a private, administrator-owned ProgramData workspace.
 // A failed/malformed remote catalog does not disable independent local packages.
 bool FetchCatalog(const std::atomic<bool>& cancel, GlassPackageCatalog::Catalog& catalog,
-    std::wstring& diagnostic, GlassReleaseClient::FailureInfo* failure = nullptr) noexcept;
-// Повтор разрешён только для сохранённого неудачного запроса; валидный snapshot не сбрасывается.
-void ResetFailedCatalogForRetry() noexcept;
+    std::wstring& diagnostic, GlassReleaseClient::Failure* failure) noexcept;
+// Parent self-update or product-card retry only. Does not authorize a local file
+// and does not run from product MSI download or the child handoff itself.
+void PrepareCatalogRetry() noexcept;
+// After Continue with no valid catalog, let the next FetchCatalog be a normal request.
+void ReleaseFailedCatalogAttempt() noexcept;
 // Read-only offer discovery: no workspace, package downloads, installation or
 // publication. A release offer is metadata, not yet verified downloaded bytes.
 // localPath optionally identifies the selected local MSI for payload metadata;
@@ -27,6 +30,6 @@ bool Prepare(GlassPackageCatalog::Product product, const GlassPackageCatalog::Ca
 // Never execute the user-writable release path or silently accept a new license.
 bool PrepareSetup(const GlassPackageCatalog::Asset& asset, const std::wstring& workspace,
     const std::atomic<bool>& cancel, std::wstring& prepared, std::wstring& error,
-    GlassReleaseClient::FailureInfo* failure = nullptr) noexcept;
+    GlassReleaseClient::Failure* failure) noexcept;
 bool CreateWorkspace(std::wstring& directory) noexcept;
 }

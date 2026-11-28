@@ -636,7 +636,7 @@ assert "if(!vendorOnly)ok = self->RegisterSelectedProducts()" in worker
 assert "if(!vendorOnly && !self->auxiliaryOnly_ && !self->mixedOpenGlass_)self->LaunchSelectedProducts()" in worker
 assert "IDS_APPLY" in setup and 'IDS_APPLY "Применить"' in setup_strings
 
-assert "if(in.inspectSources)GlassPackageAcquisition::FetchCatalog" in sut_inspect
+assert "if(in.inspectSources)GlassPackageAcquisition::FetchCatalog(cancel,catalog,diagnostic" in sut_inspect
 assert worker.index("InstallGlassSettingsEarly()") < worker.index("RunMsiSequence()")
 # Retain recognition and explicit removal of legacy Glass-owned products.
 for suffix in ("5076", "5077"):

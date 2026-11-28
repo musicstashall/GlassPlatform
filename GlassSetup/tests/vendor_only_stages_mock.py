@@ -43,6 +43,7 @@ struct InstallEngine {
  bool BuildExecutionPlan(){return Call("build");}
  bool PrepareManagedRemoval(){return !selection_.removeMask || Call("prepare-managed");}
  bool StopRunningHosts(){return Call("stop");}
+ bool WaitForSelectedSettings(){return Call("wait-settings");}
  bool InstallGlassSettingsEarly(){return Call("helpers");}
  bool ReleaseLockedModules(){return Call("scan");}
  bool PurgeRemnants(){return Call("purge");}
@@ -67,7 +68,7 @@ int main(){
  failAt.clear();
  {calls.clear();InstallEngine e;VendorOnly(e);e.cancelRequested_=true;assert(!Initial(&e));assert(calls.empty());}
  {calls.clear();InstallEngine e;VendorOnly(e);e.selection_.platform32=true;assert(Initial(&e));
-  assert(calls==std::vector<std::string>({"capture","determine","extract","snapshot","prepare-vendor","build","close","stop","helpers","scan","msi"}));
+  assert(calls==std::vector<std::string>({"capture","determine","extract","snapshot","prepare-vendor","build","wait-settings","stop","helpers","scan","msi"}));
   assert(e.installAttempted_&&e.nonSettingsChangesAttempted_);}
  {calls.clear();failAt="prepare-vendor";InstallEngine e;VendorOnly(e);e.selection_.platform32=true;
   assert(!Initial(&e));assert(calls==std::vector<std::string>({"capture","determine","extract","snapshot","prepare-vendor"}));assert(!e.installAttempted_);}

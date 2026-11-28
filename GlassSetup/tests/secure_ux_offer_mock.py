@@ -55,6 +55,7 @@ bool GetFileSizeEx(HANDLE h,LARGE_INTEGER* out){out->QuadPart=files.at(handles.a
 bool FlushFileBuffers(HANDLE){return true;}
 void DeleteFileW(const wchar_t* p){files.erase(p);}
 namespace InstallLog {template<class... A>void LineFormat(const wchar_t*,A...){}void Line(const wchar_t*){}}
+namespace GlassDownloadCache {std::wstring Path(const std::wstring& name){return L"downloads\\"+name;}}
 namespace GlassMaintenanceCache {
 std::wstring CurrentFile(const wchar_t* name){return std::wstring(L"cache\\")+name;}
 bool TrustedDirectory(const std::wstring&){return trusted;}
@@ -69,7 +70,7 @@ bool Hash(File& f,const Asset& asset,const std::atomic_bool&,std::wstring& error
  if(e.safe&&e.asset.sha256==asset.sha256&&e.asset.size==asset.size)return true;error=L"hash/type/links";return false;}
 bool Metadata(const std::wstring& path,Architecture arch,Package& p,std::wstring& error){const auto& e=files.at(path);
  if(!e.identity||e.asset.name!=FileName(arch)){error=L"MSI identity/architecture";return false;}p.version=e.version;p.productCode=L"official";return true;}
-bool Get(const std::wstring&,HANDLE h,std::string* text,std::uint64_t,const std::atomic_bool&,std::wstring& error){
+bool Get(const std::wstring&,HANDLE h,std::string* text,std::uint64_t,const std::atomic_bool&,std::wstring& error,int* =nullptr){
  if(!online){error=L"offline";return false;}if(h==-1){++fetches;*text=json;return true;}
  ++downloads;Asset remote;std::string why;assert(Select(json,machine,remote,why));files[handles.at(h)]={remote,L"4.1.0"};return true;
 }
