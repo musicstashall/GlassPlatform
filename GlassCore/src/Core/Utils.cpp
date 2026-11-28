@@ -129,7 +129,13 @@ namespace GlassCore::Utils
     void CloakWindow(HWND hWnd, BOOL cloak)
     {
         if (!hWnd) return;
-        DwmSetWindowAttribute(hWnd, DWMWA_CLOAK, &cloak, sizeof(cloak));
+        const HRESULT hr = DwmSetWindowAttribute(hWnd, DWMWA_CLOAK, &cloak, sizeof(cloak));
+        if (FAILED(hr))
+        {
+            DebugLog(DBG_WARNING,
+                L"[GlassCore][Utils] CloakWindow FAILED hwnd=0x%p cloak=%d hr=0x%08X tid=%lu",
+                hWnd, cloak ? 1 : 0, hr, static_cast<unsigned long>(GetCurrentThreadId()));
+        }
         DwmTransitionOwnedWindow(hWnd, DWMTRANSITION_OWNEDWINDOW_REPOSITION);
     }
 

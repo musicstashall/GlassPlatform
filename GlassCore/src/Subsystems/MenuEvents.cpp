@@ -15,6 +15,7 @@
 
 #include <MenuUtils.h>
 #include <WinApiUtils.h>
+#include <Helpers/SystemHelper.h>
 
 #include <mutex>
 #include <unordered_set>
@@ -124,9 +125,6 @@ namespace GlassCore::Menu
         Settings::QueryMenuCustomRenderingContext(merged.useDarkMode, merged.customRendering);
         Settings::QueryMenuIconBackgroundColorRemovalContext(merged.iconBackgroundColorRemoval);
 
-        DebugLog(DBG_IMPORTANT, L"[GlassCore][MenuEvents] OnPopupSized: customRendering.enable=%d separator_disabled=%d separator_width=%u",
-            merged.customRendering.enable, merged.customRendering.separator_disabled, merged.customRendering.separator_width);
-
         // SetContext вызываем ПОСЛЕ заполнения всех полей merged (включая customRendering)
         MenuHandler::SetContext(merged);
         MenuHandler::SetBorderContext(settingsBorder);
@@ -135,8 +133,16 @@ namespace GlassCore::Menu
         GlassCore::Settings::FlyoutAnimationContext animation{};
         GlassCore::Settings::QueryFlyoutAnimationContext(L"Menu", animation);
 
+        DebugLog(DBG_IMPORTANT,
+            L"[GlassCore][MenuEvents] OnPopupSized: hwnd=0x%p animEnable=%d customRendering.enable=%d separator_disabled=%d separator_width=%u",
+            hWnd,
+            animation.enable ? 1 : 0,
+            merged.customRendering.enable,
+            merged.customRendering.separator_disabled,
+            merged.customRendering.separator_width);
+
         Settings::ApplyPopupSwcaEffect(
-            hWnd, merged.useDarkMode, backdrop, settingsBorder, false);
+            hWnd, merged.useDarkMode, backdrop, settingsBorder, false, animation.enable);
 
         if (animation.enable)
         {
@@ -154,13 +160,25 @@ namespace GlassCore::Menu
         {
             // MN_SIZEWINDOW приходит ДО SetWindowPos(SWP_SHOWWINDOW).
             // PopupIn прикрепляет subclass и cloak в ctor; WM_WINDOWPOSCHANGED+SWP_SHOWWINDOW → Start() (как TF).
-            (void)GlassCore::Animation::CreateMenuPopupIn(
+            const HRESULT hr = GlassCore::Animation::CreateMenuPopupIn(
                 hWnd,
                 static_cast<float>(animation.startRatio) / 100.f,
                 std::chrono::milliseconds{ animation.popInTime },
                 std::chrono::milliseconds{ animation.fadeInTime },
                 animation.popInStyle
             );
+            if (FAILED(hr) || hr == S_FALSE)
+            {
+                SetFlyoutBorderDeferred(hWnd, false);
+                BOOL uncloak = FALSE;
+                (void)DwmSetWindowAttribute(hWnd, DWMWA_CLOAK, &uncloak, sizeof(uncloak));
+                Settings::ApplyPopupSwcaEffect(
+                    hWnd, merged.useDarkMode, backdrop, settingsBorder, false, false);
+                OnPaintFlyoutHostBorder(
+                    hWnd,
+                    WndCompat::Menu::FlyoutBorderPass::SetupAndPaint,
+                    nullptr);
+            }
         }
     }
 
@@ -219,6 +237,16 @@ namespace GlassCore::Menu
             return;
 
         FlyoutFrame::ClearHostBorderDeferred(hWnd);
+
+        // Win10 (<22000): ставим SWCA-backdrop (0 → desired) СРАЗУ после CloakWindow(FALSE),
+        // до синхронной отрисовки 1px рамки, чтобы не было окна для чёрного кадра AccentState=0.
+        if (Shared::SystemHelper::g_buildNumber < 22000)
+        {
+            const bool dark = MenuHandler::GetContext().useDarkMode;
+            Settings::WindowBackdropEffectContext backdrop{};
+            Settings::QueryBackdropEffectContext(L"Menu", dark, backdrop);
+            Settings::ReapplyFlyoutBackdropAfterUncloakWin10(hWnd, dark, backdrop);
+        }
 
         OnPaintFlyoutHostBorder(
             hWnd,

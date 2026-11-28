@@ -11,6 +11,8 @@
 #include <MenuUtils.h>
 #include <Tracker/WinEventHandler.h>
 #include <Helpers/ThemeHelper.h>
+#include <Helpers/SystemHelper.h>
+#include <Helpers/SwcaBackdrop.h>
 
 #include <vector>
 #include <algorithm>
@@ -194,6 +196,43 @@ namespace
         // может не дать WM_PAINT. Здесь — обычный асинхронный поток: принудительно красим.
         if (uMsg == WndCompat::WM_GLASS_FLYOUT_CLIENT_REFRESH)
         {
+            // Win10 (<22000): OnComboLBoxShow срабатывает внутри WM_SHOWWINDOW до выставления
+            // WS_VISIBLE (и в non-anim ветке OnFlyoutAnimationFinished не вызывается).
+            // К моменту асинхронного WM_GLASS_FLYOUT_CLIENT_REFRESH окно уже видимо —
+            // повторяем SWCA-backdrop в non-anim ветке (wParam == 0) через ACCENT_DISABLED → desired.
+            if (wParam == 0 && Shared::SystemHelper::g_buildNumber < 22000 && ::IsWindowVisible(hWnd))
+            {
+                auto* provider = WndCompat::DropDown::GetDropDownEventProvider();
+                WndCompat::DropDownContext ctx{};
+                if (!IsFlyoutBorderDeferredForDropDown(hWnd, provider)
+                    && provider && provider->QueryDropDownContext
+                    && provider->QueryDropDownContext(&ctx)
+                    && ctx.backdropEffect.effectType != 0)
+                {
+                    const DWORD argb = ctx.backdropEffect.gradientColor;
+                    const DWORD abgr =
+                        (argb & 0xFF00FF00u)
+                        | ((argb & 0x00FF0000u) >> 16)
+                        | ((argb & 0x000000FFu) << 16);
+                    Shared::SwcaBackdrop::SetWindowBackdrop(
+                        hWnd,
+                        FALSE,
+                        0,
+                        0, // ACCENT_DISABLED
+                        /*skipNcRendering=*/true,
+                        /*flyoutBackdrop=*/true);
+                    (void)::DwmFlush();
+                    Shared::SwcaBackdrop::SetWindowBackdrop(
+                        hWnd,
+                        ctx.backdropEffect.enableDropShadow ? TRUE : FALSE,
+                        abgr,
+                        static_cast<int>(ctx.backdropEffect.effectType),
+                        /*skipNcRendering=*/true,
+                        /*flyoutBackdrop=*/true);
+                    (void)::DwmFlush();
+                }
+            }
+
             // Диагностика регрессии (Round-5): RedrawWindow должен дойти до WM_PAINT / WM_ERASEBKGND.
             const BOOL ok = ::RedrawWindow(hWnd, nullptr, nullptr,
                 RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN | RDW_INTERNALPAINT);

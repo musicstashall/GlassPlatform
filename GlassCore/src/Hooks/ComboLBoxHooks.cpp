@@ -718,8 +718,28 @@ namespace GlassCore::ComboLBox
                 dwTextFlags |= DT_RTLREADING;
 
             int result = 0;
-            const bool lbTextOk = lpString && !FAILED(GlassCore::Text::DrawTextWithAlpha(
-                    hdc, lpString, static_cast<int>(c), &textRect, dwTextFlags, result));
+            const HRESULT hrText = lpString
+                ? GlassCore::Text::DrawTextWithAlpha(
+                    hdc, lpString, static_cast<int>(c), &textRect, dwTextFlags, result)
+                : E_INVALIDARG;
+            const bool lbTextOk = !FAILED(hrText);
+            static std::atomic<int> s_etoDiagBudget{ 16 };
+            if (s_etoDiagBudget.load(std::memory_order_relaxed) > 0
+                && s_etoDiagBudget.fetch_sub(1, std::memory_order_relaxed) > 0)
+            {
+                wchar_t modPath[MAX_PATH]{};
+                if (callerMod)
+                    GetModuleFileNameW(callerMod, modPath, MAX_PATH);
+                const wchar_t* modBase = wcsrchr(modPath, L'\\');
+                DebugLog(DBG_IMPORTANT,
+                    L"[GlassCore][ComboLBox] Overall_MyExtTextOutW hwnd=0x%p caller=%s c=%u opt=0x%X bk=0x%08X hr=0x%08X",
+                    h_combolbox,
+                    modBase ? (modBase + 1) : modPath,
+                    c,
+                    options,
+                    static_cast<unsigned>(GetBkColor(hdc)),
+                    hrText);
+            }
             if (lbTextOk)
             {
                 if (options & ETO_CLIPPED)
@@ -1523,6 +1543,24 @@ namespace GlassCore::ComboLBox
         h_combolbox = hWnd;
         ++g_paintRef;
         ArmSessionHooks(hWnd, callerMod);
+
+        static std::atomic<int> s_paintBeginDiagBudget{ 16 };
+        if (s_paintBeginDiagBudget.load(std::memory_order_relaxed) > 0
+            && s_paintBeginDiagBudget.fetch_sub(1, std::memory_order_relaxed) > 0)
+        {
+            wchar_t modPath[MAX_PATH]{};
+            if (callerMod)
+                GetModuleFileNameW(callerMod, modPath, MAX_PATH);
+            const wchar_t* modBase = wcsrchr(modPath, L'\\');
+            DebugLog(DBG_IMPORTANT,
+                L"[GlassCore][ComboLBox] OnPaintBeginGlobal hwnd=0x%p caller=%s(0x%p) comctl=0x%p legacy=0x%p armed=%d",
+                hWnd,
+                modBase ? (modBase + 1) : modPath,
+                callerMod,
+                g_comctl32Module,
+                g_comctl32ModuleLegacy,
+                g_hooksArmed ? 1 : 0);
+        }
     }
 
     static void OnPaintEndGlobal(HWND hWnd, HMODULE callerMod)
@@ -1645,8 +1683,15 @@ namespace GlassCore::ComboLBox
             auto& ctx = WndCompat::g_dropDownCtx;
             FillDropDownContext(ctx);
 
+            RECT wndRc{};
+            const bool hasNonEmptyRect =
+                ::GetWindowRect(hWnd, &wndRc)
+                && (wndRc.right > wndRc.left)
+                && (wndRc.bottom > wndRc.top);
+
             const bool schedulePopupIn =
-                (isComboBoxAnimation && !ctx.animation.enable) || ctx.animation.enable;
+                hasNonEmptyRect
+                && ((isComboBoxAnimation && !ctx.animation.enable) || ctx.animation.enable);
 
             if (schedulePopupIn)
             {
@@ -1655,7 +1700,7 @@ namespace GlassCore::ComboLBox
             }
 
             GlassCore::Settings::ApplyPopupSwcaEffect(
-                hWnd, ctx.useDarkMode, ctx.backdropEffect, ctx.border, false);
+                hWnd, ctx.useDarkMode, ctx.backdropEffect, ctx.border, false, schedulePopupIn);
 
             if (!schedulePopupIn)
             {
@@ -1664,36 +1709,54 @@ namespace GlassCore::ComboLBox
             }
 
             DebugLog(DBG_IMPORTANT,
-                L"[GlassCore][ComboLBox] ApplyComboLBoxFlyoutAtShow: hwnd=0x%p cornerType=%d anim=%d schedulePopupIn=%d",
+                L"[GlassCore][ComboLBox] ApplyComboLBoxFlyoutAtShow: hwnd=0x%p cornerType=%d anim=%d schedulePopupIn=%d nonEmpty=%d",
                 hWnd,
                 static_cast<int>(ctx.border.cornerType),
                 static_cast<int>(ctx.animation.enable),
-                schedulePopupIn ? 1 : 0);
+                schedulePopupIn ? 1 : 0,
+                hasNonEmptyRect ? 1 : 0);
 
             s_comboLBoxAppliedRoot = hWnd;
             s_comboLBoxAppliedTick = ::GetTickCount();
 
-            if (isComboBoxAnimation && !ctx.animation.enable)
+            if (schedulePopupIn)
             {
-                const HRESULT hr = GlassCore::Animation::CreateDropDownPopupIn(
-                    hWnd,
-                    static_cast<float>(50) / 100.f,
-                    std::chrono::milliseconds{ 250 },
-                    std::chrono::milliseconds{ 87 },
-                    0,
-                    ctx.animation.immediateInterupting);
-                DebugLog(L"[GlassCore][ComboLBox] CreateDropDownPopupIn (sys anim) hr=0x%08X hwnd=0x%p", hr, hWnd);
-            }
-            else if (ctx.animation.enable)
-            {
-                const HRESULT hr = GlassCore::Animation::CreateDropDownPopupIn(
-                    hWnd,
-                    static_cast<float>(ctx.animation.startRatio) / 100.f,
-                    std::chrono::milliseconds{ ctx.animation.popInTime },
-                    std::chrono::milliseconds{ ctx.animation.fadeInTime },
-                    ctx.animation.popInStyle,
-                    ctx.animation.immediateInterupting);
-                DebugLog(L"[GlassCore][ComboLBox] CreateDropDownPopupIn hr=0x%08X hwnd=0x%p", hr, hWnd);
+                HRESULT hr = E_FAIL;
+                if (isComboBoxAnimation && !ctx.animation.enable)
+                {
+                    hr = GlassCore::Animation::CreateDropDownPopupIn(
+                        hWnd,
+                        static_cast<float>(50) / 100.f,
+                        std::chrono::milliseconds{ 250 },
+                        std::chrono::milliseconds{ 87 },
+                        0,
+                        ctx.animation.immediateInterupting);
+                    DebugLog(L"[GlassCore][ComboLBox] CreateDropDownPopupIn (sys anim) hr=0x%08X hwnd=0x%p", hr, hWnd);
+                }
+                else if (ctx.animation.enable)
+                {
+                    hr = GlassCore::Animation::CreateDropDownPopupIn(
+                        hWnd,
+                        static_cast<float>(ctx.animation.startRatio) / 100.f,
+                        std::chrono::milliseconds{ ctx.animation.popInTime },
+                        std::chrono::milliseconds{ ctx.animation.fadeInTime },
+                        ctx.animation.popInStyle,
+                        ctx.animation.immediateInterupting);
+                    DebugLog(L"[GlassCore][ComboLBox] CreateDropDownPopupIn hr=0x%08X hwnd=0x%p", hr, hWnd);
+                }
+
+                if (FAILED(hr) || hr == S_FALSE)
+                {
+                    // Анимация не стартовала — снимаем defer и рисуем рамку сразу,
+                    // иначе окно останется с активным defer и без uncloak-коллбэка.
+                    GlassCore::FlyoutFrame::ClearHostBorderDeferred(hWnd);
+                    BOOL uncloak = FALSE;
+                    (void)DwmSetWindowAttribute(hWnd, DWMWA_CLOAK, &uncloak, sizeof(uncloak));
+                    GlassCore::Settings::ApplyPopupSwcaEffect(
+                        hWnd, ctx.useDarkMode, ctx.backdropEffect, ctx.border, false, false);
+                    GlassCore::FlyoutFrame::PaintHostBorder(
+                        hWnd, ctx.useDarkMode, ctx.border, ctx.backdropEffect.effectType);
+                }
             }
         }
     }
@@ -1754,6 +1817,8 @@ namespace GlassCore::ComboLBox
         }
 
         GlassCore::FlyoutFrame::ClearHostBorderDeferred(hWnd);
+        BOOL uncloak = FALSE;
+        (void)DwmSetWindowAttribute(hWnd, DWMWA_CLOAK, &uncloak, sizeof(uncloak));
         GlassCore::Settings::DropEffect(L"DropDown", hWnd);
         COLORREF noColor = DWMWCP_DEFAULT;
         DwmSetWindowAttribute(hWnd, DWMWA_WINDOW_CORNER_PREFERENCE,

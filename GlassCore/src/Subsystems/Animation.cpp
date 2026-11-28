@@ -60,6 +60,8 @@
 #include <uxtheme.h>
 #include <vssym32.h>
 #include <algorithm>
+#include <mutex>
+#include <unordered_map>
 
 
 #pragma comment(lib, "dwmapi.lib")
@@ -87,6 +89,189 @@ namespace GlassCore::Animation
                 return v.dwBuildNumber;
             }();
         return build;
+    }
+
+    struct Win10PendingThumb
+    {
+        HTHUMBNAIL thumbnail = nullptr;
+        HTHUMBNAIL backdropThumbnail = nullptr;
+        HWND backdropWindow = nullptr;
+        wil::com_ptr<IDCompositionVisual2> rootVisual;
+        wil::com_ptr<IDCompositionVisual2> thumbnailVisual;
+        wil::com_ptr<IDCompositionVisual2> backdropThumbnailVisual;
+    };
+
+    static std::mutex g_win10PendingThumbMutex;
+    static std::unordered_map<HWND, Win10PendingThumb> g_win10PendingThumbs;
+
+    static void ReleaseWin10PendingThumb(HWND overlayWnd) noexcept
+    {
+        if (!overlayWnd)
+            return;
+
+        Win10PendingThumb pending{};
+        {
+            std::lock_guard lock(g_win10PendingThumbMutex);
+            auto it = g_win10PendingThumbs.find(overlayWnd);
+            if (it == g_win10PendingThumbs.end())
+                return;
+            pending = std::move(it->second);
+            g_win10PendingThumbs.erase(it);
+        }
+
+        if (pending.rootVisual)
+        {
+            if (pending.thumbnailVisual)
+                (void)pending.rootVisual->RemoveVisual(pending.thumbnailVisual.get());
+            if (pending.backdropThumbnailVisual)
+                (void)pending.rootVisual->RemoveVisual(pending.backdropThumbnailVisual.get());
+        }
+        pending.thumbnailVisual.reset();
+        pending.backdropThumbnailVisual.reset();
+        pending.rootVisual.reset();
+        if (auto dev = Shared::DXHelper::LazyDComposition::GetInstance().GetDCompositionDevice())
+            (void)dev->Commit();
+        if (pending.thumbnail)
+            (void)DwmUnregisterThumbnail(pending.thumbnail);
+        if (pending.backdropThumbnail)
+            (void)DwmUnregisterThumbnail(pending.backdropThumbnail);
+        if (pending.backdropWindow && IsWindow(pending.backdropWindow))
+            Utils::CloakWindow(pending.backdropWindow, TRUE);
+    }
+
+    // Win10 (<22000): захватывает финальный скомпозиченный кадр overlayWnd прямо с экрана
+    // (BitBlt SRCCOPY|CAPTUREBLT → непрозрачный IDCompositionSurface), атомарно заменяет
+    // им ОБА живых thumbnail-визуала (m_thumbnailVisual + m_backdropThumbnailVisual) на
+    // overlayWnd и скрывает m_backdropWindow.
+    // За счёт этого overlayWnd держит статичный замороженный кадр поверх hWnd на время
+    // прогрева CAccentAcrylicBlurBehind: нет ни чёрных кадров прогрева, ни «двойного акрила»
+    // (белого кадра в светлой теме от наложения m_backdropWindow поверх нового акрила hWnd).
+    static void SwapWin10PendingThumbToSnapshot(
+        HWND overlayWnd,
+        HWND flyoutHwnd,
+        wil::com_ptr<IDCompositionVisual2>& outRootVisual,
+        wil::com_ptr<IDCompositionVisual2>& outSnapshotVisual,
+        wil::com_ptr<IDCompositionSurface>& outSnapshotSurface) noexcept
+    {
+        if (!overlayWnd)
+            return;
+
+        Win10PendingThumb pending{};
+        {
+            std::lock_guard lock(g_win10PendingThumbMutex);
+            auto it = g_win10PendingThumbs.find(overlayWnd);
+            if (it == g_win10PendingThumbs.end())
+                return;
+            pending = std::move(it->second);
+            g_win10PendingThumbs.erase(it);
+        }
+
+        auto dev = Shared::DXHelper::LazyDComposition::GetInstance().GetDCompositionDevice();
+        auto d3dDev = Shared::DXHelper::LazyD3D::GetInstance().GetD3DDevice();
+
+        RECT wr{};
+        if (dev && d3dDev && pending.rootVisual && flyoutHwnd && IsWindow(flyoutHwnd)
+            && GetWindowRect(flyoutHwnd, &wr))
+        {
+            const int w = wr.right - wr.left;
+            const int h = wr.bottom - wr.top;
+            if (w > 0 && h > 0 && w <= 4096 && h <= 4096)
+            {
+                HDC hdcScreen = GetDC(nullptr);
+                if (hdcScreen)
+                {
+                    HDC hdcMem = CreateCompatibleDC(hdcScreen);
+                    if (hdcMem)
+                    {
+                        BITMAPINFO bmi{};
+                        bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+                        bmi.bmiHeader.biWidth = w;
+                        bmi.bmiHeader.biHeight = -h;
+                        bmi.bmiHeader.biPlanes = 1;
+                        bmi.bmiHeader.biBitCount = 32;
+                        bmi.bmiHeader.biCompression = BI_RGB;
+
+                        void* bits = nullptr;
+                        HBITMAP hbmp = CreateDIBSection(hdcScreen, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+                        if (hbmp && bits)
+                        {
+                            HGDIOBJ oldBmp = SelectObject(hdcMem, hbmp);
+                            if (BitBlt(hdcMem, 0, 0, w, h, hdcScreen, wr.left, wr.top, SRCCOPY | CAPTUREBLT))
+                            {
+                                auto* px = static_cast<uint32_t*>(bits);
+                                const size_t count = static_cast<size_t>(w) * static_cast<size_t>(h);
+                                for (size_t i = 0; i < count; ++i)
+                                    px[i] |= 0xFF000000u;
+
+                                wil::com_ptr<IDCompositionSurface> surface;
+                                if (SUCCEEDED(dev->CreateSurface(
+                                    static_cast<UINT>(w),
+                                    static_cast<UINT>(h),
+                                    DXGI_FORMAT_B8G8R8A8_UNORM,
+                                    DXGI_ALPHA_MODE_PREMULTIPLIED,
+                                    &surface)))
+                                {
+                                    wil::com_ptr<ID3D11Texture2D> tex;
+                                    POINT offset{};
+                                    if (SUCCEEDED(surface->BeginDraw(nullptr, IID_PPV_ARGS(&tex), &offset)))
+                                    {
+                                        wil::com_ptr<ID3D11DeviceContext> ctx;
+                                        d3dDev->GetImmediateContext(&ctx);
+                                        if (ctx)
+                                        {
+                                            D3D11_BOX box{};
+                                            box.left = static_cast<UINT>(offset.x);
+                                            box.top = static_cast<UINT>(offset.y);
+                                            box.right = box.left + static_cast<UINT>(w);
+                                            box.bottom = box.top + static_cast<UINT>(h);
+                                            box.front = 0;
+                                            box.back = 1;
+                                            ctx->UpdateSubresource(
+                                                tex.get(), 0, &box, bits, static_cast<UINT>(w * 4), 0);
+                                        }
+                                        (void)surface->EndDraw();
+
+                                        wil::com_ptr<IDCompositionVisual2> snapVis;
+                                        if (SUCCEEDED(dev->CreateVisual(&snapVis))
+                                            && SUCCEEDED(snapVis->SetContent(surface.get()))
+                                            && SUCCEEDED(pending.rootVisual->AddVisual(snapVis.get(), TRUE, nullptr)))
+                                        {
+                                            outRootVisual = pending.rootVisual;
+                                            outSnapshotVisual = std::move(snapVis);
+                                            outSnapshotSurface = std::move(surface);
+                                        }
+                                    }
+                                }
+                            }
+                            SelectObject(hdcMem, oldBmp);
+                        }
+                        if (hbmp)
+                            DeleteObject(hbmp);
+                        DeleteDC(hdcMem);
+                    }
+                    ReleaseDC(nullptr, hdcScreen);
+                }
+            }
+        }
+
+        if (pending.rootVisual)
+        {
+            if (pending.thumbnailVisual)
+                (void)pending.rootVisual->RemoveVisual(pending.thumbnailVisual.get());
+            if (pending.backdropThumbnailVisual)
+                (void)pending.rootVisual->RemoveVisual(pending.backdropThumbnailVisual.get());
+        }
+        pending.thumbnailVisual.reset();
+        pending.backdropThumbnailVisual.reset();
+        pending.rootVisual.reset();
+        if (dev)
+            (void)dev->Commit();
+        if (pending.thumbnail)
+            (void)DwmUnregisterThumbnail(pending.thumbnail);
+        if (pending.backdropThumbnail)
+            (void)DwmUnregisterThumbnail(pending.backdropThumbnail);
+        if (pending.backdropWindow && IsWindow(pending.backdropWindow))
+            Utils::CloakWindow(pending.backdropWindow, TRUE);
     }
 
     static bool IsWindowClass(HWND hWnd, const wchar_t* className)
@@ -791,10 +976,19 @@ namespace GlassCore::Animation
             {
                 // Fix 2: полная очистка ресурсов при ошибке (как в BWM)
                 Finish();
-                if (m_menuWindow)
+                m_dcompTarget.reset();
+                m_rootVisual.reset();
+                m_thumbnailVisual.reset();
+                m_backdropThumbnailVisual.reset();
+                if (m_thumbnail)
                 {
-                    SendNotifyMessageW(m_menuWindow, GetAnimationFinishedMsg(), 0, 0);
-                    m_menuWindow = nullptr;
+                    DwmUnregisterThumbnail(m_thumbnail);
+                    m_thumbnail = nullptr;
+                }
+                if (m_backdropThumbnail)
+                {
+                    DwmUnregisterThumbnail(m_backdropThumbnail);
+                    m_backdropThumbnail = nullptr;
                 }
                 if (window)
                 {
@@ -806,15 +1000,11 @@ namespace GlassCore::Animation
                     SendNotifyMessageW(m_backdropWindow, WM_CLOSE, 0, 0);
                     m_backdropWindow = nullptr;
                 }
-                if (m_thumbnail)
+                (void)DwmFlush();
+                if (m_menuWindow)
                 {
-                    DwmUnregisterThumbnail(m_thumbnail);
-                    m_thumbnail = nullptr;
-                }
-                if (m_backdropThumbnail)
-                {
-                    DwmUnregisterThumbnail(m_backdropThumbnail);
-                    m_backdropThumbnail = nullptr;
+                    SendNotifyMessageW(m_menuWindow, GetAnimationFinishedMsg(), 0, 0);
+                    m_menuWindow = nullptr;
                 }
                 LOG_CAUGHT_EXCEPTION();
             }
@@ -896,9 +1086,88 @@ namespace GlassCore::Animation
 
         if (uMsg == GetAnimationFinishedMsg())
         {
-            // Post-uncloak: однократная отрисовка рамки на real flyout (sync, без WM_GLASS).
-            GlassCore::Menu::PaintDeferredFlyoutBorderIfNeeded(hWnd);
-            GlassCore::DropDown::OnFlyoutAnimationFinished(hWnd);
+            const bool isMenu = IsWindowClass(hWnd, L"#32768");
+            HWND overlayWnd = (GetBuildNumber() < 22000) ? reinterpret_cast<HWND>(wParam) : nullptr;
+            if (overlayWnd && IsWindow(overlayWnd))
+            {
+                // Win10 (<22000):
+                // Фаза 1: СНАЧАЛА захватываем финальный скомпозиченный кадр overlayWnd с экрана
+                // (однослойный акрил + текст + рамка) в непрозрачный статический IDCompositionSurface,
+                // атомарно заменяем им ОБА живых thumbnail-визуала (m_thumbnailVisual и
+                // m_backdropThumbnailVisual), отрегистрируем оба thumbnail и cloak-им m_backdropWindow.
+                // Это одновременно устраняет и чёрные кадры прогрева CAccentAcrylicBlurBehind,
+                // и белый кадр «двойного акрила» (m_backdropWindow поверх нового акрила hWnd).
+                wil::com_ptr<IDCompositionVisual2> snapRoot;
+                wil::com_ptr<IDCompositionVisual2> snapVisual;
+                wil::com_ptr<IDCompositionSurface> snapSurface;
+                SwapWin10PendingThumbToSnapshot(overlayWnd, hWnd, snapRoot, snapVisual, snapSurface);
+
+                // Держим замороженный overlayWnd ПОВЕРХ hWnd в точной геометрии и 100% alpha.
+                RECT wr{};
+                if (GetWindowRect(hWnd, &wr))
+                {
+                    SetWindowPos(
+                        overlayWnd, HWND_TOPMOST,
+                        wr.left, wr.top, wr.right - wr.left, wr.bottom - wr.top,
+                        SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOSENDCHANGING | SWP_NOREDRAW);
+                }
+                (void)SetLayeredWindowAttributes(overlayWnd, 0, 255, LWA_ALPHA);
+
+                // Фаза 2: для DropDown/ComboLBox/ViewControl рисуем 1px рамку и клиентский
+                // контент на всё ещё cloaked hWnd, полностью скрытом за замороженным overlayWnd.
+                if (!isMenu)
+                    GlassCore::DropDown::PrepareForWin10Uncloak(hWnd);
+
+                // Uncloak hWnd и включаем SWCA(0 → desired) ПОЗАДИ замороженного overlayWnd.
+                Utils::CloakWindow(hWnd, FALSE);
+
+                if (isMenu)
+                {
+                    GlassCore::Menu::PaintDeferredFlyoutBorderIfNeeded(hWnd);
+                }
+                else
+                {
+                    GlassCore::DropDown::ApplyBackdropForWin10Uncloak(hWnd);
+                    // Для ComboLBox сразу заполняем клиентский буфер (WM_PRINTCLIENT) ещё до
+                    // снятия overlayWnd, чтобы после скрытия оверлея контент уже был на месте.
+                    GlassCore::DropDown::FinalizeAfterWin10Uncloak(hWnd);
+                }
+
+                // Ждём 2 кадра DWM позади замороженного overlayWnd, чтобы CAccentAcrylicBlurBehind
+                // полностью прогрелся и стабилизировался ДО показа hWnd пользователю.
+                (void)DwmFlush();
+                (void)DwmFlush();
+
+                // Фаза 3: мгновенно скрываем overlayWnd, открывая уже полностью готовый hWnd.
+                Utils::CloakWindow(overlayWnd, TRUE);
+
+                if (snapRoot && snapVisual)
+                {
+                    (void)snapRoot->RemoveVisual(snapVisual.get());
+                    if (auto dev = Shared::DXHelper::LazyDComposition::GetInstance().GetDCompositionDevice())
+                        (void)dev->Commit();
+                }
+                snapVisual.reset();
+                snapSurface.reset();
+                snapRoot.reset();
+
+                (void)DwmFlush();
+                GlassCore::FlyoutFrame::LogWin10PostUncloakSurfaceDiag(
+                    hWnd, isMenu ? L"Menu" : (IsWindowClass(hWnd, L"ComboLBox") ? L"ComboLBox" : L"DropDown"));
+            }
+            else
+            {
+                // Гарантируем uncloak на GUI-потоке владельца.
+                Utils::CloakWindow(hWnd, FALSE);
+
+                // Post-uncloak: однократная отрисовка рамки на real flyout (sync, без WM_GLASS).
+                // #32768 — меню (L"Menu"); остальные flyout (ComboLBox/DropDown/Listviewpopup/ViewControl) — L"DropDown".
+                if (isMenu)
+                    GlassCore::Menu::PaintDeferredFlyoutBorderIfNeeded(hWnd);
+                else
+                    GlassCore::DropDown::OnFlyoutAnimationFinished(hWnd);
+            }
+
             RemoveWindowSubclass(hWnd, SubclassProc, 0);
             return DefSubclassProc(hWnd, uMsg, wParam, lParam);
         }
@@ -936,76 +1205,227 @@ namespace GlassCore::Animation
             , m_animationStyle(animationStyle)
             , m_immediateInterupting(immediateInterupting)
         {
-            if (!EnsureDwmApi())
-                THROW_HR(E_FAIL);
+            bool attached = false;
+            bool cloaked = false;
+            try
+            {
+                if (!EnsureDwmApi())
+                    THROW_HR(E_FAIL);
 
-            auto context = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-            auto dpiCleanup = wil::scope_exit([&] { SetThreadDpiAwarenessContext(context); });
+                auto context = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+                auto dpiCleanup = wil::scope_exit([&] { SetThreadDpiAwarenessContext(context); });
 
-            auto& dcomp = Shared::DXHelper::LazyDComposition::GetInstance();
-            dcomp.EnsureResources();
-            auto dcompDevice = dcomp.GetDCompositionDevice();
-            THROW_HR_IF_NULL(E_FAIL, dcompDevice);
+                auto& dcomp = Shared::DXHelper::LazyDComposition::GetInstance();
+                dcomp.EnsureResources();
+                auto dcompDevice = dcomp.GetDCompositionDevice();
+                THROW_HR_IF_NULL(E_FAIL, dcompDevice);
 
-            Attach();
-            Utils::CloakWindow(m_menuWindow, TRUE);
+                Attach();
+                attached = true;
+                Utils::CloakWindow(m_menuWindow, TRUE);
+                cloaked = true;
 
-            m_backdropWindow = Utils::SHCreateWorkerWindowW(
-                DefWindowProcW,
-                ownerWindow,
-                WS_EX_NOREDIRECTIONBITMAP | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
-                WS_POPUP,
-                nullptr,
-                0
-            );
-            THROW_LAST_ERROR_IF_NULL(m_backdropWindow);
+                m_backdropWindow = Utils::SHCreateWorkerWindowW(
+                    DefWindowProcW,
+                    ownerWindow,
+                    WS_EX_NOREDIRECTIONBITMAP | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+                    WS_POPUP,
+                    nullptr,
+                    0
+                );
+                THROW_LAST_ERROR_IF_NULL(m_backdropWindow);
 
-            window = Utils::SHCreateWorkerWindowW(
-                DefWindowProcW,
-                ownerWindow,
-                WS_EX_NOREDIRECTIONBITMAP | WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
-                WS_POPUP,
-                nullptr,
-                0
-            );
-            THROW_LAST_ERROR_IF_NULL(window);
+                window = Utils::SHCreateWorkerWindowW(
+                    DefWindowProcW,
+                    ownerWindow,
+                    WS_EX_NOREDIRECTIONBITMAP | WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+                    WS_POPUP,
+                    nullptr,
+                    0
+                );
+                THROW_LAST_ERROR_IF_NULL(window);
 
-            THROW_LAST_ERROR_IF(!SetLayeredWindowAttributes(window, 0, 0, LWA_ALPHA));
-            THROW_LAST_ERROR_IF(!SetLayeredWindowAttributes(m_backdropWindow, 0, 0, LWA_ALPHA));
-            Utils::CloakWindow(window, TRUE);
-            THROW_LAST_ERROR_IF(!SetWindowPos(m_backdropWindow, nullptr, 0, 0, 0, 0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_ASYNCWINDOWPOS | SWP_NOSENDCHANGING));
+                THROW_LAST_ERROR_IF(!SetLayeredWindowAttributes(window, 0, 0, LWA_ALPHA));
+                THROW_LAST_ERROR_IF(!SetLayeredWindowAttributes(m_backdropWindow, 0, 0, LWA_ALPHA));
+                Utils::CloakWindow(window, TRUE);
+                THROW_LAST_ERROR_IF(!SetWindowPos(m_backdropWindow, nullptr, 0, 0, 0, 0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_ASYNCWINDOWPOS | SWP_NOSENDCHANGING));
 
-            THROW_IF_FAILED(dcompDevice->CreateTargetForHwnd(window, TRUE, &m_dcompTarget));
+                THROW_IF_FAILED(dcompDevice->CreateTargetForHwnd(window, TRUE, &m_dcompTarget));
 
-            DWM_THUMBNAIL_PROPERTIES thumbProps = {
-                DWM_TNP_VISIBLE | DWM_TNP_RECTDESTINATION | DWM_TNP_SOURCECLIENTAREAONLY | Shared::DwmThumbnailAPI::DWM_TNP_ENABLE3D,
-                {0,0,0,0}, {}, 255, TRUE, TRUE
-            };
-            THROW_IF_FAILED(Shared::DwmThumbnailAPI::DwmpCreateSharedThumbnailVisual(
-                window, m_menuWindow, 0, &thumbProps,
-                dcompDevice.get(), m_thumbnailVisual.put_void(), &m_thumbnail));
+                DWM_THUMBNAIL_PROPERTIES thumbProps = {
+                    DWM_TNP_VISIBLE | DWM_TNP_RECTDESTINATION | DWM_TNP_SOURCECLIENTAREAONLY | Shared::DwmThumbnailAPI::DWM_TNP_ENABLE3D,
+                    {0,0,0,0}, {}, 255, TRUE, TRUE
+                };
+                THROW_IF_FAILED(Shared::DwmThumbnailAPI::DwmpCreateSharedThumbnailVisual(
+                    window, m_menuWindow, 0, &thumbProps,
+                    dcompDevice.get(), m_thumbnailVisual.put_void(), &m_thumbnail));
 
-            thumbProps.fSourceClientAreaOnly = FALSE;
-            THROW_IF_FAILED(Shared::DwmThumbnailAPI::DwmpCreateSharedThumbnailVisual(
-                window, m_backdropWindow, 0, &thumbProps,
-                dcompDevice.get(), m_backdropThumbnailVisual.put_void(), &m_backdropThumbnail));
+                thumbProps.fSourceClientAreaOnly = FALSE;
+                THROW_IF_FAILED(Shared::DwmThumbnailAPI::DwmpCreateSharedThumbnailVisual(
+                    window, m_backdropWindow, 0, &thumbProps,
+                    dcompDevice.get(), m_backdropThumbnailVisual.put_void(), &m_backdropThumbnail));
 
-            THROW_IF_FAILED(dcompDevice->CreateVisual(&m_rootVisual));
-            THROW_IF_FAILED(m_rootVisual->AddVisual(m_backdropThumbnailVisual.get(), FALSE, nullptr));
-            THROW_IF_FAILED(m_rootVisual->AddVisual(m_thumbnailVisual.get(), FALSE, nullptr));
-            THROW_IF_FAILED(m_dcompTarget->SetRoot(m_rootVisual.get()));
-            THROW_IF_FAILED(dcompDevice->Commit());
-            THROW_IF_FAILED(DwmFlush());
+                THROW_IF_FAILED(dcompDevice->CreateVisual(&m_rootVisual));
+                THROW_IF_FAILED(m_rootVisual->AddVisual(m_backdropThumbnailVisual.get(), FALSE, nullptr));
+                THROW_IF_FAILED(m_rootVisual->AddVisual(m_thumbnailVisual.get(), FALSE, nullptr));
+                THROW_IF_FAILED(m_dcompTarget->SetRoot(m_rootVisual.get()));
+                THROW_IF_FAILED(dcompDevice->Commit());
+                THROW_IF_FAILED(DwmFlush());
 
-            // См. Fix 6: гарантируем попытку Start после полной инициализации, если SWP_SHOWWINDOW
-            // уже не придёт в сабкласс анимации (или пришёл только SWP_FRAMECHANGED).
-            (void)PostMessageW(m_menuWindow, GetDeferredPopupInStartMsg(), 0, 0);
+                // См. Fix 6: гарантируем попытку Start после полной инициализации, если SWP_SHOWWINDOW
+                // уже не придёт в сабкласс анимации (или пришёл только SWP_FRAMECHANGED).
+                (void)PostMessageW(m_menuWindow, GetDeferredPopupInStartMsg(), 0, 0);
+            }
+            catch (...)
+            {
+                // При исключении в конструкторе ~PopupIn() не вызывается:
+                // снимаем cloak, сабкласс (во избежание dangling this), thumbnail и worker-окна.
+                if (m_thumbnail)
+                {
+                    DwmUnregisterThumbnail(m_thumbnail);
+                    m_thumbnail = nullptr;
+                }
+                if (m_backdropThumbnail)
+                {
+                    DwmUnregisterThumbnail(m_backdropThumbnail);
+                    m_backdropThumbnail = nullptr;
+                }
+                m_dcompTarget.reset();
+                m_rootVisual.reset();
+                m_thumbnailVisual.reset();
+                m_backdropThumbnailVisual.reset();
+
+                if (cloaked && m_flyoutHwnd && IsWindow(m_flyoutHwnd))
+                    Utils::CloakWindow(m_flyoutHwnd, FALSE);
+
+                if (attached)
+                    Detach();
+
+                if (window)
+                {
+                    if (IsWindow(window))
+                        DestroyWindow(window);
+                    window = nullptr;
+                }
+                if (m_backdropWindow)
+                {
+                    if (IsWindow(m_backdropWindow))
+                        DestroyWindow(m_backdropWindow);
+                    m_backdropWindow = nullptr;
+                }
+
+                (void)DwmFlush();
+                throw;
+            }
         }
 
         virtual ~PopupIn() noexcept
         {
+            if (GetBuildNumber() < 22000 && m_menuWindow && IsWindow(m_menuWindow))
+            {
+                // Win10 (<22000): оставляем m_thumbnailVisual живым на overlayWnd до самого
+                // момента выполнения GetAnimationFinishedMsg на GUI-потоке, чтобы контент
+                // не пропадал в ожидании SendMessageTimeoutW. GUI-поток атомарно снимает
+                // m_thumbnail, uncloak-ит m_menuWindow и сразу применяет SWCA (0 → desired).
+                if (window)
+                {
+                    Win10PendingThumb pending{};
+                    pending.thumbnail = m_thumbnail;
+                    pending.backdropThumbnail = m_backdropThumbnail;
+                    pending.backdropWindow = m_backdropWindow;
+                    pending.rootVisual = m_rootVisual;
+                    pending.thumbnailVisual = std::move(m_thumbnailVisual);
+                    pending.backdropThumbnailVisual = std::move(m_backdropThumbnailVisual);
+                    m_thumbnail = nullptr;
+                    m_backdropThumbnail = nullptr;
+                    {
+                        std::lock_guard lock(g_win10PendingThumbMutex);
+                        g_win10PendingThumbs[window] = std::move(pending);
+                    }
+                }
+
+                HWND menuWnd = m_menuWindow;
+                m_menuWindow = nullptr;
+                DWORD_PTR sendResult = 0;
+                SendMessageTimeoutW(
+                    menuWnd,
+                    GetAnimationFinishedMsg(),
+                    reinterpret_cast<WPARAM>(window),
+                    0,
+                    SMTO_ABORTIFHUNG,
+                    2000,
+                    &sendResult);
+
+                // Fallback-очистка, если GUI-поток не обработал сообщение (timeout/destroy).
+                ReleaseWin10PendingThumb(window);
+
+                Utils::CloakWindow(window, TRUE);
+
+                if (m_dcompTarget)
+                    (void)m_dcompTarget->SetRoot(nullptr);
+                m_dcompTarget.reset();
+                m_rootVisual.reset();
+                m_backdropThumbnailVisual.reset();
+                if (auto dev = Shared::DXHelper::LazyDComposition::GetInstance().GetDCompositionDevice())
+                    (void)dev->Commit();
+
+                if (m_backdropThumbnail)
+                {
+                    DwmUnregisterThumbnail(m_backdropThumbnail);
+                    m_backdropThumbnail = nullptr;
+                }
+                if (window)
+                {
+                    SendNotifyMessageW(window, WM_CLOSE, 0, 0);
+                    window = nullptr;
+                }
+                if (m_backdropWindow)
+                {
+                    SendNotifyMessageW(m_backdropWindow, WM_CLOSE, 0, 0);
+                    m_backdropWindow = nullptr;
+                }
+                (void)DwmFlush();
+                return;
+            }
+
             Finish();
+
+            // Сначала отпускаем DComp-визуалы, коммитим teardown в DWM, отрегистрируем DWM thumbnail
+            // и закрываем оверлей/backdrop-окна, и только затем уведомляем real flyout синхронно —
+            // иначе PaintHostBorder/SWCA/WM_PRINTCLIENT в OnFlyoutAnimationFinished
+            // выполняются поверх живого DWM thumbnail и оверлея.
+            if (m_dcompTarget)
+                (void)m_dcompTarget->SetRoot(nullptr);
+            m_dcompTarget.reset();
+            m_rootVisual.reset();
+            m_thumbnailVisual.reset();
+            m_backdropThumbnailVisual.reset();
+            if (auto dev = Shared::DXHelper::LazyDComposition::GetInstance().GetDCompositionDevice())
+                (void)dev->Commit();
+
+            if (m_thumbnail)
+            {
+                DwmUnregisterThumbnail(m_thumbnail);
+                m_thumbnail = nullptr;
+            }
+            if (m_backdropThumbnail)
+            {
+                DwmUnregisterThumbnail(m_backdropThumbnail);
+                m_backdropThumbnail = nullptr;
+            }
+            if (window)
+            {
+                SendNotifyMessageW(window, WM_CLOSE, 0, 0);
+                window = nullptr;
+            }
+            if (m_backdropWindow)
+            {
+                SendNotifyMessageW(m_backdropWindow, WM_CLOSE, 0, 0);
+                m_backdropWindow = nullptr;
+            }
+            (void)DwmFlush();
+
             if (m_menuWindow)
             {
                 HWND menuWnd = m_menuWindow;
@@ -1019,26 +1439,6 @@ namespace GlassCore::Animation
                 SendMessageTimeoutW(
                     menuWnd, GetAnimationFinishedMsg(), 0, 0,
                     SMTO_ABORTIFHUNG, 1000, &sendResult);
-            }
-            if (window)
-            {
-                SendNotifyMessageW(window, WM_CLOSE, 0, 0);
-                window = nullptr;
-            }
-            if (m_backdropWindow)
-            {
-                SendNotifyMessageW(m_backdropWindow, WM_CLOSE, 0, 0);
-                m_backdropWindow = nullptr;
-            }
-            if (m_thumbnail)
-            {
-                DwmUnregisterThumbnail(m_thumbnail);
-                m_thumbnail = nullptr;
-            }
-            if (m_backdropThumbnail)
-            {
-                DwmUnregisterThumbnail(m_backdropThumbnail);
-                m_backdropThumbnail = nullptr;
             }
         }
 
@@ -1412,6 +1812,12 @@ namespace GlassCore::Animation
                             DebugLog(DBG_IMPORTANT,
                                 L"[GlassCore][Animation] MenuPopupIn finished hwnd=0x%p",
                                 menuAnim->FlyoutHwnd());
+                        }
+                        else if (auto* ddAnim = dynamic_cast<DropDownPopupIn*>(info.get()))
+                        {
+                            DebugLog(DBG_IMPORTANT,
+                                L"[GlassCore][Animation] DropDownPopupIn finished hwnd=0x%p",
+                                ddAnim->FlyoutHwnd());
                         }
                         it = localStorage.erase(it);
                     }

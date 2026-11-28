@@ -34,4 +34,7 @@ namespace GlassCore::FlyoutFrame
         const Settings::BorderContext& border,
         unsigned effectType,
         FlyoutHostBorderFlush flush = FlyoutHostBorderFlush::FrameOnly) noexcept;
+
+    /// Временная диагностика поверхности/z-order после uncloak flyout (только Win10 < 22000).
+    void LogWin10PostUncloakSurfaceDiag(HWND hWnd, const wchar_t* tag) noexcept;
 }

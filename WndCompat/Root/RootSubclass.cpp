@@ -93,11 +93,19 @@ namespace
         return pfn;
     }
 
-    /// Shell-root и auxiliary: SWCA на Root_Attach не вызываем —
+    /// Win11 shell-root (CabinetWClass/ExploreWClass) обслуживает ExplorerRootSubclassProc;
+    /// на Win10 (<22000) проводник идёт через общий RootSubclassProc.
+    [[nodiscard]] bool IsWin11FileExplorerShellRoot(HWND hRoot) noexcept
+    {
+        return Shared::SystemHelper::g_buildNumber >= 22000
+            && Shared::RootBackdropPolicy::IsFileExplorerShellRootHwnd(hRoot);
+    }
+
+    /// Shell-root Win11 и auxiliary: SWCA на Root_Attach не вызываем —
     /// shell Win11 обслуживает ExplorerRootSubclassProc + DwmSetWindowAttribute IAT.
     [[nodiscard]] bool ShouldSkipRootAttachSwca(HWND hRoot) noexcept
     {
-        if (Shared::RootBackdropPolicy::IsFileExplorerShellRootHwnd(hRoot))
+        if (IsWin11FileExplorerShellRoot(hRoot))
             return true;
         if (const auto pfn = GetIsExplorerAuxiliaryRootFn())
         {
@@ -214,7 +222,7 @@ namespace
         RedrawWindow(hRoot, nullptr, nullptr,
             RDW_INVALIDATE | RDW_ERASE | RDW_ERASENOW | RDW_UPDATENOW | RDW_ALLCHILDREN | RDW_FRAME);
 
-        if (Shared::RootBackdropPolicy::IsFileExplorerShellRootHwnd(hRoot))
+        if (IsWin11FileExplorerShellRoot(hRoot))
             WndCompat::ExplorerRoot::PostExplorerChromeRedrawIfShellRoot(hRoot);
     }
 
@@ -1065,9 +1073,10 @@ namespace
                 return erased != 0 ? erased : TRUE;
             }
 
-            // Shell-проводник на RootSubclassProc (GLASS_DIAG_EXPLORER_USE_ROOT_SUBCLASS): как ExplorerRootSubclass —
-            // не заливаем клиент чёрным, иначе SWCA/DWM не видны (полное «чёрное окно»).
-            if (Shared::RootBackdropPolicy::IsFileExplorerShellRootHwnd(hWnd))
+            // Shell-проводник Win11 на RootSubclassProc (GLASS_DIAG_EXPLORER_USE_ROOT_SUBCLASS): как ExplorerRootSubclass —
+            // не заливаем клиент чёрным, иначе XAML-мост/SWCA/DWM не видны (полное «чёрное окно»).
+            // На Win10 (<22000) CabinetWClass — классическое Win32-окно и нуждается в чёрной базе под стекло.
+            if (IsWin11FileExplorerShellRoot(hWnd))
                 break;
 
             // VCL-таблицы (TStringGrid/TDrawGrid/TShownValueList) стирают фон
@@ -1222,7 +1231,7 @@ namespace
             if (!GlassShared::GlassIsBackdropAllowedForHwnd(hWnd))
                 break;
 
-            if (Shared::RootBackdropPolicy::IsFileExplorerShellRootHwnd(hWnd))
+            if (IsWin11FileExplorerShellRoot(hWnd))
                 break;
 
             const GlassShared::GlassControlKind kind = GlassShared::GlassGetWindowKind(hWnd);
@@ -1780,7 +1789,9 @@ namespace WndCompat
             return rWnd && rWnd == rFg;
         }();
 
-        if (!Shared::RootBackdropPolicy::IsFileExplorerShellRootHwnd(hRoot))
+        const bool isWin11ExplorerShellRoot = IsWin11FileExplorerShellRoot(hRoot);
+
+        if (!isWin11ExplorerShellRoot)
         {
             RedrawWindow(hRoot, nullptr, nullptr,
                 RDW_INVALIDATE | RDW_ERASE | RDW_ERASENOW | RDW_ALLCHILDREN | RDW_FRAME);
@@ -1788,7 +1799,7 @@ namespace WndCompat
 
         if (auto* provider = WndCompat::Root::GetRootEventProvider())
         {
-            if (Shared::RootBackdropPolicy::IsFileExplorerShellRootHwnd(hRoot))
+            if (isWin11ExplorerShellRoot)
             {
                 if (Shared::RootPolicyQuery::UsesSwcaBackdrop())
                     WndCompat::ExplorerRoot::ApplyShellBackdropOnBackdropEnabled(hRoot);
@@ -1811,7 +1822,7 @@ namespace WndCompat
             }
         }
 
-        if (Shared::RootBackdropPolicy::IsFileExplorerShellRootHwnd(hRoot))
+        if (isWin11ExplorerShellRoot)
         {
             RedrawWindow(hRoot, nullptr, nullptr,
                 RDW_INVALIDATE | RDW_ERASE | RDW_ERASENOW | RDW_UPDATENOW | RDW_ALLCHILDREN | RDW_FRAME);
@@ -2049,7 +2060,7 @@ namespace WndCompat
         if (!IsWindow(hRoot))
             return;
 
-        if (Shared::RootBackdropPolicy::IsFileExplorerShellRootHwnd(hRoot))
+        if (IsWin11FileExplorerShellRoot(hRoot))
         {
             ExplorerRoot::Detach(hRoot);
             return;

@@ -37,6 +37,9 @@ namespace GlassCore::DropDown
     /// Post-uncloak NC-рамка DropDown/ComboLBox/ViewControl (sync, FrameOnly).
     void PaintDeferredFlyoutBorderIfNeeded(HWND hWnd) noexcept;
     void OnFlyoutAnimationFinished(HWND hWnd) noexcept;
+    void PrepareForWin10Uncloak(HWND hWnd) noexcept;
+    void ApplyBackdropForWin10Uncloak(HWND hWnd) noexcept;
+    void FinalizeAfterWin10Uncloak(HWND hWnd) noexcept;
     void RefreshFlyoutClientAfterUncloak(HWND root) noexcept;
     bool QueryDropDownContext(WndCompat::DropDownContext* out) noexcept;
     void ClearFlyoutBorderDeferred(HWND hWnd) noexcept;

@@ -143,6 +143,29 @@ namespace GlassCore::Settings
         DwmTransitionOwnedWindow(hWnd, DWMTRANSITION_OWNEDWINDOW_REPOSITION);
     }
 
+    void ReapplyFlyoutBackdropAfterUncloakWin10(
+        HWND hWnd,
+        bool darkMode,
+        const WindowBackdropEffectContext& backdropContext) noexcept
+    {
+        if (Shared::SystemHelper::g_buildNumber >= 22000 || !hWnd || !IsWindow(hWnd))
+            return;
+
+        if (backdropContext.effectType == 0)
+            return;
+
+        // Win10 (<22000): вызывается сразу после DwmUnregisterThumbnail(m_thumbnail) и
+        // CloakWindow(hWnd, FALSE) БЕЗ промежуточного DwmFlush(), чтобы DWM не успел
+        // скомпозитить чёрный кадр AccentState=0. Выполняем чистый первичный переход
+        // 0 → desired; единый DwmFlush() выполняется в SubclassProc перед скрытием overlayWnd.
+        ApplyBackdropEffect(
+            hWnd,
+            darkMode,
+            backdropContext,
+            /*skipNcRendering=*/true,
+            /*flyoutBackdrop=*/true);
+    }
+
     void ApplyBorderEffect(HWND hWnd, bool darkMode, const BorderContext& border)
     {
         // Паритет TranslucentFlyouts ApiEx::ApplyBorderEffect — без TriggerWindowNCRendering (NC только из backdrop ET 6–8).
@@ -284,8 +307,25 @@ namespace GlassCore::Settings
     void ApplyPopupSwcaEffect(HWND hWnd, bool darkMode,
         const WindowBackdropEffectContext& backdropContext,
         const BorderContext& border,
-        bool skipNcRendering)
+        bool skipNcRendering,
+        bool deferWin10BackdropForAnim)
     {
+        if (deferWin10BackdropForAnim && Shared::SystemHelper::g_buildNumber < 22000)
+        {
+            // Win10 (<22000) + PopupIn: не применяем SWCA-акрил до cloak/thumbnail —
+            // иначе dwmcore кэширует битый CAccent, который сбрасывается только через
+            // чёрный ACCENT_DISABLED. Держим AccentState=0 и включаем DwmMakeWindowTransparent(TRUE),
+            // чтобы 0x00000000-фон оставался альфа-прозрачным в m_thumbnailVisual и поверх
+            // overlayWnd при handoff; затем ReapplyFlyoutBackdropAfterUncloakWin10 выполняет
+            // чистый первичный переход 0 → desired без чёрного кадра.
+            EffectHelper::EnableWindowDarkMode(hWnd, darkMode);
+            EffectHelper::SetWindowBackdrop(
+                hWnd, FALSE, 0, EffectHelper::EffectType::None, /*skipNcRendering=*/true, /*flyoutBackdrop=*/true);
+            EffectHelper::DwmMakeWindowTransparent(hWnd, TRUE);
+            ApplyBorderEffect(hWnd, darkMode, border);
+            return;
+        }
+
         // Паритет TranslucentFlyouts Api::ApplyEffect — без PreparePopupSwcaBackdropHwnd на show flyout.
         ApplyBackdropEffect(hWnd, darkMode, backdropContext, skipNcRendering, true);
         ApplyBorderEffect(hWnd, darkMode, border);
@@ -782,51 +822,85 @@ namespace GlassCore::Settings
     {
         RtlSecureZeroMemory(&context, sizeof(context));
 
-        // Как FlyoutControls + Registry::ReadBwmDwordFb:
-        // значения в HKCU\BWM\<part>\Animation; при отсутствии — в корне BWM (общие).
+        // Паритет с GlassSettings (FlyoutAnimRegistry.AnimSubKey):
+        //   раздел: <part>\Animation (и legacy <part> для EnableFluentAnimation);
+        //   общие:  Animation (и корень L"" для BWM/TF-совместимости).
         std::wstring animKey;
         animKey.assign(part);
         animKey.append(L"\\Animation");
         const std::wstring_view animPath{ animKey };
 
-        constexpr size_t kAnimFb = 1;
-        // BWM ApiEx: …\<part>\EnableFluentAnimation.
-        // Один сегмент + maxFallThrough=0 — без чтения из «голого» корня BWM.
+        auto tryGetAnimDword = [&](std::wstring_view valueName) noexcept -> std::optional<DWORD>
         {
-            const auto enAnim = Shared::RegHelper::TryGet<DWORD>(
-                { std::wstring_view(animKey) }, L"EnableFluentAnimation", 0);
-            const auto enPart = Shared::RegHelper::TryGet<DWORD>({ part }, L"EnableFluentAnimation", 0);
-            const DWORD enableDw = enAnim.has_value() ? enAnim.value()
-                : (enPart.has_value() ? enPart.value() : 0);
-            context.enable = (enableDw != 0);
+            if (auto v = Shared::RegHelper::TryGet<DWORD>({ animPath }, valueName, 0))
+                return v;
+            if (auto v = Shared::RegHelper::TryGet<DWORD>({ L"Animation" }, valueName, 0))
+                return v;
+            return Shared::RegHelper::TryGet<DWORD>({ L"" }, valueName, 0);
+        };
+
+        // EnableFluentAnimation: <part>\Animation → <part> → Animation → корень L"".
+        // Если явного ключа нет нигде, но в <part>\Animation или общем Animation уже
+        // присутствуют параметры анимации (предыдущие версии PopupHubPage писали их
+        // в Animation без EnableFluentAnimation), считаем анимацию включённой
+        // (паритет с FlyoutAnimRegistry.IsAnyPresent в GlassSettings).
+        {
+            std::optional<DWORD> en = Shared::RegHelper::TryGet<DWORD>({ animPath }, L"EnableFluentAnimation", 0);
+            if (!en)
+                en = Shared::RegHelper::TryGet<DWORD>({ part }, L"EnableFluentAnimation", 0);
+            if (!en)
+                en = Shared::RegHelper::TryGet<DWORD>({ L"Animation" }, L"EnableFluentAnimation", 0);
+            if (!en)
+                en = Shared::RegHelper::TryGet<DWORD>({ L"" }, L"EnableFluentAnimation", 0);
+
+            if (en.has_value())
+            {
+                context.enable = (en.value() != 0);
+            }
+            else
+            {
+                constexpr std::wstring_view kVisibleAnimValues[] = {
+                    L"PopInStyle",
+                    L"FadeOutTime",
+                    L"PopInTime",
+                    L"FadeInTime",
+                    L"StartRatio",
+                    L"ImmediateInterrupting",
+                    L"ImmediateInterupting",
+                    L"EnableImmediateInterupting"
+                };
+                bool anyPresent = false;
+                for (const auto name : kVisibleAnimValues)
+                {
+                    if (Shared::RegHelper::TryGet<DWORD>({ animPath }, name, 0).has_value()
+                        || Shared::RegHelper::TryGet<DWORD>({ L"Animation" }, name, 0).has_value())
+                    {
+                        anyPresent = true;
+                        break;
+                    }
+                }
+                context.enable = anyPresent;
+            }
         }
 
-        context.fadeOutTime = Shared::RegHelper::Get<DWORD>(
-            { animPath, L"" }, L"FadeOutTime", 350, kAnimFb);
+        context.fadeOutTime = tryGetAnimDword(L"FadeOutTime").value_or(350);
 
         {
-            std::optional<DWORD> imm = Shared::RegHelper::TryGet<DWORD>(
-                { animPath, L"" }, L"ImmediateInterrupting", kAnimFb);
+            std::optional<DWORD> imm = tryGetAnimDword(L"ImmediateInterrupting");
             if (!imm)
-                imm = Shared::RegHelper::TryGet<DWORD>(
-                    { animPath, L"" }, L"ImmediateInterupting", kAnimFb);
+                imm = tryGetAnimDword(L"ImmediateInterupting");
             if (!imm)
-                imm = Shared::RegHelper::TryGet<DWORD>(
-                    { animPath, L"" }, L"EnableImmediateInterupting", kAnimFb);
+                imm = tryGetAnimDword(L"EnableImmediateInterupting");
             context.immediateInterupting = (imm.value_or(0) != 0);
         }
 
-        context.startRatio = Shared::RegHelper::Get<DWORD>(
-            { animPath, L"" }, L"StartRatio", 50, kAnimFb);
+        context.startRatio = tryGetAnimDword(L"StartRatio").value_or(50);
 
-        context.popInTime = Shared::RegHelper::Get<DWORD>(
-            { animPath, L"" }, L"PopInTime", 250, kAnimFb);
+        context.popInTime = tryGetAnimDword(L"PopInTime").value_or(250);
 
-        context.fadeInTime = Shared::RegHelper::Get<DWORD>(
-            { animPath, L"" }, L"FadeInTime", 87, kAnimFb);
+        context.fadeInTime = tryGetAnimDword(L"FadeInTime").value_or(87);
 
-        context.popInStyle = Shared::RegHelper::Get<DWORD>(
-            { animPath, L"" }, L"PopInStyle", 0, kAnimFb);
+        context.popInStyle = tryGetAnimDword(L"PopInStyle").value_or(0);
     }
 
     void QueryTooltipRenderingContext(TooltipRenderingContext& context, bool darkMode)

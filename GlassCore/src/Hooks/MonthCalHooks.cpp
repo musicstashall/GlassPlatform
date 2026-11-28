@@ -379,17 +379,25 @@ namespace GlassCore::MonthCal
         GlassCore::Settings::QueryBorderContext(L"DropDown", darkMode, border);
         GlassCore::Settings::QueryFlyoutAnimationContext(L"DropDown", animation);
 
-        GlassCore::Settings::ApplyEffect(hWndDropDown, darkMode, backdrop, border);
+        GlassCore::Settings::ApplyPopupSwcaEffect(
+            hWndDropDown, darkMode, backdrop, border, false, animation.enable);
 
         if (animation.enable)
         {
-            GlassCore::Animation::CreateDropDownPopupIn(
+            const HRESULT hr = GlassCore::Animation::CreateDropDownPopupIn(
                 hWndDropDown,
                 static_cast<float>(animation.startRatio) / 100.f,
                 std::chrono::milliseconds{ animation.popInTime },
                 std::chrono::milliseconds{ animation.fadeInTime },
                 animation.popInStyle,
                 animation.immediateInterupting);
+            if (FAILED(hr) || hr == S_FALSE)
+            {
+                BOOL uncloak = FALSE;
+                (void)DwmSetWindowAttribute(hWndDropDown, DWMWA_CLOAK, &uncloak, sizeof(uncloak));
+                GlassCore::Settings::ApplyPopupSwcaEffect(
+                    hWndDropDown, darkMode, backdrop, border, false, false);
+            }
         }
     }
 

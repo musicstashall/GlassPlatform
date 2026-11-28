@@ -8,6 +8,7 @@
 #include <Subsystems/RenderText.h>
 #include <Subsystems/MenuRendering.h>
 #include <Helpers/ThemeHelper.h>
+#include <Helpers/SystemHelper.h>
 #include <Core/Intercept/HookDispatcher.h>
 #include <wil.h>
 #include <uxtheme.h>
@@ -356,7 +357,7 @@ namespace GlassCore::DropDown
             OnPaintEnd(hwnd);
         }
 
-        void SyncComboLBoxClientPaint(HWND root) noexcept
+        void SyncComboLBoxClientPaint(HWND root, bool skipWin10Swca = false) noexcept
         {
             GlassCore::ComboLBox::OnComboLBoxPrintClientBegin(root);
 
@@ -378,7 +379,12 @@ namespace GlassCore::DropDown
             // попадает в очередь этого же потока и обрабатывается после возврата —
             // тогда RDW_UPDATENOW действительно доходит до WM_PAINT (sync RedrawWindow
             // внутри сессии на клиенте в «доаттачном» белом виде фактически не красил).
-            (void)::PostMessageW(root, WndCompat::WM_GLASS_FLYOUT_CLIENT_REFRESH, 0, 0);
+            // wParam == 1 означает, что Win10 SWCA-backdrop уже пересобран в OnFlyoutAnimationFinished.
+            (void)::PostMessageW(
+                root,
+                WndCompat::WM_GLASS_FLYOUT_CLIENT_REFRESH,
+                static_cast<WPARAM>(skipWin10Swca ? 1 : 0),
+                0);
         }
 
         void SyncViewControlClientPaint(HWND root) noexcept
@@ -390,7 +396,7 @@ namespace GlassCore::DropDown
                 RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
         }
 
-        void RefreshFlyoutClientPaint(HWND root, const wchar_t* modeLabel) noexcept
+        void RefreshFlyoutClientPaint(HWND root, const wchar_t* modeLabel, bool skipWin10Swca = false) noexcept
         {
             if (!root || !::IsWindow(root))
                 return;
@@ -401,7 +407,7 @@ namespace GlassCore::DropDown
             }
             else if (IsComboLBoxClass(root))
             {
-                SyncComboLBoxClientPaint(root);
+                SyncComboLBoxClientPaint(root, skipWin10Swca);
             }
             else
             {
@@ -594,7 +600,7 @@ namespace GlassCore::DropDown
             }
 
             GlassCore::Settings::ApplyPopupSwcaEffect(
-                target, ctx.useDarkMode, ctx.backdropEffect, ctx.border, false);
+                target, ctx.useDarkMode, ctx.backdropEffect, ctx.border, false, deferBorder);
 
             if (!deferBorder)
             {
@@ -624,6 +630,17 @@ namespace GlassCore::DropDown
                     ctx.animation.popInStyle,
                     ctx.animation.immediateInterupting);
                 DebugLog(L"[GlassCore][DropDown] CreateDropDownPopupIn hr=0x%08X hwnd=0x%p", hr, target);
+
+                if (FAILED(hr) || hr == S_FALSE)
+                {
+                    GlassCore::FlyoutFrame::ClearHostBorderDeferred(target);
+                    BOOL uncloak = FALSE;
+                    (void)DwmSetWindowAttribute(target, DWMWA_CLOAK, &uncloak, sizeof(uncloak));
+                    GlassCore::Settings::ApplyPopupSwcaEffect(
+                        target, ctx.useDarkMode, ctx.backdropEffect, ctx.border, false, false);
+                    GlassCore::FlyoutFrame::PaintHostBorder(
+                        target, ctx.useDarkMode, ctx.border, ctx.backdropEffect.effectType);
+                }
             }
         }
     }
@@ -715,13 +732,90 @@ namespace GlassCore::DropDown
         return true;
     }
 
+    void PrepareForWin10Uncloak(HWND hWnd) noexcept
+    {
+        if (!hWnd || !::IsWindow(hWnd))
+            return;
+
+        // Win10 (<22000): выполняем всю GDI-отрисовку рамки и клиентского контента
+        // (включая WM_ERASEBKGND BLACKNESS + SysListView32) ДО CloakWindow(hWnd, FALSE),
+        // пока hWnd скрыто за overlayWnd и не может выдать чёрный кадр на экран.
+        PaintDeferredFlyoutBorderIfNeeded(hWnd);
+
+        if (IsViewControlClass(hWnd))
+        {
+            SyncViewControlClientPaint(hWnd);
+        }
+        else if (!IsComboLBoxClass(hWnd))
+        {
+            std::vector<HWND> targets;
+            CollectChildWindowsByClass(hWnd, L"ListviewPopup", targets);
+            if (targets.empty())
+                CollectChildWindowsByClass(hWnd, L"SysListView32", targets);
+            if (targets.empty())
+                targets.push_back(hWnd);
+
+            for (HWND const target : targets)
+                RedrawFlyoutContentHwnd(target);
+        }
+
+        FlyoutFrame::ClearHostBorderDeferred(hWnd);
+    }
+
+    void ApplyBackdropForWin10Uncloak(HWND hWnd) noexcept
+    {
+        if (!hWnd || !::IsWindow(hWnd))
+            return;
+
+        if (Shared::SystemHelper::g_buildNumber < 22000)
+        {
+            auto ctx = WndCompat::g_dropDownCtx;
+            if (ctx.backdropEffect.effectType == 0)
+            {
+                FillDropDownContext(ctx);
+            }
+            GlassCore::Settings::ReapplyFlyoutBackdropAfterUncloakWin10(
+                hWnd, ctx.useDarkMode, ctx.backdropEffect);
+        }
+    }
+
+    void FinalizeAfterWin10Uncloak(HWND hWnd) noexcept
+    {
+        if (!hWnd || !::IsWindow(hWnd))
+            return;
+
+        if (IsComboLBoxClass(hWnd))
+        {
+            SyncComboLBoxClientPaint(hWnd, /*skipWin10Swca=*/true);
+        }
+    }
+
     void OnFlyoutAnimationFinished(HWND hWnd) noexcept
     {
         if (!hWnd || !::IsWindow(hWnd))
             return;
 
+        // Win10 (<22000): ставим SWCA-backdrop (0 → desired) СРАЗУ после CloakWindow(FALSE),
+        // до синхронной отрисовки рамки и client-контента, чтобы не было окна для чёрного кадра.
+        if (Shared::SystemHelper::g_buildNumber < 22000)
+        {
+            auto ctx = WndCompat::g_dropDownCtx;
+            if (ctx.backdropEffect.effectType == 0)
+            {
+                FillDropDownContext(ctx);
+            }
+            GlassCore::Settings::ReapplyFlyoutBackdropAfterUncloakWin10(
+                hWnd, ctx.useDarkMode, ctx.backdropEffect);
+        }
+
         PaintDeferredFlyoutBorderIfNeeded(hWnd);
-        RefreshFlyoutClientAfterUncloak(hWnd);
+
+        if (IsViewControlClass(hWnd))
+            RefreshFlyoutClientPaint(hWnd, L"ViewControl", /*skipWin10Swca=*/true);
+        else if (IsComboLBoxClass(hWnd))
+            RefreshFlyoutClientPaint(hWnd, L"ComboLBox", /*skipWin10Swca=*/true);
+        else
+            RefreshFlyoutClientPaint(hWnd, L"DropDown", /*skipWin10Swca=*/true);
         FlyoutFrame::ClearHostBorderDeferred(hWnd);
     }
 
