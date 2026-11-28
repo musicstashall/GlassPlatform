@@ -1065,7 +1065,7 @@ namespace GlassCore::Animation
 
         virtual ~PopupIn() noexcept
         {
-            if (Shared::SystemHelper::g_buildNumber < 22000 && m_menuWindow && IsWindow(m_menuWindow))
+            if (GetBuildNumber() < 22000 && m_menuWindow && IsWindow(m_menuWindow))
             {
                 // Win10 (<22000): оставляем animation-оверлей `window` видимым поверх `m_menuWindow`,
                 // пока реальное окно uncloak-ится, рисует рамку и пересобирает SWCA-backdrop
