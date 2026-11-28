@@ -238,11 +238,8 @@ namespace GlassCore::Menu
 
         FlyoutFrame::ClearHostBorderDeferred(hWnd);
 
-        OnPaintFlyoutHostBorder(
-            hWnd,
-            WndCompat::Menu::FlyoutBorderPass::SetupAndPaint,
-            nullptr);
-
+        // Win10 (<22000): ставим SWCA-backdrop (0 → desired) СРАЗУ после CloakWindow(FALSE),
+        // до синхронной отрисовки 1px рамки, чтобы не было окна для чёрного кадра AccentState=0.
         if (Shared::SystemHelper::g_buildNumber < 22000)
         {
             const bool dark = MenuHandler::GetContext().useDarkMode;
@@ -250,6 +247,11 @@ namespace GlassCore::Menu
             Settings::QueryBackdropEffectContext(L"Menu", dark, backdrop);
             Settings::ReapplyFlyoutBackdropAfterUncloakWin10(hWnd, dark, backdrop);
         }
+
+        OnPaintFlyoutHostBorder(
+            hWnd,
+            WndCompat::Menu::FlyoutBorderPass::SetupAndPaint,
+            nullptr);
 
         DebugLog(DBG_IMPORTANT,
             L"[GlassCore][MenuEvents] PaintDeferredFlyoutBorderIfNeeded hwnd=0x%p",

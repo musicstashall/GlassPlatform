@@ -60,6 +60,8 @@
 #include <uxtheme.h>
 #include <vssym32.h>
 #include <algorithm>
+#include <mutex>
+#include <unordered_map>
 
 
 #pragma comment(lib, "dwmapi.lib")
@@ -87,6 +89,41 @@ namespace GlassCore::Animation
                 return v.dwBuildNumber;
             }();
         return build;
+    }
+
+    struct Win10PendingThumb
+    {
+        HTHUMBNAIL thumbnail = nullptr;
+        wil::com_ptr<IDCompositionVisual2> rootVisual;
+        wil::com_ptr<IDCompositionVisual2> thumbnailVisual;
+    };
+
+    static std::mutex g_win10PendingThumbMutex;
+    static std::unordered_map<HWND, Win10PendingThumb> g_win10PendingThumbs;
+
+    static void ReleaseWin10PendingThumb(HWND overlayWnd) noexcept
+    {
+        if (!overlayWnd)
+            return;
+
+        Win10PendingThumb pending{};
+        {
+            std::lock_guard lock(g_win10PendingThumbMutex);
+            auto it = g_win10PendingThumbs.find(overlayWnd);
+            if (it == g_win10PendingThumbs.end())
+                return;
+            pending = std::move(it->second);
+            g_win10PendingThumbs.erase(it);
+        }
+
+        if (pending.rootVisual && pending.thumbnailVisual)
+            (void)pending.rootVisual->RemoveVisual(pending.thumbnailVisual.get());
+        pending.thumbnailVisual.reset();
+        pending.rootVisual.reset();
+        if (auto dev = Shared::DXHelper::LazyDComposition::GetInstance().GetDCompositionDevice())
+            (void)dev->Commit();
+        if (pending.thumbnail)
+            (void)DwmUnregisterThumbnail(pending.thumbnail);
     }
 
     static bool IsWindowClass(HWND hWnd, const wchar_t* className)
@@ -904,10 +941,12 @@ namespace GlassCore::Animation
             HWND overlayWnd = (GetBuildNumber() < 22000) ? reinterpret_cast<HWND>(wParam) : nullptr;
             if (overlayWnd && IsWindow(overlayWnd))
             {
-                // Win10 (<22000): к этому моменту m_thumbnail уже отрегистрирован (чтобы dwmcore
-                // разрешил пересборку CAccent на hWnd), а overlayWnd содержит только
-                // m_backdropThumbnailVisual (готовый акрил). Ставим overlayWnd ровно под hWnd
-                // и uncloak-им hWnd поверх него — без кадра дырки на время пересборки SWCA.
+                // Win10 (<22000): ставим overlayWnd ровно под hWnd (пока hWnd ещё cloaked),
+                // затем атомарно на GUI-потоке без единого промежуточного DwmFlush() выполняем:
+                // RemoveVisual/DwmUnregisterThumbnail(m_thumbnail) → CloakWindow(hWnd, FALSE) →
+                // ApplyBackdropEffect(0 → desired) → PaintHostBorder → единый DwmFlush() →
+                // CloakWindow(overlayWnd, TRUE). Так в композитор попадает сразу готовый кадр
+                // без чёрного кадра AccentState=0 и без пропадания текста.
                 const bool targetTopmost = (GetWindowLongPtrW(hWnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
                 if (!targetTopmost)
                 {
@@ -918,13 +957,16 @@ namespace GlassCore::Animation
                 SetWindowPos(
                     overlayWnd, hWnd, 0, 0, 0, 0,
                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOSENDCHANGING);
+
+                ReleaseWin10PendingThumb(overlayWnd);
             }
 
             // Гарантируем uncloak на GUI-потоке владельца: на Win10 DWMWA_CLOAK с worker-потока
             // до закрытия оверлея/thumbnail может оставить окно скрытым в DWM.
             Utils::CloakWindow(hWnd, FALSE);
 
-            // Post-uncloak: однократная отрисовка рамки на real flyout (sync, без WM_GLASS).
+            // Post-uncloak: на Win10 первым делом применяет SWCA (0 → desired), затем
+            // однократная отрисовка рамки на real flyout (sync, без WM_GLASS).
             // #32768 — меню (L"Menu"); остальные flyout (ComboLBox/DropDown/Listviewpopup/ViewControl) — L"DropDown".
             const bool isMenu = IsWindowClass(hWnd, L"#32768");
             if (isMenu)
@@ -934,6 +976,7 @@ namespace GlassCore::Animation
 
             if (overlayWnd && IsWindow(overlayWnd))
             {
+                (void)DwmFlush();
                 Utils::CloakWindow(overlayWnd, TRUE);
                 (void)DwmFlush();
                 GlassCore::FlyoutFrame::LogWin10PostUncloakSurfaceDiag(
@@ -1096,22 +1139,21 @@ namespace GlassCore::Animation
         {
             if (GetBuildNumber() < 22000 && m_menuWindow && IsWindow(m_menuWindow))
             {
-                // Win10 (<22000): DwmpCreateSharedThumbnailVisual(DWM_TNP_SOURCECLIENTAREAONLY)
-                // на m_menuWindow подавляет пересборку CAccent пока m_thumbnail зарегистрирован.
-                // Поэтому сначала снимаем ТОЛЬКО m_thumbnailVisual + m_thumbnail (оставляя `window`
-                // с живым m_backdropThumbnailVisual — готовым акриловым фоном!), затем передаём
-                // `window` в GetAnimationFinishedMsg: на GUI-потоке `window` ставится ровно ПОД
-                // m_menuWindow, m_menuWindow uncloak-ится поверх него и пересобирает собственный
-                // SWCA-backdrop, после чего `window` скрывается и уничтожается.
-                if (m_rootVisual && m_thumbnailVisual)
-                    (void)m_rootVisual->RemoveVisual(m_thumbnailVisual.get());
-                m_thumbnailVisual.reset();
-                if (auto dev = Shared::DXHelper::LazyDComposition::GetInstance().GetDCompositionDevice())
-                    (void)dev->Commit();
-                if (m_thumbnail)
+                // Win10 (<22000): оставляем m_thumbnailVisual живым на overlayWnd до самого
+                // момента выполнения GetAnimationFinishedMsg на GUI-потоке, чтобы контент
+                // не пропадал в ожидании SendMessageTimeoutW. GUI-поток атомарно снимает
+                // m_thumbnail, uncloak-ит m_menuWindow и сразу применяет SWCA (0 → desired).
+                if (window)
                 {
-                    DwmUnregisterThumbnail(m_thumbnail);
+                    Win10PendingThumb pending{};
+                    pending.thumbnail = m_thumbnail;
+                    pending.rootVisual = m_rootVisual;
+                    pending.thumbnailVisual = std::move(m_thumbnailVisual);
                     m_thumbnail = nullptr;
+                    {
+                        std::lock_guard lock(g_win10PendingThumbMutex);
+                        g_win10PendingThumbs[window] = std::move(pending);
+                    }
                 }
 
                 HWND menuWnd = m_menuWindow;
@@ -1125,6 +1167,9 @@ namespace GlassCore::Animation
                     SMTO_ABORTIFHUNG,
                     2000,
                     &sendResult);
+
+                // Fallback-очистка, если GUI-поток не обработал сообщение (timeout/destroy).
+                ReleaseWin10PendingThumb(window);
 
                 Utils::CloakWindow(window, TRUE);
 

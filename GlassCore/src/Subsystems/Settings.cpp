@@ -154,20 +154,16 @@ namespace GlassCore::Settings
         if (backdropContext.effectType == 0)
             return;
 
-        // Win10 (<22000): m_thumbnail уже отрегистрирован, overlayWnd с готовым акрилом
-        // стоит ровно под hWnd, а само hWnd держит AccentState=0 + DwmMakeWindowTransparent(TRUE)
-        // (прозрачно поверх overlayWnd, без дырки и без чёрного кадра).
-        // 1 DwmFlush гарантирует, что DWM завершил DwmUnregisterThumbnail + Uncloak,
-        // после чего ApplyBackdropEffect выполняет чистый первичный переход 0 → desired.
-        (void)DwmFlush();
-
+        // Win10 (<22000): вызывается сразу после DwmUnregisterThumbnail(m_thumbnail) и
+        // CloakWindow(hWnd, FALSE) БЕЗ промежуточного DwmFlush(), чтобы DWM не успел
+        // скомпозитить чёрный кадр AccentState=0. Выполняем чистый первичный переход
+        // 0 → desired; единый DwmFlush() выполняется в SubclassProc перед скрытием overlayWnd.
         ApplyBackdropEffect(
             hWnd,
             darkMode,
             backdropContext,
             /*skipNcRendering=*/true,
             /*flyoutBackdrop=*/true);
-        (void)DwmFlush();
     }
 
     void ApplyBorderEffect(HWND hWnd, bool darkMode, const BorderContext& border)

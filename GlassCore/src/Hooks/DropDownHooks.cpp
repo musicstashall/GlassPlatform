@@ -737,11 +737,8 @@ namespace GlassCore::DropDown
         if (!hWnd || !::IsWindow(hWnd))
             return;
 
-        PaintDeferredFlyoutBorderIfNeeded(hWnd);
-
-        // Win10 (<22000): до анимации hWnd держало AccentState=0 + DwmMakeWindowTransparent(TRUE),
-        // m_thumbnail уже отрегистрирован, а overlayWnd держит акрил под hWnd —
-        // выполняем чистый первичный переход 0 → desired + DwmFlush().
+        // Win10 (<22000): ставим SWCA-backdrop (0 → desired) СРАЗУ после CloakWindow(FALSE),
+        // до синхронной отрисовки рамки и client-контента, чтобы не было окна для чёрного кадра.
         if (Shared::SystemHelper::g_buildNumber < 22000)
         {
             auto ctx = WndCompat::g_dropDownCtx;
@@ -752,6 +749,8 @@ namespace GlassCore::DropDown
             GlassCore::Settings::ReapplyFlyoutBackdropAfterUncloakWin10(
                 hWnd, ctx.useDarkMode, ctx.backdropEffect);
         }
+
+        PaintDeferredFlyoutBorderIfNeeded(hWnd);
 
         if (IsViewControlClass(hWnd))
             RefreshFlyoutClientPaint(hWnd, L"ViewControl", /*skipWin10Swca=*/true);
