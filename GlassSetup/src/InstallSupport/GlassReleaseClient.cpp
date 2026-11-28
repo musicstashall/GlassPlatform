@@ -1,4 +1,5 @@
 #include "GlassReleaseClient.h"
+#include "GlassInstallLog.h"
 #include <winhttp.h>
 #include <wincrypt.h>
 #include <sddl.h>
@@ -43,6 +44,25 @@ bool AllowedHost(const std::wstring& host){
 }
 // Redirects are followed manually so neither TLS nor GitHub host restrictions
 // can be bypassed. No auth tokens, shell, PowerShell or external downloader.
+// Name resolution and a refused connect mean the network cannot be reached.
+// Those are not retried. A reset, timeout or handshake drop (including 12030
+// while a VPN route changes) is transient and is retried by Get.
+bool IsOfflineCode(DWORD code) noexcept {
+    return code==ERROR_WINHTTP_NAME_NOT_RESOLVED||code==ERROR_WINHTTP_CANNOT_CONNECT;
+}
+bool IsTransientCode(DWORD code) noexcept {
+    switch(code){
+    case ERROR_WINHTTP_TIMEOUT:
+    case ERROR_WINHTTP_CONNECTION_ERROR:
+    case ERROR_WINHTTP_SHUTDOWN:
+    case ERROR_WINHTTP_RESEND_REQUEST:
+    case ERROR_WINHTTP_SECURE_FAILURE:
+    case ERROR_WINHTTP_SECURE_CHANNEL_ERROR:
+        return true;
+    default:
+        return false;
+    }
+}
 // Request/read transport codes only. HTTP status, headers, redirect policy,
 // local I/O and content limits are not network access failures.
 bool IsRequestTransportCode(DWORD code) noexcept {
@@ -52,6 +72,7 @@ bool IsRequestTransportCode(DWORD code) noexcept {
     case ERROR_WINHTTP_CANNOT_CONNECT:
     case ERROR_WINHTTP_CONNECTION_ERROR:
     case ERROR_WINHTTP_SHUTDOWN:
+    case ERROR_WINHTTP_RESEND_REQUEST:
     case ERROR_WINHTTP_SECURE_FAILURE:
     case ERROR_WINHTTP_SECURE_CERT_DATE_INVALID:
     case ERROR_WINHTTP_SECURE_CERT_CN_INVALID:
@@ -66,10 +87,20 @@ bool IsRequestTransportCode(DWORD code) noexcept {
         return false;
     }
 }
-bool FailRequest(std::wstring& error,Failure* failure,const wchar_t* operation){
+bool FailRequest(std::wstring& error,Failure* failure,const wchar_t* operation,DWORD* codeOut=nullptr){
     const DWORD code=GetLastError();
+    if(codeOut)*codeOut=code;
     if(failure&&IsRequestTransportCode(code))*failure=Failure::Transport;
     return Fail(error,operation,code);
+}
+bool PauseTransientRetry(int attempt,const std::atomic<bool>& cancel,std::wstring& error){
+    const unsigned shift=attempt>0&&attempt<4?static_cast<unsigned>(attempt-1):2u;
+    const DWORD wait=500u<<shift;
+    for(DWORD slept=0;slept<wait;slept+=100){
+        if(Cancelled(cancel,error))return false;
+        Sleep(100);
+    }
+    return !Cancelled(cancel,error);
 }
 bool RewindFile(HANDLE file,std::uint64_t offset,bool truncate,std::wstring& error){
     LARGE_INTEGER at{};at.QuadPart=static_cast<LONGLONG>(offset);
@@ -80,13 +111,14 @@ bool RewindFile(HANDLE file,std::uint64_t offset,bool truncate,std::wstring& err
 // A package file that already has bytes is continued with Range. A catalog
 // response (no output file) is always a fresh GET. 200 after a Range request
 // means the server ignored the range, so the partial file is replaced.
-bool Get(const std::wstring& initial,HANDLE output,std::string* text,std::uint64_t limit,
-    const std::atomic<bool>& cancel,std::wstring& error,Failure* failure){
+bool GetAttempt(const std::wstring& initial,HANDLE output,std::string* text,std::uint64_t limit,
+    const std::atomic<bool>& cancel,std::wstring& error,Failure* failure,DWORD* requestCode){
     if(failure)*failure=Failure::None;
+    if(requestCode)*requestCode=0;
     Internet session(WinHttpOpen(L"GlassSetup/ReleaseClient",WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
         WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,0));
-    if(!session.h)return FailRequest(error,failure,L"WinHttpOpen");
-    if(!WinHttpSetTimeouts(session.h,4000,4000,4000,8000))return FailRequest(error,failure,L"WinHttpSetTimeouts");
+    if(!session.h)return FailRequest(error,failure,L"WinHttpOpen",requestCode);
+    if(!WinHttpSetTimeouts(session.h,4000,4000,4000,8000))return FailRequest(error,failure,L"WinHttpSetTimeouts",requestCode);
     std::uint64_t resumeFrom=0;
     if(!text&&output!=INVALID_HANDLE_VALUE){
         LARGE_INTEGER size{};
@@ -108,17 +140,17 @@ bool Get(const std::wstring& initial,HANDLE output,std::string* text,std::uint64
         std::wstring path(parts.lpszUrlPath,parts.dwUrlPathLength);
         if(parts.dwExtraInfoLength)path.append(parts.lpszExtraInfo,parts.dwExtraInfoLength);
         Internet connection(WinHttpConnect(session.h,host.c_str(),parts.nPort,0));
-        if(!connection.h)return FailRequest(error,failure,L"WinHttpConnect");
+        if(!connection.h)return FailRequest(error,failure,L"WinHttpConnect",requestCode);
         Internet request(WinHttpOpenRequest(connection.h,L"GET",path.c_str(),nullptr,WINHTTP_NO_REFERER,
             WINHTTP_DEFAULT_ACCEPT_TYPES,WINHTTP_FLAG_SECURE));
-        if(!request.h)return FailRequest(error,failure,L"WinHttpOpenRequest");
+        if(!request.h)return FailRequest(error,failure,L"WinHttpOpenRequest",requestCode);
         DWORD policy=WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
         if(!WinHttpSetOption(request.h,WINHTTP_OPTION_REDIRECT_POLICY,&policy,sizeof(policy)))return Fail(error,L"WinHttpSetOption");
         std::wstring headers=text?L"Accept: application/vnd.github+json\r\nX-GitHub-Api-Version: 2022-11-28\r\n":
                                   L"Accept: application/octet-stream\r\n";
         if(!text&&resumeFrom)headers+=L"Range: bytes="+std::to_wstring(resumeFrom)+L"-\r\n";
         if(!WinHttpSendRequest(request.h,headers.c_str(),static_cast<DWORD>(-1),WINHTTP_NO_REQUEST_DATA,0,0,0)||
-            !WinHttpReceiveResponse(request.h,nullptr))return FailRequest(error,failure,L"GitHub request failed");
+            !WinHttpReceiveResponse(request.h,nullptr))return FailRequest(error,failure,L"GitHub request failed",requestCode);
         DWORD status=0,bytes=sizeof(status);
         if(!WinHttpQueryHeaders(request.h,WINHTTP_QUERY_STATUS_CODE|WINHTTP_QUERY_FLAG_NUMBER,
             WINHTTP_HEADER_NAME_BY_INDEX,&status,&bytes,WINHTTP_NO_HEADER_INDEX))return Fail(error,L"GitHub HTTP status");
@@ -146,7 +178,7 @@ bool Get(const std::wstring& initial,HANDLE output,std::string* text,std::uint64
         std::array<char,32768> buffer{};std::uint64_t total=resumeFrom;
         for(;;){
             if(Cancelled(cancel,error))return false;
-            DWORD read=0;if(!WinHttpReadData(request.h,buffer.data(),static_cast<DWORD>(buffer.size()),&read))return FailRequest(error,failure,L"GitHub download");
+            DWORD read=0;if(!WinHttpReadData(request.h,buffer.data(),static_cast<DWORD>(buffer.size()),&read))return FailRequest(error,failure,L"GitHub download",requestCode);
             if(!read)return true;
             total+=read;if(total>limit)return Fail(error,L"GitHub response too large",ERROR_FILE_TOO_LARGE);
             if(text)text->append(buffer.data(),read);
@@ -155,6 +187,29 @@ bool Get(const std::wstring& initial,HANDLE output,std::string* text,std::uint64
         }
     }
     return Fail(error,L"Too many GitHub redirects",ERROR_WINHTTP_REDIRECT_FAILED);
+}
+bool Get(const std::wstring& initial,HANDLE output,std::string* text,std::uint64_t limit,
+    const std::atomic<bool>& cancel,std::wstring& error,Failure* failure){
+    if(failure)*failure=Failure::None;
+    const std::size_t textMark=text?text->size():0;
+    DWORD code=0;
+    for(int attempt=0;attempt<4;++attempt){
+        if(attempt){
+            if(text)text->resize(textMark);
+            GlassInstallLog::LineFormat(L"GitHub request interrupted (%lu); retrying",code);
+            if(!PauseTransientRetry(attempt,cancel,error)){
+                if(failure)*failure=Failure::None;
+                return false;
+            }
+        }
+        if(GetAttempt(initial,output,text,limit,cancel,error,failure,&code))return true;
+        if(cancel.load(std::memory_order_acquire)){
+            if(failure)*failure=Failure::None;
+            return false;
+        }
+        if(!IsTransientCode(code))return false;
+    }
+    return false;
 }
 bool VerifyHash(HANDLE file,std::uint64_t expectedSize,const std::string& expectedHash,const std::atomic<bool>& cancel,std::wstring& error){
     LARGE_INTEGER size{};BY_HANDLE_FILE_INFORMATION info{};

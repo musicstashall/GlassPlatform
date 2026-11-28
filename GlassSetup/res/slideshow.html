@@ -223,6 +223,10 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 .error-mark{fill:none;stroke:url(#errorMarkGradient);stroke-width:8;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:190;stroke-dashoffset:190;filter:url(#errorSoftGlow);animation:error-mark-draw .72s .62s ease-out forwards}
 @keyframes error-mark-draw{to{stroke-dashoffset:0}}
 .error-spark{fill:#ffc2cc;filter:url(#errorSoftGlow);animation:node-pulse 2.3s ease-in-out infinite alternate}
+.recovery-warn{display:none}
+.recovery-triangle{fill:url(#recoveryMarkGradient);stroke:#e0b15a;stroke-width:3;stroke-linejoin:round}
+.recovery-bang{fill:none;stroke:#2b2417;stroke-width:8;stroke-linecap:round}
+.recovery-bang-dot{fill:#2b2417}
 .error-spark.s2{animation-delay:.7s}.error-spark.s3{animation-delay:1.2s}
 @media(prefers-reduced-motion:reduce){.error-ambient,.error-sheen,.error-copy,.error-tag:before,.error-visual,.error-orbit,.error-ring,.error-mark,.error-spark{animation-duration:.01ms!important;animation-iteration-count:1!important}.error-copy,.error-visual{opacity:1;transform:none}.error-ring,.error-mark{stroke-dashoffset:0}}
 /* A dropped update server is not a critical failure. Same page, amber warning standard, never coral. */
@@ -244,7 +248,8 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 #stage.is-recovery .error-halo{fill:url(#recoveryGlow)}
 #stage.is-recovery .error-ring{fill:#2a2418de;stroke:url(#recoveryRingGradient)}
 #stage.is-recovery .error-inner{fill:url(#recoveryFace);stroke:#f0c27a4f}
-#stage.is-recovery .error-mark{stroke:url(#recoveryMarkGradient)}
+#stage.is-recovery .error-mark{display:none}
+#stage.is-recovery .recovery-warn{display:inline}
 #stage.is-recovery .error-spark{fill:#f0c27a}
 
 /* Host-controlled states: the slideshow and every interstitial are strictly offline. */
@@ -900,6 +905,7 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 <linearGradient id="recoveryFace" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f0c27a" stop-opacity=".12"/><stop offset=".56" stop-color="#c4923e" stop-opacity=".08"/><stop offset="1" stop-color="#2b2417" stop-opacity=".18"/></linearGradient>
 <filter id="errorSoftGlow" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="3" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
 <circle class="error-halo" cx="200" cy="200" r="157"/><circle class="error-orbit" cx="200" cy="200" r="158"/><circle class="error-orbit inner" cx="200" cy="200" r="132"/><circle class="error-orbit dashed" cx="200" cy="200" r="107"/><circle class="error-ring" cx="200" cy="200" r="86"/><circle class="error-inner" cx="200" cy="200" r="71"/><path class="error-mark" d="M171 171l58 58M229 171l-58 58"/>
+<g class="recovery-warn"><path class="recovery-triangle" d="M200 152 L250 236 H150 Z"/><path class="recovery-bang" d="M200 178 v32"/><circle class="recovery-bang-dot" cx="200" cy="222" r="4.2"/></g>
 <circle class="error-spark" cx="91" cy="146" r="3.4"/><circle class="error-spark s2" cx="310" cy="119" r="3"/><circle class="error-spark s3" cx="319" cy="269" r="2.6"/><circle class="error-spark" cx="96" cy="273" r="1.8" opacity=".65"/><circle class="error-spark" cx="277" cy="324" r="1.6" opacity=".55"/></svg></div></section>
 <section id="components-panel" class="mode-panel components-scene" aria-labelledby="components-title">
 <img id="components-banner" class="components-banner" alt="" aria-hidden="true"><div class="components-overlay"></div><div id="components-brand" class="native-brand">GlassPlatform</div>

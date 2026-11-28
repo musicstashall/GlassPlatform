@@ -4324,11 +4324,28 @@ private:
         g.FillEllipse(&disc,GdiReal(cx-Scale(82)),GdiReal(cy-Scale(82)),GdiReal(Scale(164)),GdiReal(Scale(164)));
         Gdiplus::Pen ring(Gdiplus::Color(230,accentR,accentG,accentB),static_cast<Gdiplus::REAL>(Scale(2)));
         g.DrawEllipse(&ring,GdiReal(cx-Scale(82)),GdiReal(cy-Scale(82)),GdiReal(Scale(164)),GdiReal(Scale(164)));
-        Gdiplus::Pen cross(Gdiplus::Color(255,warning?255:255,warning?236:220,warning?214:226),static_cast<Gdiplus::REAL>(Scale(8)));
-        cross.SetStartCap(Gdiplus::LineCapRound); cross.SetEndCap(Gdiplus::LineCapRound);
-        cross.SetLineJoin(Gdiplus::LineJoinRound);
-        g.DrawLine(&cross,GdiReal(cx-Scale(30)),GdiReal(cy-Scale(30)),GdiReal(cx+Scale(30)),GdiReal(cy+Scale(30)));
-        g.DrawLine(&cross,GdiReal(cx+Scale(30)),GdiReal(cy-Scale(30)),GdiReal(cx-Scale(30)),GdiReal(cy+Scale(30)));
+        if(warning){
+            const Gdiplus::PointF triangle[]={
+                {cx,cy-static_cast<Gdiplus::REAL>(Scale(46))},
+                {cx-static_cast<Gdiplus::REAL>(Scale(40)),cy+static_cast<Gdiplus::REAL>(Scale(34))},
+                {cx+static_cast<Gdiplus::REAL>(Scale(40)),cy+static_cast<Gdiplus::REAL>(Scale(34))}};
+            Gdiplus::SolidBrush tri(Gdiplus::Color(255,240,194,122));
+            g.FillPolygon(&tri,triangle,3);
+            Gdiplus::Pen edge(Gdiplus::Color(255,224,177,90),static_cast<Gdiplus::REAL>(Scale(2)));
+            edge.SetLineJoin(Gdiplus::LineJoinRound);
+            g.DrawPolygon(&edge,triangle,3);
+            Gdiplus::Pen bang(Gdiplus::Color(255,43,36,23),static_cast<Gdiplus::REAL>(Scale(6)));
+            bang.SetStartCap(Gdiplus::LineCapRound); bang.SetEndCap(Gdiplus::LineCapRound);
+            g.DrawLine(&bang,cx,cy-static_cast<Gdiplus::REAL>(Scale(16)),cx,cy+static_cast<Gdiplus::REAL>(Scale(8)));
+            Gdiplus::SolidBrush dot(Gdiplus::Color(255,43,36,23));
+            g.FillEllipse(&dot,GdiReal(cx-Scale(4)),GdiReal(cy+Scale(16)),GdiReal(Scale(8)),GdiReal(Scale(8)));
+        }else{
+            Gdiplus::Pen cross(Gdiplus::Color(255,255,220,226),static_cast<Gdiplus::REAL>(Scale(8)));
+            cross.SetStartCap(Gdiplus::LineCapRound); cross.SetEndCap(Gdiplus::LineCapRound);
+            cross.SetLineJoin(Gdiplus::LineJoinRound);
+            g.DrawLine(&cross,GdiReal(cx-Scale(30)),GdiReal(cy-Scale(30)),GdiReal(cx+Scale(30)),GdiReal(cy+Scale(30)));
+            g.DrawLine(&cross,GdiReal(cx+Scale(30)),GdiReal(cy-Scale(30)),GdiReal(cx-Scale(30)),GdiReal(cy+Scale(30)));
+        }
         Gdiplus::SolidBrush spark(Gdiplus::Color(232,accentR,accentG,accentB));
         g.FillEllipse(&spark,GdiReal(cx+Scale(119)),GdiReal(cy-Scale(73)),GdiReal(Scale(7)),GdiReal(Scale(7)));
         g.FillEllipse(&spark,GdiReal(cx-Scale(127)),GdiReal(cy+Scale(81)),GdiReal(Scale(5)),GdiReal(Scale(5)));

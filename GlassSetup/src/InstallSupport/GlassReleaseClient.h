@@ -12,6 +12,8 @@ namespace GlassReleaseClient {
 inline thread_local std::function<void(std::uint64_t,std::uint64_t)> packageProgress;
 // Structured result of Get. Transport is only a WinHTTP request or read that
 // failed with a transport code. Callers must not infer it by parsing `error`.
+// A dropped connection is retried inside Get. A network that cannot be reached
+// at all is still Transport, but it is not retried.
 enum class Failure : unsigned {
     None = 0,
     Transport = 1,

@@ -195,6 +195,9 @@ bool PrepareSetup(const GlassPackageCatalog::Asset& asset,const std::wstring& wo
                 GlassReleaseClient::Failure got=GlassReleaseClient::Failure::None;
                 ok=GlassReleaseClient::Get(Wide(asset.url),out.h,nullptr,asset.size,cancel,error,&got)&&FlushFileBuffers(out.h);
                 downloadFailure=ok?GlassReleaseClient::Failure::None:got;
+                // Get already retried a dropped connection. A network that cannot
+                // be reached, or an exhausted blip, must not burn the remaining attempts.
+                if(!ok&&got==GlassReleaseClient::Failure::Transport)break;
             }
         }
         if(ok){
