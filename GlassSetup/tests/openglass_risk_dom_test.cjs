@@ -166,7 +166,9 @@ for(const locale of ['ru','en']){
  assert.equal(catalogNote.textContent,locale==='ru'?'Проверка выпуска не выполнена (12007)':'The release check did not finish (12007)');
  assert.ok(!/сохраняют доверие|stay trusted/.test(catalogNote.textContent));
  assert.equal(dom.window.getComputedStyle(catalogCard.querySelector('.c-meta')).visibility,'hidden');
- assert.ok(catalogCard.querySelector('.download-retry').dataset.tooltip.includes('12007'));
- assert.ok(catalogCard.querySelector('.download-retry').dataset.tooltip.includes(locale==='ru'?'сохраняют доверие':'stay trusted'));
+ const catalogRetry=catalogCard.querySelector('.download-retry');
+ assert.equal(catalogRetry.dataset.tooltip,locale==='ru'?'Повторить':'Retry');
+ assert.equal(catalogRetry.getAttribute('aria-label'),catalogRetry.dataset.tooltip);
+ assert.ok(!/12007|сохраняют доверие|stay trusted|Повторить проверку|Retry check/.test(catalogRetry.dataset.tooltip));
 }
 assert.deepEqual(errors,[]);dom.window.close();console.log('PASS: risk red-state/icon/dialog, removal/undo, no installed overflow hint, unavailable vs pending source diagnostics and gate retained');

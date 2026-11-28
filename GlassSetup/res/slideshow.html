@@ -1791,9 +1791,8 @@ function syncDownloadVisuals(){
    if(errorLabel){errorLabel.remove();errorLabel=null;}
    if(!retry){retry=document.createElement('button');retry.type='button';retry.className='download-retry';card.append(retry);}
    retry.disabled=!!item.catalogRetrying;
-   const retryLabel=item.catalogRetryLabel||(ru?'Повторить проверку':'Retry check');
-   const detail=[retryLabel,item.catalogError,item.catalogHint].filter(Boolean).join(' — ');
-   retry.dataset.tooltip=detail;retry.setAttribute('aria-label',detail);
+   const retryLabel=ru?'Повторить':'Retry';
+   retry.dataset.tooltip=retryLabel;retry.setAttribute('aria-label',retryLabel);
    retry.onclick=e=>{e.stopPropagation();if(!item.catalogRetrying)window.chrome?.webview?.postMessage('catalog-retry');};
    if(!catalogNote){catalogNote=document.createElement('span');catalogNote.className='metadata-error-label catalog-check-note';card.append(catalogNote);}
    else catalogNote.classList.add('metadata-error-label');
