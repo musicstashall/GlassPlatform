@@ -52,7 +52,8 @@ for(const locale of ['ru','en']){
  assert.equal(d.querySelector('#components-installed-grid .metadata-error-label'),null);
  assert.ok(d.querySelector('#components-grid .metadata-error-label').textContent.includes('E403'));
  send([{...forbidden,metadataRetrying:true}],locale);
- assert.equal(d.querySelector('#components-grid .download-retry').disabled,true);
+ assert.equal(d.querySelector('#components-grid .download-retry'),null);
+ assert.ok(d.querySelector('#components-grid .card-check-spin .loading-donut'));
  // One retry must not recreate the other 403 cards or restart their border.
  {
   const blocked=id=>({id,title:id,installed:true,checked:false,applySupported:false,metadataBlocked:true,metadataError:'GitHub HTTP error (403)'});
@@ -63,9 +64,29 @@ for(const locale of ['ru','en']){
   send([{...blocked('openglass'),metadataRetrying:true},blocked('secureUxTheme')],locale);
   assert.equal(d.querySelector('#components-grid [data-catalog-alias="openglass"]'),ogCard);
   assert.equal(d.querySelector('#components-grid [data-catalog-alias="secureUxTheme"]'),sutCard);
-  assert.equal(ogCard.querySelector('.download-retry').disabled,true);
+  assert.equal(ogCard.querySelector('.download-retry'),null);
+  assert.ok(ogCard.querySelector('.loading-donut'));
   assert.equal(sutCard.querySelector('.download-retry').disabled,false);
+  assert.equal(sutCard.querySelector('.loading-donut'),null);
   assert.ok(ogCard.classList.contains('download-failed')&&sutCard.classList.contains('download-failed'));
+  send([{...blocked('openglass'),catalogRetrying:true},{...blocked('secureUxTheme'),catalogRetrying:true}],locale);
+  assert.equal(d.querySelector('#components-grid [data-catalog-alias="openglass"]'),ogCard);
+  assert.equal(d.querySelector('#components-grid [data-catalog-alias="secureUxTheme"]'),sutCard);
+  assert.equal(ogCard.querySelector('.download-retry'),null);
+  assert.equal(sutCard.querySelector('.download-retry'),null);
+  assert.ok(ogCard.querySelector('.loading-donut')&&sutCard.querySelector('.loading-donut'));
+ }
+ for(const id of ['openglass','secureUxTheme']){
+  const offline={id,title:id,installed:false,checked:false,applySupported:false,metadataBlocked:true,metadataError:'GitHub request failed (12007)'};
+  send([offline],locale);
+  const card=d.querySelector('#components-grid [data-product="'+id+'"]');
+  const play=card.querySelector('.download-retry');
+  assert.ok(play,'network-unavailable version check keeps ▶');
+  assert.ok(card.textContent.includes('12007'));
+  assert.ok(!card.textContent.includes('E403'));
+  const prior=messages.length;play.click();
+  assert.equal(messages.at(-1),'metadata-retry:'+id);
+  assert.equal(messages.length,prior+1);
  }
  send([{...forbidden,metadataBlocked:false,metadataRetrying:false,applySupported:true,targetPayloadVersion:'3.0.2.3749'}],locale);
  assert.equal(d.querySelector('#components-grid .download-retry'),null);
@@ -170,5 +191,21 @@ for(const locale of ['ru','en']){
  assert.equal(catalogRetry.dataset.tooltip,locale==='ru'?'Повторить':'Retry');
  assert.equal(catalogRetry.getAttribute('aria-label'),catalogRetry.dataset.tooltip);
  assert.ok(!/12007|сохраняют доверие|stay trusted|Повторить проверку|Retry check/.test(catalogRetry.dataset.tooltip));
+ const shared=id=>({...catalogFail,id,title:id});
+ send([shared('x64'),shared('settings64')],locale);
+ const sharedX64=d.querySelector('#components-grid [data-product="x64"]');
+ const sharedSettings=d.querySelector('#components-grid [data-product="settings64"]');
+ assert.ok(sharedX64.querySelector('.download-retry')&&sharedSettings.querySelector('.download-retry'));
+ send([{...shared('x64'),catalogRetrying:true},{...shared('settings64'),catalogRetrying:true}],locale);
+ assert.equal(d.querySelector('#components-grid [data-product="x64"]'),sharedX64,'shared recheck must not rebuild cards');
+ assert.equal(d.querySelector('#components-grid [data-product="settings64"]'),sharedSettings);
+ assert.equal(sharedX64.querySelector('.download-retry'),null);
+ assert.equal(sharedSettings.querySelector('.download-retry'),null);
+ assert.ok(sharedX64.querySelector('.card-check-spin .loading-donut'));
+ assert.ok(sharedSettings.querySelector('.card-check-spin .loading-donut'));
+ assert.equal(sharedX64.querySelector('.catalog-check-note').textContent,catalogNote.textContent);
+ send([shared('x64'),shared('settings64')],locale);
+ assert.ok(d.querySelector('#components-grid [data-product="x64"] .download-retry'));
+ assert.equal(d.querySelector('#components-grid .card-check-spin'),null);
 }
 assert.deepEqual(errors,[]);dom.window.close();console.log('PASS: risk red-state/icon/dialog, removal/undo, no installed overflow hint, unavailable vs pending source diagnostics and gate retained');

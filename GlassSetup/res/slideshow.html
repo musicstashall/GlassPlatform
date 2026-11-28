@@ -70,6 +70,8 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 #components-panel .download-retry:focus-visible{outline:2px solid #d5caff;outline-offset:3px}
 #components-panel .download-retry:active{background:#c1b4ff38;box-shadow:0 0 9px #b6a1ff30}
 @media(prefers-reduced-motion:reduce){#components-panel .download-retry{transition:none}}
+#components-panel .card-check-spin{position:absolute;left:50%;top:50%;z-index:2;display:grid;place-items:center;width:38px;height:38px;transform:translate(-50%,-50%);pointer-events:none}
+#components-panel .card-check-spin .loading-donut{width:28px;height:28px;border-width:3px}
 .unlock-backdrop{position:absolute;inset:0;width:1000px;height:540px;object-fit:cover;opacity:.43;filter:saturate(.78);pointer-events:none}
 .unlock-shade{position:absolute;inset:0;background:linear-gradient(90deg,#101225f0 0%,#101225df 38%,#10122582 72%,#1012259c 100%);pointer-events:none}
 .unlock-copy{position:absolute;left:48px;top:120px;width:410px;z-index:3}
@@ -1357,6 +1359,19 @@ document.addEventListener('pointerover',e=>showAcrylicTooltip(e.target));documen
 for(const type of ['pointerout','focusout','pointerdown','keydown','wheel'])document.addEventListener(type,hideAcrylicTooltip,{capture:true,passive:true});
 window.addEventListener('resize',hideAcrylicTooltip);document.addEventListener('scroll',hideAcrylicTooltip,true);
 function metadataBlockText(item){return (item?.metadataError||'HTTP 403')+' — '+(locale==='ru'?'Установка недоступна: не удалось получить версию продукта. Нажмите ▶ для повторной проверки.':'Installation unavailable: could not retrieve the product version. Press ▶ to retry.');}
+function metadataUnavailableLine(item){
+ const error=String(item?.metadataError||''),code=error.match(/\((\d+)\)\s*$/);
+ if(!code||code[1]==='403')return locale==='ru'?'Сервер недоступен (E403)':'Server unavailable (E403)';
+ return (locale==='ru'?'Сервер недоступен':'Server unavailable')+' ('+code[1]+')';
+}
+function setCardCheckDonut(card,busy){
+ let spin=card.querySelector('.card-check-spin');
+ if(!busy){if(spin)spin.remove();card.removeAttribute('aria-busy');return;}
+ card.setAttribute('aria-busy','true');
+ if(spin)return;
+ spin=document.createElement('span');spin.className='card-check-spin';spin.setAttribute('aria-hidden','true');
+ const donut=document.createElement('span');donut.className='loading-donut';spin.append(donut);card.append(spin);
+}
 function catalogCheckLine(item){
  const hint=String(item?.catalogHint||'').trim();
  let sentence=(hint.split(/\.\s+/)[0]||hint).replace(/\.$/,'').trim();
@@ -1746,8 +1761,8 @@ function renderComponentsPanel(){
  const grid=document.getElementById('components-grid'),installedGrid=document.getElementById('components-installed-grid'),extra=document.getElementById('components-extra'),button=document.getElementById('components-select-all');
  if(!button.dataset.bound){button.dataset.bound='1';document.getElementById('components-remove-all').onclick=planRemoveAllComponents;button.onclick=acceptComponentRecommendations;const shade=document.getElementById('components-warning-dialog');shade.onclick=e=>{if(e.target===shade)closeProductWarning();};document.getElementById('components-warning-close').onclick=closeProductWarning;document.getElementById('components-warning-ok').onclick=closeProductWarning;shade.onkeydown=e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeProductWarning();}if(e.key==='Tab'){const first=document.getElementById('components-warning-close'),last=document.getElementById('components-warning-ok');if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}};document.querySelector('#components-panel .components-list').onscroll=hideAcrylicTooltip;}
  const items=Array.isArray(hostState.components)?hostState.components:[],loading=hostState.componentsLoading===true;
- // metadataRetrying only disables the pressed play control. Including it would
- // rebuild every card and replay the red border transition on all 403 offers.
+ // Retry flags only swap ▶ for the donut. Including them would rebuild every
+ // card and replay the red border transition on all blocked offers.
  const panelItems=items.map(item=>{if(!item||typeof item!=='object')return item;const copy={...item};delete copy.metadataRetrying;delete copy.catalogRetrying;return copy;});
  const signature=JSON.stringify([locale,hostState.appMode,loading,panelItems]);
  const changed=signature!==componentSignature,shelfScroll=changed?captureComponentShelfScroll():null;
@@ -1789,11 +1804,16 @@ function syncDownloadVisuals(){
    card.classList.remove('download-failed','download-planned','download-progress');
    if(bar){bar.remove();bar=null;}
    if(errorLabel){errorLabel.remove();errorLabel=null;}
-   if(!retry){retry=document.createElement('button');retry.type='button';retry.className='download-retry';card.append(retry);}
-   retry.disabled=!!item.catalogRetrying;
-   const retryLabel=ru?'Повторить':'Retry';
-   retry.dataset.tooltip=retryLabel;retry.setAttribute('aria-label',retryLabel);
-   retry.onclick=e=>{e.stopPropagation();if(!item.catalogRetrying)window.chrome?.webview?.postMessage('catalog-retry');};
+   // One press rechecks every catalog card, so the donut replaces ▶ on all of them.
+   if(item.catalogRetrying){if(retry){retry.remove();retry=null;}setCardCheckDonut(card,true);}
+   else{
+    setCardCheckDonut(card,false);
+    if(!retry){retry=document.createElement('button');retry.type='button';retry.className='download-retry';card.append(retry);}
+    retry.disabled=false;
+    const retryLabel=ru?'Повторить':'Retry';
+    retry.dataset.tooltip=retryLabel;retry.setAttribute('aria-label',retryLabel);
+    retry.onclick=e=>{e.stopPropagation();if(!item.catalogRetrying)window.chrome?.webview?.postMessage('catalog-retry');};
+   }
    if(!catalogNote){catalogNote=document.createElement('span');catalogNote.className='metadata-error-label catalog-check-note';card.append(catalogNote);}
    else catalogNote.classList.add('metadata-error-label');
    catalogNote.textContent=catalogCheckLine(item);
@@ -1806,14 +1826,20 @@ function syncDownloadVisuals(){
    if(bar)bar.remove();
    card.classList.remove('download-planned','download-progress','download-local');
    card.classList.add('download-failed');
-   if(!retry){retry=document.createElement('button');retry.type='button';retry.className='download-retry';card.append(retry);}
-   retry.disabled=!!item.metadataRetrying;
    if(!errorLabel){errorLabel=document.createElement('span');errorLabel.className='metadata-error-label';card.append(errorLabel);}
-   errorLabel.textContent=ru?'Сервер недоступен (E403)':'Server unavailable (E403)';
-   retry.dataset.tooltip=ru?'Повторить загрузку метаданных':'Retry metadata download';retry.setAttribute('aria-label',ru?'Повторить получение версии':'Retry version discovery');
-   retry.onclick=e=>{e.stopPropagation();if(!item.metadataRetrying)window.chrome?.webview?.postMessage('metadata-retry:'+item.id);};
+   errorLabel.textContent=metadataUnavailableLine(item);
+   const checking=!!(item.metadataRetrying||item.catalogRetrying);
+   if(checking){if(retry){retry.remove();retry=null;}setCardCheckDonut(card,true);}
+   else{
+    setCardCheckDonut(card,false);
+    if(!retry){retry=document.createElement('button');retry.type='button';retry.className='download-retry';card.append(retry);}
+    retry.disabled=false;
+    retry.dataset.tooltip=ru?'Повторить загрузку метаданных':'Retry metadata download';retry.setAttribute('aria-label',ru?'Повторить получение версии':'Retry version discovery');
+    retry.onclick=e=>{e.stopPropagation();if(!item.metadataRetrying&&!item.catalogRetrying)window.chrome?.webview?.postMessage('metadata-retry:'+item.id);};
+   }
    continue;
   }
+  setCardCheckDonut(card,false);
   const remote=item?.downloadRequired!==false||!!d?.network,active=planned&&remote&&!!d&&d.phase!=='ready';
   card.classList.toggle('download-planned',planned&&remote&&!d);
   card.classList.toggle('download-progress',active);

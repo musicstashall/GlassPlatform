@@ -42,6 +42,13 @@ public:
             GlassSetupSourceLayout::SetPrepared(i,{});retired.push_back(std::move(jobs[i]));
         }
     }
+    // Drop a local snapshot that must not satisfy a server-only offer. The worker is joined from retired.
+    void Discard(std::size_t i) {
+        if(i>=jobs.size()||!jobs[i])return;
+        jobs[i]->cancel=true;
+        GlassSetupSourceLayout::SetPrepared(i,{});
+        retired.push_back(std::move(jobs[i]));
+    }
     void Join() {for(auto& job:jobs)job.reset();retired.clear();}
     bool Ready(const std::array<bool,7>& selected) const {
         for(std::size_t i=0;i<jobs.size();++i)if(selected[i]&&(!jobs[i]||!jobs[i]->done.load()||!jobs[i]->ok||!jobs[i]->published||jobs[i]->cancel.load()))return false;

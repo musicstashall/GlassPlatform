@@ -1133,6 +1133,18 @@ struct Surface {
     }
 };
 
+namespace {
+// 403 is the existing HTTP refusal. Transport failures are "GitHub request failed (12007)"
+// and the other WinHTTP request codes — the upstream version was not checked.
+bool VendorMetadataUnavailable(const std::wstring& error) noexcept {
+    return error.find(L"403")!=std::wstring::npos
+        ||error.find(L"GitHub request failed")!=std::wstring::npos
+        ||error.find(L"GitHub HTTP error")!=std::wstring::npos;
+}
+// OpenGlass is an upstream EXE that is always staged again. Catalog MSIs and SecureUxTheme are not.
+bool CatalogMsiSlot(std::size_t slot) noexcept { return slot!=4&&slot<7; }
+}
+
 class Installer {
 public:
     HWND window = nullptr;
@@ -1361,7 +1373,7 @@ private:
     std::atomic_bool versionCheckCancel_{false};
     GlassPackageCatalog::Catalog releaseCatalog_;
     GlassProductDownloads downloads_;
-    bool downloadContinuePending_=false,setupDownloadActive_=false;
+    bool downloadContinuePending_=false,setupDownloadActive_=false,serverDownloadDeferred_=false;
     bool fullCleanupReviewed_=false;
     bool cleanupPlatformEligible_=false,cleanupOgEligible_=false;
     std::atomic<std::uint64_t> setupDownloadBytes_{0},setupDownloadTotal_{0};
@@ -2361,6 +2373,7 @@ private:
             L",\"metadataLocalAvailable\":"+(sutMetadataLocal_?L"true":L"false")+
             L",\"metadataBlocked\":"+(sutMetadataBlocked_?L"true":L"false")+
             L",\"metadataRetrying\":"+(vendorMetadataRetry_==L"secureUxTheme"?L"true":L"false")+
+            L",\"catalogRetrying\":"+(catalogRetrying_.load()?L"true":L"false")+
             L",\"metadataError\":"+JsStringLiteral(inspect_.secureUxDiscoveryError)+
             L",\"applySupported\":"+(inspect_.secureUxTheme.installed||(sutMetadataBlocked_&&!sutMetadataLocal_)?L"false":L"true")+
             L",\"removalDependencyId\":"+JsStringLiteral(os64?L"settings64":L"settings32")+
@@ -2460,6 +2473,28 @@ private:
         percent_=WizardProgress::Percent(progressValue_);
         ShowContentControls();InvalidateRect(progress_,nullptr,FALSE);InvalidateFooter();
     }
+    // Вызывающий не держит inspectMutex_. Локальный снимок более старого кэша не закрывает серверный MSI.
+    [[nodiscard]] bool ServerMsiNeedsTransfer() const {
+        if(SimulationBuild()||!inspectReady_.load(std::memory_order_acquire))return false;
+        const auto selected=DownloadSelection();
+        std::lock_guard<std::mutex> lock(inspectMutex_);
+        for(std::size_t i=0;i<selected.size();++i) {
+            if(!CatalogMsiSlot(i)||!selected[i]||!DownloadRequiredLocked(i))continue;
+            const auto& job=downloads_.jobs[i];
+            const bool downloaded=job&&job->done.load(std::memory_order_acquire)&&job->ok&&!job->cancel.load()&&job->network.load(std::memory_order_acquire);
+            if(!downloaded)return true;
+        }
+        return false;
+    }
+    void DiscardUnsatisfiedServerJobs() {
+        const auto selected=DownloadSelection();
+        std::lock_guard<std::mutex> lock(inspectMutex_);
+        for(std::size_t i=0;i<selected.size();++i) {
+            if(!CatalogMsiSlot(i)||!selected[i]||!DownloadRequiredLocked(i))continue;
+            const auto& job=downloads_.jobs[i];
+            if(job&&!job->network.load(std::memory_order_acquire))downloads_.Discard(i);
+        }
+    }
     void RequestComponentContinue() {
         // Downloads can finish while consent is still missing. Do not leave Apply
         // as a click that returns before the license page.
@@ -2471,23 +2506,41 @@ private:
         if(!ComponentsReady())return;
         // Apply starts preparation. A transfer waits for another Apply after the
         // files are ready. Packages already on disk continue on this Apply.
-        if(!DownloadsReady()) {
+        // A finished local snapshot is not enough when the selected MSI is only on the server.
+        if(!DownloadsReady()||ServerMsiNeedsTransfer()) {
+            DiscardUnsatisfiedServerJobs();
             // Нужна сеть — запомнить выбор: при отмене следующий запуск подхватит скачанное.
             if(ProductApplyTextId()==IDS_APPLY&&!GlassDownloadCache::WriteSelection(DownloadSelection()))
                 InstallLog::Line(L"Download cache: cannot save product selection");
+            serverDownloadDeferred_=false;
             downloadContinuePending_=true;
             ReconcileDownloads();UpdateDownloadProgress();
             SyncWebViewState();
             EnableWindow(next_,ComponentsReady());
+            UpdateNextText();
             return;
         }
         downloadContinuePending_=false;
+        serverDownloadDeferred_=false;
         KillTimer(window,kProductDownloadTimer);
         if(CertificatePageApplies())SetPage(Page::Certificate);else StartInstallation();
     }
     void NoteDownloadsPrepared() {
         if(!downloadContinuePending_||page_!=Page::Components||!DownloadsReady())return;
+        if(ServerMsiNeedsTransfer()) {
+            InstallLog::Line(L"Selected MSI is only on the server; download stays on the product page");
+            DiscardUnsatisfiedServerJobs();
+            downloadContinuePending_=false;
+            serverDownloadDeferred_=true;
+            KillTimer(window,kProductDownloadTimer);
+            UpdateNextText();
+            EnableWindow(next_,!failurePending_&&!DebugDemoLocksControls()&&ComponentsReady());
+            UpdateDownloadProgress();
+            SyncWebViewState();
+            return;
+        }
         downloadContinuePending_=false;
+        serverDownloadDeferred_=false;
         KillTimer(window,kProductDownloadTimer);
         const auto selected=DownloadSelection();
         bool transferred=false;
@@ -2738,7 +2791,9 @@ private:
         for(std::size_t i=0;i<selected.size();++i) {
             if(!selected[i]||!DownloadRequiredLocked(i))continue;
             const auto& job=downloads_.jobs[i];
-            const bool prepared=job&&job->done.load(std::memory_order_acquire)&&job->ok&&!job->cancel.load();
+            // OpenGlass is staged again even from a local file. A catalog/vendor MSI still needs the server transfer.
+            const bool prepared=job&&job->done.load(std::memory_order_acquire)&&job->ok&&!job->cancel.load()&&
+                (i==4||job->network.load(std::memory_order_acquire));
             if(!prepared)return IDS_APPLY;
         }
         return IDS_EXECUTE;
@@ -2853,8 +2908,8 @@ private:
             std::lock_guard<std::mutex> lock(inspectMutex_);
             ogMetadataLocal_=inspect_.og.sourceVerified&&!inspect_.og.targetPayloadVersion.empty();
             sutMetadataLocal_=inspect_.secureUxOffer.localVerified;
-            ogMetadataBlocked_=inspect_.openGlassDiscoveryError.find(L"403")!=std::wstring::npos;
-            sutMetadataBlocked_=inspect_.secureUxDiscoveryError.find(L"403")!=std::wstring::npos;
+            ogMetadataBlocked_=VendorMetadataUnavailable(inspect_.openGlassDiscoveryError);
+            sutMetadataBlocked_=VendorMetadataUnavailable(inspect_.secureUxDiscoveryError);
         }
         {
             std::lock_guard<std::mutex> lock(inspectMutex_);
@@ -2906,7 +2961,7 @@ private:
             retireControllerOnExit=true;
         if (transitioning_) EndTransition();
         page_=page;
-        if(page_!=Page::Components)downloadContinuePending_=false;
+        if(page_!=Page::Components){downloadContinuePending_=false;serverDownloadDeferred_=false;}
         if(page_!=Page::Checking)setupDownloadActive_=false;
         UpdateErrorPulseTimer();
         WizardTheme::ApplyDarkWindowChrome(window);
@@ -3304,6 +3359,27 @@ private:
         SendMessageW(accept_,BM_SETCHECK,accepted_?BST_CHECKED:BST_UNCHECKED,0);
         SetPage(accepted_?Page::Components:Page::License);
     }
+    // Join the retry thread first. FetchCatalog then reuses its snapshot and does not open another request.
+    void PublishRetriedCatalog() {
+        std::atomic_bool cancel{false};
+        GlassPackageCatalog::Catalog catalog;
+        std::wstring diagnostic;
+        if(!GlassPackageAcquisition::FetchCatalog(cancel,catalog,diagnostic)) {
+            if(!diagnostic.empty())
+                InstallLog::LineFormat(L"Product catalog retry was not published: %s",diagnostic.c_str());
+            return;
+        }
+        releaseCatalog_=std::move(catalog);
+        InstallLog::Line(L"Product catalog retry published for package preparation");
+        if(closing_||page_!=Page::Components||!serverDownloadDeferred_)return;
+        serverDownloadDeferred_=false;
+        downloadContinuePending_=true;
+        DiscardUnsatisfiedServerJobs();
+        ReconcileDownloads();
+        UpdateNextText();
+        EnableWindow(next_,!failurePending_&&!DebugDemoLocksControls()&&ComponentsReady());
+        UpdateDownloadProgress();
+    }
     void RetryProductCatalog() {
         if(closing_||catalogRetrying_.load()||!inspectReady_.load()||!vendorMetadataRetry_.empty()||DebugDemoLocksControls())return;
         if(inspectThread_.joinable())inspectThread_.join();
@@ -3327,8 +3403,8 @@ private:
                     inspect_=std::move(report);
                     ogMetadataLocal_=inspect_.og.sourceVerified&&!inspect_.og.targetPayloadVersion.empty();
                     sutMetadataLocal_=inspect_.secureUxOffer.localVerified;
-                    ogMetadataBlocked_=inspect_.openGlassDiscoveryError.find(L"403")!=std::wstring::npos;
-                    sutMetadataBlocked_=inspect_.secureUxDiscoveryError.find(L"403")!=std::wstring::npos;
+                    ogMetadataBlocked_=VendorMetadataUnavailable(inspect_.openGlassDiscoveryError);
+                    sutMetadataBlocked_=VendorMetadataUnavailable(inspect_.secureUxDiscoveryError);
                 }
                 catalogRetrying_.store(false,std::memory_order_release);
                 if(target)PostMessageW(target,kCatalogRetryReady,0,0);
@@ -4117,6 +4193,7 @@ private:
             // Правка плана во время подготовки — это не «Применить». Снятые
             // продукты уже отменены сверкой выше; остальные не уходят в установку,
             // пока пользователь снова не нажмёт «Применить».
+            if(planEdited)serverDownloadDeferred_=false;
             if(planEdited&&downloadContinuePending_){
                 downloadContinuePending_=false;
                 InstallLog::Line(L"Apply continuation cleared: product plan changed during preparation");
@@ -4723,7 +4800,13 @@ private:
         case kCatalogRetryReady:
             if(catalogRetryThread_.joinable())catalogRetryThread_.join();
             catalogRetrying_.store(false,std::memory_order_release);
-            if(!closing_){ShowContentControls();EnableWindow(next_,!failurePending_&&!DebugDemoLocksControls()&&ComponentsReady());SyncWebViewState();InvalidateContent();}
+            if(!closing_){
+                PublishRetriedCatalog();
+                ShowContentControls();
+                EnableWindow(next_,!failurePending_&&!DebugDemoLocksControls()&&ComponentsReady());
+                SyncWebViewState();
+                InvalidateContent();
+            }
             return 0;
         case kVendorMetadataReady:
             if(vendorMetadataThread_.joinable())vendorMetadataThread_.join();
