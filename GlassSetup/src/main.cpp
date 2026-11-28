@@ -3364,7 +3364,8 @@ private:
         std::atomic_bool cancel{false};
         GlassPackageCatalog::Catalog catalog;
         std::wstring diagnostic;
-        if(!GlassPackageAcquisition::FetchCatalog(cancel,catalog,diagnostic)) {
+        GlassReleaseClient::Failure failure=GlassReleaseClient::Failure::None;
+        if(!GlassPackageAcquisition::FetchCatalog(cancel,catalog,diagnostic,&failure)) {
             if(!diagnostic.empty())
                 InstallLog::LineFormat(L"Product catalog retry was not published: %s",diagnostic.c_str());
             return;
