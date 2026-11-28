@@ -154,29 +154,11 @@ namespace GlassCore::Settings
         if (backdropContext.effectType == 0)
             return;
 
-        // Win10 (<22000): после DWMWA_CLOAK(TRUE→FALSE) + DwmpCreateSharedThumbnailVisual
-        // dwmcore теряет визуал CAccentAcrylicBlurBehind, а повторный SWCA с идентичной
-        // ACCENT_POLICY схлопывается как no-op. Вместо ACCENT_DISABLED (дающего чёрный кадр)
-        // переходим через прозрачный Blur/Transparent с тем же тинтом + DwmFlush(), затем
-        // ApplyBackdropEffect(desired) + DwmFlush().
-        const DWORD argb = backdropContext.gradientColor;
-        const DWORD accentColor =
-            (argb & 0xFF00FF00u)
-            | ((argb & 0x00FF0000u) >> 16)
-            | ((argb & 0x000000FFu) << 16);
-
-        const auto intermediateType =
-            (backdropContext.effectType == static_cast<DWORD>(EffectHelper::EffectType::Blur))
-                ? EffectHelper::EffectType::Transparent
-                : EffectHelper::EffectType::Blur;
-
-        EffectHelper::SetWindowBackdrop(
-            hWnd,
-            backdropContext.enableDropShadow,
-            accentColor,
-            intermediateType,
-            /*skipNcRendering=*/true,
-            /*flyoutBackdrop=*/true);
+        // Win10 (<22000): m_thumbnail уже отрегистрирован, overlayWnd с готовым акрилом
+        // стоит ровно под hWnd, а само hWnd держит AccentState=0 + DwmMakeWindowTransparent(TRUE)
+        // (прозрачно поверх overlayWnd, без дырки и без чёрного кадра).
+        // 1 DwmFlush гарантирует, что DWM завершил DwmUnregisterThumbnail + Uncloak,
+        // после чего ApplyBackdropEffect выполняет чистый первичный переход 0 → desired.
         (void)DwmFlush();
 
         ApplyBackdropEffect(
@@ -329,8 +311,25 @@ namespace GlassCore::Settings
     void ApplyPopupSwcaEffect(HWND hWnd, bool darkMode,
         const WindowBackdropEffectContext& backdropContext,
         const BorderContext& border,
-        bool skipNcRendering)
+        bool skipNcRendering,
+        bool deferWin10BackdropForAnim)
     {
+        if (deferWin10BackdropForAnim && Shared::SystemHelper::g_buildNumber < 22000)
+        {
+            // Win10 (<22000) + PopupIn: не применяем SWCA-акрил до cloak/thumbnail —
+            // иначе dwmcore кэширует битый CAccent, который сбрасывается только через
+            // чёрный ACCENT_DISABLED. Держим AccentState=0 и включаем DwmMakeWindowTransparent(TRUE),
+            // чтобы 0x00000000-фон оставался альфа-прозрачным в m_thumbnailVisual и поверх
+            // overlayWnd при handoff; затем ReapplyFlyoutBackdropAfterUncloakWin10 выполняет
+            // чистый первичный переход 0 → desired без чёрного кадра.
+            EffectHelper::EnableWindowDarkMode(hWnd, darkMode);
+            EffectHelper::SetWindowBackdrop(
+                hWnd, FALSE, 0, EffectHelper::EffectType::None, /*skipNcRendering=*/true, /*flyoutBackdrop=*/true);
+            EffectHelper::DwmMakeWindowTransparent(hWnd, TRUE);
+            ApplyBorderEffect(hWnd, darkMode, border);
+            return;
+        }
+
         // Паритет TranslucentFlyouts Api::ApplyEffect — без PreparePopupSwcaBackdropHwnd на show flyout.
         ApplyBackdropEffect(hWnd, darkMode, backdropContext, skipNcRendering, true);
         ApplyBorderEffect(hWnd, darkMode, border);

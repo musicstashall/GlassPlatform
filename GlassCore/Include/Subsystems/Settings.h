@@ -83,7 +83,8 @@ namespace GlassCore::Settings
     void ApplyPopupSwcaEffect(HWND hWnd, bool darkMode,
         const WindowBackdropEffectContext& backdropContext,
         const BorderContext& border,
-        bool skipNcRendering = false);
+        bool skipNcRendering = false,
+        bool deferWin10BackdropForAnim = false);
     void DropEffect(std::wstring_view part, HWND hWnd);
 
     // Чтение настроек из реестра

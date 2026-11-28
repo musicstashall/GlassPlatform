@@ -600,7 +600,7 @@ namespace GlassCore::DropDown
             }
 
             GlassCore::Settings::ApplyPopupSwcaEffect(
-                target, ctx.useDarkMode, ctx.backdropEffect, ctx.border, false);
+                target, ctx.useDarkMode, ctx.backdropEffect, ctx.border, false, deferBorder);
 
             if (!deferBorder)
             {
@@ -636,6 +636,8 @@ namespace GlassCore::DropDown
                     GlassCore::FlyoutFrame::ClearHostBorderDeferred(target);
                     BOOL uncloak = FALSE;
                     (void)DwmSetWindowAttribute(target, DWMWA_CLOAK, &uncloak, sizeof(uncloak));
+                    GlassCore::Settings::ApplyPopupSwcaEffect(
+                        target, ctx.useDarkMode, ctx.backdropEffect, ctx.border, false, false);
                     GlassCore::FlyoutFrame::PaintHostBorder(
                         target, ctx.useDarkMode, ctx.border, ctx.backdropEffect.effectType);
                 }
@@ -737,11 +739,16 @@ namespace GlassCore::DropDown
 
         PaintDeferredFlyoutBorderIfNeeded(hWnd);
 
-        // Win10 (<22000): после DWMWA_CLOAK(TRUE→FALSE) + shared thumbnail делаем
-        // цикл Blur/Transparent + DwmFlush() → desired backdrop + DwmFlush().
+        // Win10 (<22000): до анимации hWnd держало AccentState=0 + DwmMakeWindowTransparent(TRUE),
+        // m_thumbnail уже отрегистрирован, а overlayWnd держит акрил под hWnd —
+        // выполняем чистый первичный переход 0 → desired + DwmFlush().
         if (Shared::SystemHelper::g_buildNumber < 22000)
         {
-            const auto& ctx = WndCompat::g_dropDownCtx;
+            auto ctx = WndCompat::g_dropDownCtx;
+            if (ctx.backdropEffect.effectType == 0)
+            {
+                FillDropDownContext(ctx);
+            }
             GlassCore::Settings::ReapplyFlyoutBackdropAfterUncloakWin10(
                 hWnd, ctx.useDarkMode, ctx.backdropEffect);
         }

@@ -1700,7 +1700,7 @@ namespace GlassCore::ComboLBox
             }
 
             GlassCore::Settings::ApplyPopupSwcaEffect(
-                hWnd, ctx.useDarkMode, ctx.backdropEffect, ctx.border, false);
+                hWnd, ctx.useDarkMode, ctx.backdropEffect, ctx.border, false, schedulePopupIn);
 
             if (!schedulePopupIn)
             {
@@ -1752,6 +1752,8 @@ namespace GlassCore::ComboLBox
                     GlassCore::FlyoutFrame::ClearHostBorderDeferred(hWnd);
                     BOOL uncloak = FALSE;
                     (void)DwmSetWindowAttribute(hWnd, DWMWA_CLOAK, &uncloak, sizeof(uncloak));
+                    GlassCore::Settings::ApplyPopupSwcaEffect(
+                        hWnd, ctx.useDarkMode, ctx.backdropEffect, ctx.border, false, false);
                     GlassCore::FlyoutFrame::PaintHostBorder(
                         hWnd, ctx.useDarkMode, ctx.border, ctx.backdropEffect.effectType);
                 }

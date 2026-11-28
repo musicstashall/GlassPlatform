@@ -142,7 +142,7 @@ namespace GlassCore::Menu
             merged.customRendering.separator_width);
 
         Settings::ApplyPopupSwcaEffect(
-            hWnd, merged.useDarkMode, backdrop, settingsBorder, false);
+            hWnd, merged.useDarkMode, backdrop, settingsBorder, false, animation.enable);
 
         if (animation.enable)
         {
@@ -172,6 +172,8 @@ namespace GlassCore::Menu
                 SetFlyoutBorderDeferred(hWnd, false);
                 BOOL uncloak = FALSE;
                 (void)DwmSetWindowAttribute(hWnd, DWMWA_CLOAK, &uncloak, sizeof(uncloak));
+                Settings::ApplyPopupSwcaEffect(
+                    hWnd, merged.useDarkMode, backdrop, settingsBorder, false, false);
                 OnPaintFlyoutHostBorder(
                     hWnd,
                     WndCompat::Menu::FlyoutBorderPass::SetupAndPaint,

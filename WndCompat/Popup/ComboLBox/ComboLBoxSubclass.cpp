@@ -198,9 +198,8 @@ namespace
         {
             // Win10 (<22000): OnComboLBoxShow срабатывает внутри WM_SHOWWINDOW до выставления
             // WS_VISIBLE (и в non-anim ветке OnFlyoutAnimationFinished не вызывается).
-            // К моменту асинхронного WM_GLASS_FLYOUT_CLIENT_REFRESH окно уже видимо и uncloaked —
-            // повторяем SWCA-backdrop только в non-anim ветке (wParam == 0), через прозрачный
-            // промежуточный Blur/Transparent без чёрного кадра.
+            // К моменту асинхронного WM_GLASS_FLYOUT_CLIENT_REFRESH окно уже видимо —
+            // повторяем SWCA-backdrop в non-anim ветке (wParam == 0) через ACCENT_DISABLED → desired.
             if (wParam == 0 && Shared::SystemHelper::g_buildNumber < 22000 && ::IsWindowVisible(hWnd))
             {
                 auto* provider = WndCompat::DropDown::GetDropDownEventProvider();
@@ -215,12 +214,11 @@ namespace
                         (argb & 0xFF00FF00u)
                         | ((argb & 0x00FF0000u) >> 16)
                         | ((argb & 0x000000FFu) << 16);
-                    const int intermediateEffect = (ctx.backdropEffect.effectType == 3u) ? 1 : 3;
                     Shared::SwcaBackdrop::SetWindowBackdrop(
                         hWnd,
-                        ctx.backdropEffect.enableDropShadow ? TRUE : FALSE,
-                        abgr,
-                        intermediateEffect,
+                        FALSE,
+                        0,
+                        0, // ACCENT_DISABLED
                         /*skipNcRendering=*/true,
                         /*flyoutBackdrop=*/true);
                     (void)::DwmFlush();
