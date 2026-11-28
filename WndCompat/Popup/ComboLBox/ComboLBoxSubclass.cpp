@@ -199,25 +199,28 @@ namespace
             // Win10 (<22000): OnComboLBoxShow срабатывает внутри WM_SHOWWINDOW до выставления
             // WS_VISIBLE (и в non-anim ветке OnFlyoutAnimationFinished не вызывается).
             // К моменту асинхронного WM_GLASS_FLYOUT_CLIENT_REFRESH окно уже видимо и uncloaked —
-            // повторяем SWCA-backdrop, чтобы DWM гарантированно применил акрил/блюр.
-            if (Shared::SystemHelper::g_buildNumber < 22000 && ::IsWindowVisible(hWnd))
+            // повторяем SWCA-backdrop только в non-anim ветке (wParam == 0), через прозрачный
+            // промежуточный Blur/Transparent без чёрного кадра.
+            if (wParam == 0 && Shared::SystemHelper::g_buildNumber < 22000 && ::IsWindowVisible(hWnd))
             {
                 auto* provider = WndCompat::DropDown::GetDropDownEventProvider();
                 WndCompat::DropDownContext ctx{};
                 if (!IsFlyoutBorderDeferredForDropDown(hWnd, provider)
                     && provider && provider->QueryDropDownContext
-                    && provider->QueryDropDownContext(&ctx))
+                    && provider->QueryDropDownContext(&ctx)
+                    && ctx.backdropEffect.effectType != 0)
                 {
                     const DWORD argb = ctx.backdropEffect.gradientColor;
                     const DWORD abgr =
                         (argb & 0xFF00FF00u)
                         | ((argb & 0x00FF0000u) >> 16)
                         | ((argb & 0x000000FFu) << 16);
+                    const int intermediateEffect = (ctx.backdropEffect.effectType == 3u) ? 1 : 3;
                     Shared::SwcaBackdrop::SetWindowBackdrop(
                         hWnd,
-                        FALSE,
-                        0,
-                        0,
+                        ctx.backdropEffect.enableDropShadow ? TRUE : FALSE,
+                        abgr,
+                        intermediateEffect,
                         /*skipNcRendering=*/true,
                         /*flyoutBackdrop=*/true);
                     (void)::DwmFlush();

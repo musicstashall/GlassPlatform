@@ -93,6 +93,7 @@ namespace GlassCore::FlyoutFrame
                 {
                     // Win10 (<22000): синхронно отрисовываем отложенное 1-px NC-кольцо
                     // без SWP_DRAWFRAME / WM_ERASEBKGND, не затрагивая клиентскую область.
+                    // DwmFlush сразу следом выполняет ReapplyFlyoutBackdropAfterUncloakWin10.
                     (void)SendMessageW(hwnd, WM_NCPAINT, static_cast<WPARAM>(1), 0);
                 }
                 else
@@ -102,8 +103,8 @@ namespace GlassCore::FlyoutFrame
                         nullptr,
                         nullptr,
                         RDW_FRAME | RDW_NOCHILDREN);
+                    (void)DwmFlush();
                 }
-                (void)DwmFlush();
                 break;
             case FlyoutHostBorderFlush::Full:
                 (void)RedrawWindow(

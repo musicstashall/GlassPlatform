@@ -1065,6 +1065,56 @@ namespace GlassCore::Animation
 
         virtual ~PopupIn() noexcept
         {
+            if (Shared::SystemHelper::g_buildNumber < 22000 && m_menuWindow && IsWindow(m_menuWindow))
+            {
+                // Win10 (<22000): оставляем animation-оверлей `window` видимым поверх `m_menuWindow`,
+                // пока реальное окно uncloak-ится, рисует рамку и пересобирает SWCA-backdrop
+                // (Blur/Transparent → desired). Оверлей скрывается и уничтожается только после того,
+                // как реальный flyout полностью готов в DWM — без кадра «дырки» и без чёрного кадра.
+                Utils::CloakWindow(m_menuWindow, FALSE);
+
+                HWND menuWnd = m_menuWindow;
+                m_menuWindow = nullptr;
+                DWORD_PTR sendResult = 0;
+                SendMessageTimeoutW(
+                    menuWnd, GetAnimationFinishedMsg(), 0, 0,
+                    SMTO_ABORTIFHUNG, 2000, &sendResult);
+
+                Utils::CloakWindow(window, TRUE);
+
+                if (m_dcompTarget)
+                    (void)m_dcompTarget->SetRoot(nullptr);
+                m_dcompTarget.reset();
+                m_rootVisual.reset();
+                m_thumbnailVisual.reset();
+                m_backdropThumbnailVisual.reset();
+                if (auto dev = Shared::DXHelper::LazyDComposition::GetInstance().GetDCompositionDevice())
+                    (void)dev->Commit();
+
+                if (m_thumbnail)
+                {
+                    DwmUnregisterThumbnail(m_thumbnail);
+                    m_thumbnail = nullptr;
+                }
+                if (m_backdropThumbnail)
+                {
+                    DwmUnregisterThumbnail(m_backdropThumbnail);
+                    m_backdropThumbnail = nullptr;
+                }
+                if (window)
+                {
+                    SendNotifyMessageW(window, WM_CLOSE, 0, 0);
+                    window = nullptr;
+                }
+                if (m_backdropWindow)
+                {
+                    SendNotifyMessageW(m_backdropWindow, WM_CLOSE, 0, 0);
+                    m_backdropWindow = nullptr;
+                }
+                (void)DwmFlush();
+                return;
+            }
+
             Finish();
 
             // Сначала отпускаем DComp-визуалы, коммитим teardown в DWM, отрегистрируем DWM thumbnail

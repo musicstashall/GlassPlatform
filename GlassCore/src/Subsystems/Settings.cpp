@@ -151,16 +151,30 @@ namespace GlassCore::Settings
         if (Shared::SystemHelper::g_buildNumber >= 22000 || !hWnd || !IsWindow(hWnd))
             return;
 
+        if (backdropContext.effectType == 0)
+            return;
+
         // Win10 (<22000): после DWMWA_CLOAK(TRUE→FALSE) + DwmpCreateSharedThumbnailVisual
         // dwmcore теряет визуал CAccentAcrylicBlurBehind, а повторный SWCA с идентичной
-        // ACCENT_POLICY (и предшествующим DwmEnableBlurBehindWindow(FALSE)) схлопывается
-        // как no-op. Принудительный переход desired→ACCENT_DISABLED + DwmFlush() → desired
-        // заставляет dwmcore пересоздать CAccent на уже видимом uncloaked-окне.
+        // ACCENT_POLICY схлопывается как no-op. Вместо ACCENT_DISABLED (дающего чёрный кадр)
+        // переходим через прозрачный Blur/Transparent с тем же тинтом + DwmFlush(), затем
+        // ApplyBackdropEffect(desired) + DwmFlush().
+        const DWORD argb = backdropContext.gradientColor;
+        const DWORD accentColor =
+            (argb & 0xFF00FF00u)
+            | ((argb & 0x00FF0000u) >> 16)
+            | ((argb & 0x000000FFu) << 16);
+
+        const auto intermediateType =
+            (backdropContext.effectType == static_cast<DWORD>(EffectHelper::EffectType::Blur))
+                ? EffectHelper::EffectType::Transparent
+                : EffectHelper::EffectType::Blur;
+
         EffectHelper::SetWindowBackdrop(
             hWnd,
-            FALSE,
-            0,
-            EffectHelper::EffectType::None,
+            backdropContext.enableDropShadow,
+            accentColor,
+            intermediateType,
             /*skipNcRendering=*/true,
             /*flyoutBackdrop=*/true);
         (void)DwmFlush();

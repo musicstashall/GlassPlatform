@@ -357,7 +357,7 @@ namespace GlassCore::DropDown
             OnPaintEnd(hwnd);
         }
 
-        void SyncComboLBoxClientPaint(HWND root) noexcept
+        void SyncComboLBoxClientPaint(HWND root, bool skipWin10Swca = false) noexcept
         {
             GlassCore::ComboLBox::OnComboLBoxPrintClientBegin(root);
 
@@ -379,7 +379,12 @@ namespace GlassCore::DropDown
             // попадает в очередь этого же потока и обрабатывается после возврата —
             // тогда RDW_UPDATENOW действительно доходит до WM_PAINT (sync RedrawWindow
             // внутри сессии на клиенте в «доаттачном» белом виде фактически не красил).
-            (void)::PostMessageW(root, WndCompat::WM_GLASS_FLYOUT_CLIENT_REFRESH, 0, 0);
+            // wParam == 1 означает, что Win10 SWCA-backdrop уже пересобран в OnFlyoutAnimationFinished.
+            (void)::PostMessageW(
+                root,
+                WndCompat::WM_GLASS_FLYOUT_CLIENT_REFRESH,
+                static_cast<WPARAM>(skipWin10Swca ? 1 : 0),
+                0);
         }
 
         void SyncViewControlClientPaint(HWND root) noexcept
@@ -391,7 +396,7 @@ namespace GlassCore::DropDown
                 RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
         }
 
-        void RefreshFlyoutClientPaint(HWND root, const wchar_t* modeLabel) noexcept
+        void RefreshFlyoutClientPaint(HWND root, const wchar_t* modeLabel, bool skipWin10Swca = false) noexcept
         {
             if (!root || !::IsWindow(root))
                 return;
@@ -402,7 +407,7 @@ namespace GlassCore::DropDown
             }
             else if (IsComboLBoxClass(root))
             {
-                SyncComboLBoxClientPaint(root);
+                SyncComboLBoxClientPaint(root, skipWin10Swca);
             }
             else
             {
@@ -733,7 +738,7 @@ namespace GlassCore::DropDown
         PaintDeferredFlyoutBorderIfNeeded(hWnd);
 
         // Win10 (<22000): после DWMWA_CLOAK(TRUE→FALSE) + shared thumbnail делаем
-        // полный цикл ACCENT_DISABLED + DwmFlush() → desired backdrop + DwmFlush().
+        // цикл Blur/Transparent + DwmFlush() → desired backdrop + DwmFlush().
         if (Shared::SystemHelper::g_buildNumber < 22000)
         {
             const auto& ctx = WndCompat::g_dropDownCtx;
@@ -741,7 +746,12 @@ namespace GlassCore::DropDown
                 hWnd, ctx.useDarkMode, ctx.backdropEffect);
         }
 
-        RefreshFlyoutClientAfterUncloak(hWnd);
+        if (IsViewControlClass(hWnd))
+            RefreshFlyoutClientPaint(hWnd, L"ViewControl", /*skipWin10Swca=*/true);
+        else if (IsComboLBoxClass(hWnd))
+            RefreshFlyoutClientPaint(hWnd, L"ComboLBox", /*skipWin10Swca=*/true);
+        else
+            RefreshFlyoutClientPaint(hWnd, L"DropDown", /*skipWin10Swca=*/true);
         FlyoutFrame::ClearHostBorderDeferred(hWnd);
 
         if (Shared::SystemHelper::g_buildNumber < 22000)
