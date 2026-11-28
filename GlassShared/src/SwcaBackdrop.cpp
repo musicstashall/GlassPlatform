@@ -229,15 +229,23 @@ namespace Shared::SwcaBackdrop
             accent.AccentFlags |= kAccentGradientOrModernRecipe;
             break;
         case 6:
-            if (!flyoutBackdrop && PopupSystemBackdropBlockedByRootDwmPolicy())
+            if (build >= 22621)
             {
-                ApplyPopupAccentFallbackForDwmsbtEffect(accent, hasTint, effectTypeReg);
+                if (!flyoutBackdrop && PopupSystemBackdropBlockedByRootDwmPolicy())
+                {
+                    ApplyPopupAccentFallbackForDwmsbtEffect(accent, hasTint, effectTypeReg);
+                }
+                else
+                {
+                    backdropType        = DWMSBT_TRANSIENTWINDOW;
+                    ncRendering         = TRUE;
+                    windowTransparent   = TRUE;
+                }
             }
             else
             {
-                backdropType        = DWMSBT_TRANSIENTWINDOW;
-                ncRendering         = TRUE;
-                windowTransparent   = TRUE;
+                accent.AccentState = static_cast<DWORD>(ACCENT_STATE::ACCENT_ENABLE_ACRYLICBLURBEHIND);
+                accent.AccentFlags |= hasTint ? kAccentGradientOrModernRecipe : 0u;
             }
             break;
         case 7:
@@ -262,7 +270,7 @@ namespace Shared::SwcaBackdrop
             }
             break;
         case 8:
-            if (build >= 22000)
+            if (build >= 22621)
             {
                 if (!flyoutBackdrop && PopupSystemBackdropBlockedByRootDwmPolicy())
                 {
@@ -307,11 +315,18 @@ namespace Shared::SwcaBackdrop
 
         if (swcaFn)
         {
+            WINDOWCOMPOSITIONATTRIBUTEDATA data{};
+            data.dwAttribute = kWcaAccentPolicy;
+            data.pvData      = &accent;
+            data.cbData      = sizeof(accent);
+            const BOOL swcaOk = swcaFn(hwnd, &data);
+            const DWORD swcaErr = swcaOk ? 0u : GetLastError();
+
             DebugLog(
                 DBG_IMPORTANT,
                 L"[GlassShared][SwcaBackdrop] SetWindowBackdrop hwnd=0x%p eff=%d "
                 L"dropShadow=%d backdrop=%u AccentState=%u AccentFlags=0x%X "
-                L"tintAbgr=0x%08X nc=%d transparent=%d flyout=%d swca=1",
+                L"tintAbgr=0x%08X nc=%d transparent=%d flyout=%d swca=1 ok=%d err=%lu",
                 hwnd,
                 effectTypeReg,
                 dropShadow ? 1 : 0,
@@ -321,13 +336,9 @@ namespace Shared::SwcaBackdrop
                 tintAbgr,
                 ncRendering ? 1 : 0,
                 windowTransparent ? 1 : 0,
-                flyoutBackdrop ? 1 : 0);
-
-            WINDOWCOMPOSITIONATTRIBUTEDATA data{};
-            data.dwAttribute = kWcaAccentPolicy;
-            data.pvData      = &accent;
-            data.cbData      = sizeof(accent);
-            (void)swcaFn(hwnd, &data);
+                flyoutBackdrop ? 1 : 0,
+                swcaOk ? 1 : 0,
+                static_cast<unsigned long>(swcaErr));
         }
         else if (effectTypeReg == 3)
         {

@@ -754,9 +754,10 @@ namespace GlassCore::Root
 
         const bool darkMode = Shared::ThemeHelper::ResolveEffectiveDarkMode();
         const bool explorerShell =
-            Shared::RootBackdropPolicy::IsFileExplorerShellRootHwnd(hRoot);
+            Shared::SystemHelper::g_buildNumber >= 22000
+            && Shared::RootBackdropPolicy::IsFileExplorerShellRootHwnd(hRoot);
 
-        // Не-explorer ET 1–5 SWCA: Win11 не вызывает explorer CAPTION_COLOR hook — полный reapply на NC.
+        // Не-explorer (и Win10 CabinetWClass) ET 1–5 SWCA: Win11 не вызывает explorer CAPTION_COLOR hook — полный reapply на NC.
         if (!explorerShell)
         {
             GlassCore::Settings::WindowBackdropEffectContext backdrop{};
@@ -1363,7 +1364,7 @@ namespace GlassCore::Root
         {
             if (Shared::RootBackdropPolicy::DidGlassApplyRootBackdrop(hRoot))
                 OnRootDetach(hRoot);
-            if (!Shared::RootBackdropPolicy::IsFileExplorerShellRootHwnd(hRoot))
+            if (!IsWin11FileExplorerShellRoot(hRoot))
             {
                 RedrawWindow(hRoot, nullptr, nullptr,
                     RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME);
@@ -1376,7 +1377,7 @@ namespace GlassCore::Root
             return;
 
         ApplyRootBackdropPolicyForHwnd(hRoot, isActive);
-        if (!Shared::RootBackdropPolicy::IsFileExplorerShellRootHwnd(hRoot))
+        if (!IsWin11FileExplorerShellRoot(hRoot))
         {
             RedrawWindow(hRoot, nullptr, nullptr,
                 RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME);

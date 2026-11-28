@@ -15,6 +15,7 @@
 
 #include <MenuUtils.h>
 #include <WinApiUtils.h>
+#include <Helpers/SystemHelper.h>
 
 #include <mutex>
 #include <unordered_set>
@@ -154,13 +155,23 @@ namespace GlassCore::Menu
         {
             // MN_SIZEWINDOW приходит ДО SetWindowPos(SWP_SHOWWINDOW).
             // PopupIn прикрепляет subclass и cloak в ctor; WM_WINDOWPOSCHANGED+SWP_SHOWWINDOW → Start() (как TF).
-            (void)GlassCore::Animation::CreateMenuPopupIn(
+            const HRESULT hr = GlassCore::Animation::CreateMenuPopupIn(
                 hWnd,
                 static_cast<float>(animation.startRatio) / 100.f,
                 std::chrono::milliseconds{ animation.popInTime },
                 std::chrono::milliseconds{ animation.fadeInTime },
                 animation.popInStyle
             );
+            if (FAILED(hr) || hr == S_FALSE)
+            {
+                SetFlyoutBorderDeferred(hWnd, false);
+                BOOL uncloak = FALSE;
+                (void)DwmSetWindowAttribute(hWnd, DWMWA_CLOAK, &uncloak, sizeof(uncloak));
+                OnPaintFlyoutHostBorder(
+                    hWnd,
+                    WndCompat::Menu::FlyoutBorderPass::SetupAndPaint,
+                    nullptr);
+            }
         }
     }
 
@@ -224,6 +235,15 @@ namespace GlassCore::Menu
             hWnd,
             WndCompat::Menu::FlyoutBorderPass::SetupAndPaint,
             nullptr);
+
+        if (Shared::SystemHelper::g_buildNumber < 22000)
+        {
+            const bool dark = MenuHandler::GetContext().useDarkMode;
+            Settings::WindowBackdropEffectContext backdrop{};
+            Settings::QueryBackdropEffectContext(L"Menu", dark, backdrop);
+            Settings::ApplyBackdropEffect(hWnd, dark, backdrop, /*skipNcRendering=*/true, /*flyoutBackdrop=*/true);
+            (void)DwmFlush();
+        }
 
         DebugLog(DBG_IMPORTANT,
             L"[GlassCore][MenuEvents] PaintDeferredFlyoutBorderIfNeeded hwnd=0x%p",

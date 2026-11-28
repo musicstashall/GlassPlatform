@@ -34,6 +34,7 @@
 #include <RootBackdropPolicy.h>
 #include <RootEventProvider.h>
 #include <RootPolicyQuery.h>
+#include <SystemHelper.h>
 #include <GlassBackdropMark.h>
 #include <WndCompat.h>
 #include <WinUiBridge/WinUiContentBridgeHost.h>
@@ -107,7 +108,8 @@ namespace WndCompat
                 GetProcAddress(hCore, "GlassCore_ApplyRootBackdropPolicyTransitionForHwnd"))
             : nullptr;
 
-        if (Shared::RootBackdropPolicy::IsFileExplorerShellRootHwnd(hRoot))
+        if (Shared::SystemHelper::g_buildNumber >= 22000
+            && Shared::RootBackdropPolicy::IsFileExplorerShellRootHwnd(hRoot))
         {
             if (pfnTransition)
                 pfnTransition(hRoot);

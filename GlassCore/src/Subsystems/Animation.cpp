@@ -897,8 +897,11 @@ namespace GlassCore::Animation
         if (uMsg == GetAnimationFinishedMsg())
         {
             // Post-uncloak: однократная отрисовка рамки на real flyout (sync, без WM_GLASS).
-            GlassCore::Menu::PaintDeferredFlyoutBorderIfNeeded(hWnd);
-            GlassCore::DropDown::OnFlyoutAnimationFinished(hWnd);
+            // #32768 — меню (L"Menu"); остальные flyout (ComboLBox/DropDown/Listviewpopup/ViewControl) — L"DropDown".
+            if (IsWindowClass(hWnd, L"#32768"))
+                GlassCore::Menu::PaintDeferredFlyoutBorderIfNeeded(hWnd);
+            else
+                GlassCore::DropDown::OnFlyoutAnimationFinished(hWnd);
             RemoveWindowSubclass(hWnd, SubclassProc, 0);
             return DefSubclassProc(hWnd, uMsg, wParam, lParam);
         }
@@ -936,71 +939,119 @@ namespace GlassCore::Animation
             , m_animationStyle(animationStyle)
             , m_immediateInterupting(immediateInterupting)
         {
-            if (!EnsureDwmApi())
-                THROW_HR(E_FAIL);
+            bool attached = false;
+            bool cloaked = false;
+            try
+            {
+                if (!EnsureDwmApi())
+                    THROW_HR(E_FAIL);
 
-            auto context = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-            auto dpiCleanup = wil::scope_exit([&] { SetThreadDpiAwarenessContext(context); });
+                auto context = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+                auto dpiCleanup = wil::scope_exit([&] { SetThreadDpiAwarenessContext(context); });
 
-            auto& dcomp = Shared::DXHelper::LazyDComposition::GetInstance();
-            dcomp.EnsureResources();
-            auto dcompDevice = dcomp.GetDCompositionDevice();
-            THROW_HR_IF_NULL(E_FAIL, dcompDevice);
+                auto& dcomp = Shared::DXHelper::LazyDComposition::GetInstance();
+                dcomp.EnsureResources();
+                auto dcompDevice = dcomp.GetDCompositionDevice();
+                THROW_HR_IF_NULL(E_FAIL, dcompDevice);
 
-            Attach();
-            Utils::CloakWindow(m_menuWindow, TRUE);
+                Attach();
+                attached = true;
+                Utils::CloakWindow(m_menuWindow, TRUE);
+                cloaked = true;
 
-            m_backdropWindow = Utils::SHCreateWorkerWindowW(
-                DefWindowProcW,
-                ownerWindow,
-                WS_EX_NOREDIRECTIONBITMAP | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
-                WS_POPUP,
-                nullptr,
-                0
-            );
-            THROW_LAST_ERROR_IF_NULL(m_backdropWindow);
+                m_backdropWindow = Utils::SHCreateWorkerWindowW(
+                    DefWindowProcW,
+                    ownerWindow,
+                    WS_EX_NOREDIRECTIONBITMAP | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+                    WS_POPUP,
+                    nullptr,
+                    0
+                );
+                THROW_LAST_ERROR_IF_NULL(m_backdropWindow);
 
-            window = Utils::SHCreateWorkerWindowW(
-                DefWindowProcW,
-                ownerWindow,
-                WS_EX_NOREDIRECTIONBITMAP | WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
-                WS_POPUP,
-                nullptr,
-                0
-            );
-            THROW_LAST_ERROR_IF_NULL(window);
+                window = Utils::SHCreateWorkerWindowW(
+                    DefWindowProcW,
+                    ownerWindow,
+                    WS_EX_NOREDIRECTIONBITMAP | WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+                    WS_POPUP,
+                    nullptr,
+                    0
+                );
+                THROW_LAST_ERROR_IF_NULL(window);
 
-            THROW_LAST_ERROR_IF(!SetLayeredWindowAttributes(window, 0, 0, LWA_ALPHA));
-            THROW_LAST_ERROR_IF(!SetLayeredWindowAttributes(m_backdropWindow, 0, 0, LWA_ALPHA));
-            Utils::CloakWindow(window, TRUE);
-            THROW_LAST_ERROR_IF(!SetWindowPos(m_backdropWindow, nullptr, 0, 0, 0, 0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_ASYNCWINDOWPOS | SWP_NOSENDCHANGING));
+                THROW_LAST_ERROR_IF(!SetLayeredWindowAttributes(window, 0, 0, LWA_ALPHA));
+                THROW_LAST_ERROR_IF(!SetLayeredWindowAttributes(m_backdropWindow, 0, 0, LWA_ALPHA));
+                Utils::CloakWindow(window, TRUE);
+                THROW_LAST_ERROR_IF(!SetWindowPos(m_backdropWindow, nullptr, 0, 0, 0, 0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_ASYNCWINDOWPOS | SWP_NOSENDCHANGING));
 
-            THROW_IF_FAILED(dcompDevice->CreateTargetForHwnd(window, TRUE, &m_dcompTarget));
+                THROW_IF_FAILED(dcompDevice->CreateTargetForHwnd(window, TRUE, &m_dcompTarget));
 
-            DWM_THUMBNAIL_PROPERTIES thumbProps = {
-                DWM_TNP_VISIBLE | DWM_TNP_RECTDESTINATION | DWM_TNP_SOURCECLIENTAREAONLY | Shared::DwmThumbnailAPI::DWM_TNP_ENABLE3D,
-                {0,0,0,0}, {}, 255, TRUE, TRUE
-            };
-            THROW_IF_FAILED(Shared::DwmThumbnailAPI::DwmpCreateSharedThumbnailVisual(
-                window, m_menuWindow, 0, &thumbProps,
-                dcompDevice.get(), m_thumbnailVisual.put_void(), &m_thumbnail));
+                DWM_THUMBNAIL_PROPERTIES thumbProps = {
+                    DWM_TNP_VISIBLE | DWM_TNP_RECTDESTINATION | DWM_TNP_SOURCECLIENTAREAONLY | Shared::DwmThumbnailAPI::DWM_TNP_ENABLE3D,
+                    {0,0,0,0}, {}, 255, TRUE, TRUE
+                };
+                THROW_IF_FAILED(Shared::DwmThumbnailAPI::DwmpCreateSharedThumbnailVisual(
+                    window, m_menuWindow, 0, &thumbProps,
+                    dcompDevice.get(), m_thumbnailVisual.put_void(), &m_thumbnail));
 
-            thumbProps.fSourceClientAreaOnly = FALSE;
-            THROW_IF_FAILED(Shared::DwmThumbnailAPI::DwmpCreateSharedThumbnailVisual(
-                window, m_backdropWindow, 0, &thumbProps,
-                dcompDevice.get(), m_backdropThumbnailVisual.put_void(), &m_backdropThumbnail));
+                thumbProps.fSourceClientAreaOnly = FALSE;
+                THROW_IF_FAILED(Shared::DwmThumbnailAPI::DwmpCreateSharedThumbnailVisual(
+                    window, m_backdropWindow, 0, &thumbProps,
+                    dcompDevice.get(), m_backdropThumbnailVisual.put_void(), &m_backdropThumbnail));
 
-            THROW_IF_FAILED(dcompDevice->CreateVisual(&m_rootVisual));
-            THROW_IF_FAILED(m_rootVisual->AddVisual(m_backdropThumbnailVisual.get(), FALSE, nullptr));
-            THROW_IF_FAILED(m_rootVisual->AddVisual(m_thumbnailVisual.get(), FALSE, nullptr));
-            THROW_IF_FAILED(m_dcompTarget->SetRoot(m_rootVisual.get()));
-            THROW_IF_FAILED(dcompDevice->Commit());
-            THROW_IF_FAILED(DwmFlush());
+                THROW_IF_FAILED(dcompDevice->CreateVisual(&m_rootVisual));
+                THROW_IF_FAILED(m_rootVisual->AddVisual(m_backdropThumbnailVisual.get(), FALSE, nullptr));
+                THROW_IF_FAILED(m_rootVisual->AddVisual(m_thumbnailVisual.get(), FALSE, nullptr));
+                THROW_IF_FAILED(m_dcompTarget->SetRoot(m_rootVisual.get()));
+                THROW_IF_FAILED(dcompDevice->Commit());
+                THROW_IF_FAILED(DwmFlush());
 
-            // См. Fix 6: гарантируем попытку Start после полной инициализации, если SWP_SHOWWINDOW
-            // уже не придёт в сабкласс анимации (или пришёл только SWP_FRAMECHANGED).
-            (void)PostMessageW(m_menuWindow, GetDeferredPopupInStartMsg(), 0, 0);
+                // См. Fix 6: гарантируем попытку Start после полной инициализации, если SWP_SHOWWINDOW
+                // уже не придёт в сабкласс анимации (или пришёл только SWP_FRAMECHANGED).
+                (void)PostMessageW(m_menuWindow, GetDeferredPopupInStartMsg(), 0, 0);
+            }
+            catch (...)
+            {
+                // При исключении в конструкторе ~PopupIn() не вызывается:
+                // снимаем cloak, сабкласс (во избежание dangling this), thumbnail и worker-окна.
+                if (m_thumbnail)
+                {
+                    DwmUnregisterThumbnail(m_thumbnail);
+                    m_thumbnail = nullptr;
+                }
+                if (m_backdropThumbnail)
+                {
+                    DwmUnregisterThumbnail(m_backdropThumbnail);
+                    m_backdropThumbnail = nullptr;
+                }
+                m_dcompTarget.reset();
+                m_rootVisual.reset();
+                m_thumbnailVisual.reset();
+                m_backdropThumbnailVisual.reset();
+
+                if (cloaked && m_flyoutHwnd && IsWindow(m_flyoutHwnd))
+                    Utils::CloakWindow(m_flyoutHwnd, FALSE);
+
+                if (attached)
+                    Detach();
+
+                if (window)
+                {
+                    if (IsWindow(window))
+                        DestroyWindow(window);
+                    window = nullptr;
+                }
+                if (m_backdropWindow)
+                {
+                    if (IsWindow(m_backdropWindow))
+                        DestroyWindow(m_backdropWindow);
+                    m_backdropWindow = nullptr;
+                }
+
+                (void)DwmFlush();
+                throw;
+            }
         }
 
         virtual ~PopupIn() noexcept

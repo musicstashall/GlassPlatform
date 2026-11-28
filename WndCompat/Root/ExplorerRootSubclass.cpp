@@ -585,6 +585,8 @@ namespace WndCompat::ExplorerRoot
     {
         if (!IsWindow(hRoot))
             return;
+        if (Shared::SystemHelper::g_buildNumber < 22000)
+            return;
         if (!Shared::RootBackdropPolicy::IsFileExplorerShellRootHwnd(hRoot))
             return;
 
@@ -632,6 +634,10 @@ namespace WndCompat::ExplorerRoot
         const std::unordered_map<ATOM, WndCompat::Root::ExplorerBridge::ClassBrushEntry>& classBrushes,
         DWORD curTid)
     {
+        // На Win10 (<22000) CabinetWClass/ExploreWClass ведутся через общий RootSubclassProc.
+        if (Shared::SystemHelper::g_buildNumber < 22000)
+            return;
+
         for (HWND hWnd : windows)
         {
             if (!IsWindow(hWnd))

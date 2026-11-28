@@ -8,6 +8,7 @@
 #include <Subsystems/RenderText.h>
 #include <Subsystems/MenuRendering.h>
 #include <Helpers/ThemeHelper.h>
+#include <Helpers/SystemHelper.h>
 #include <Core/Intercept/HookDispatcher.h>
 #include <wil.h>
 #include <uxtheme.h>
@@ -624,6 +625,15 @@ namespace GlassCore::DropDown
                     ctx.animation.popInStyle,
                     ctx.animation.immediateInterupting);
                 DebugLog(L"[GlassCore][DropDown] CreateDropDownPopupIn hr=0x%08X hwnd=0x%p", hr, target);
+
+                if (FAILED(hr) || hr == S_FALSE)
+                {
+                    GlassCore::FlyoutFrame::ClearHostBorderDeferred(target);
+                    BOOL uncloak = FALSE;
+                    (void)DwmSetWindowAttribute(target, DWMWA_CLOAK, &uncloak, sizeof(uncloak));
+                    GlassCore::FlyoutFrame::PaintHostBorder(
+                        target, ctx.useDarkMode, ctx.border, ctx.backdropEffect.effectType);
+                }
             }
         }
     }
@@ -721,6 +731,17 @@ namespace GlassCore::DropDown
             return;
 
         PaintDeferredFlyoutBorderIfNeeded(hWnd);
+
+        // Win10 (<22000): SetWindowCompositionAttribute мог быть вызван до WS_VISIBLE / под DWMWA_CLOAK
+        // и до SWP_DRAWFRAME (PaintHostBorder). Повторяем SWCA уже на видимом uncloaked-окне.
+        if (Shared::SystemHelper::g_buildNumber < 22000)
+        {
+            const auto& ctx = WndCompat::g_dropDownCtx;
+            GlassCore::Settings::ApplyBackdropEffect(
+                hWnd, ctx.useDarkMode, ctx.backdropEffect, /*skipNcRendering=*/true, /*flyoutBackdrop=*/true);
+            (void)DwmFlush();
+        }
+
         RefreshFlyoutClientAfterUncloak(hWnd);
         FlyoutFrame::ClearHostBorderDeferred(hWnd);
     }
