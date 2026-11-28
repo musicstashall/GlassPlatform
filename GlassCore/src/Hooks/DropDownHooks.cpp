@@ -753,12 +753,6 @@ namespace GlassCore::DropDown
         else
             RefreshFlyoutClientPaint(hWnd, L"DropDown", /*skipWin10Swca=*/true);
         FlyoutFrame::ClearHostBorderDeferred(hWnd);
-
-        if (Shared::SystemHelper::g_buildNumber < 22000)
-        {
-            FlyoutFrame::LogWin10PostUncloakSurfaceDiag(
-                hWnd, IsComboLBoxClass(hWnd) ? L"ComboLBox" : L"DropDown");
-        }
     }
 
     void ClearFlyoutBorderDeferred(HWND hWnd) noexcept

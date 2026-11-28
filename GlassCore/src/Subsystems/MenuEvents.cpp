@@ -247,7 +247,6 @@ namespace GlassCore::Menu
             Settings::WindowBackdropEffectContext backdrop{};
             Settings::QueryBackdropEffectContext(L"Menu", dark, backdrop);
             Settings::ReapplyFlyoutBackdropAfterUncloakWin10(hWnd, dark, backdrop);
-            FlyoutFrame::LogWin10PostUncloakSurfaceDiag(hWnd, L"Menu");
         }
 
         DebugLog(DBG_IMPORTANT,

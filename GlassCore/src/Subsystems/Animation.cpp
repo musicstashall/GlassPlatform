@@ -901,16 +901,45 @@ namespace GlassCore::Animation
 
         if (uMsg == GetAnimationFinishedMsg())
         {
+            HWND overlayWnd = (GetBuildNumber() < 22000) ? reinterpret_cast<HWND>(wParam) : nullptr;
+            if (overlayWnd && IsWindow(overlayWnd))
+            {
+                // Win10 (<22000): к этому моменту m_thumbnail уже отрегистрирован (чтобы dwmcore
+                // разрешил пересборку CAccent на hWnd), а overlayWnd содержит только
+                // m_backdropThumbnailVisual (готовый акрил). Ставим overlayWnd ровно под hWnd
+                // и uncloak-им hWnd поверх него — без кадра дырки на время пересборки SWCA.
+                const bool targetTopmost = (GetWindowLongPtrW(hWnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+                if (!targetTopmost)
+                {
+                    SetWindowPos(
+                        overlayWnd, HWND_NOTOPMOST, 0, 0, 0, 0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOSENDCHANGING);
+                }
+                SetWindowPos(
+                    overlayWnd, hWnd, 0, 0, 0, 0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOSENDCHANGING);
+            }
+
             // Гарантируем uncloak на GUI-потоке владельца: на Win10 DWMWA_CLOAK с worker-потока
             // до закрытия оверлея/thumbnail может оставить окно скрытым в DWM.
             Utils::CloakWindow(hWnd, FALSE);
 
             // Post-uncloak: однократная отрисовка рамки на real flyout (sync, без WM_GLASS).
             // #32768 — меню (L"Menu"); остальные flyout (ComboLBox/DropDown/Listviewpopup/ViewControl) — L"DropDown".
-            if (IsWindowClass(hWnd, L"#32768"))
+            const bool isMenu = IsWindowClass(hWnd, L"#32768");
+            if (isMenu)
                 GlassCore::Menu::PaintDeferredFlyoutBorderIfNeeded(hWnd);
             else
                 GlassCore::DropDown::OnFlyoutAnimationFinished(hWnd);
+
+            if (overlayWnd && IsWindow(overlayWnd))
+            {
+                Utils::CloakWindow(overlayWnd, TRUE);
+                (void)DwmFlush();
+                GlassCore::FlyoutFrame::LogWin10PostUncloakSurfaceDiag(
+                    hWnd, isMenu ? L"Menu" : (IsWindowClass(hWnd, L"ComboLBox") ? L"ComboLBox" : L"DropDown"));
+            }
+
             RemoveWindowSubclass(hWnd, SubclassProc, 0);
             return DefSubclassProc(hWnd, uMsg, wParam, lParam);
         }
@@ -1067,18 +1096,35 @@ namespace GlassCore::Animation
         {
             if (GetBuildNumber() < 22000 && m_menuWindow && IsWindow(m_menuWindow))
             {
-                // Win10 (<22000): оставляем animation-оверлей `window` видимым поверх `m_menuWindow`,
-                // пока реальное окно uncloak-ится, рисует рамку и пересобирает SWCA-backdrop
-                // (Blur/Transparent → desired). Оверлей скрывается и уничтожается только после того,
-                // как реальный flyout полностью готов в DWM — без кадра «дырки» и без чёрного кадра.
-                Utils::CloakWindow(m_menuWindow, FALSE);
+                // Win10 (<22000): DwmpCreateSharedThumbnailVisual(DWM_TNP_SOURCECLIENTAREAONLY)
+                // на m_menuWindow подавляет пересборку CAccent пока m_thumbnail зарегистрирован.
+                // Поэтому сначала снимаем ТОЛЬКО m_thumbnailVisual + m_thumbnail (оставляя `window`
+                // с живым m_backdropThumbnailVisual — готовым акриловым фоном!), затем передаём
+                // `window` в GetAnimationFinishedMsg: на GUI-потоке `window` ставится ровно ПОД
+                // m_menuWindow, m_menuWindow uncloak-ится поверх него и пересобирает собственный
+                // SWCA-backdrop, после чего `window` скрывается и уничтожается.
+                if (m_rootVisual && m_thumbnailVisual)
+                    (void)m_rootVisual->RemoveVisual(m_thumbnailVisual.get());
+                m_thumbnailVisual.reset();
+                if (auto dev = Shared::DXHelper::LazyDComposition::GetInstance().GetDCompositionDevice())
+                    (void)dev->Commit();
+                if (m_thumbnail)
+                {
+                    DwmUnregisterThumbnail(m_thumbnail);
+                    m_thumbnail = nullptr;
+                }
 
                 HWND menuWnd = m_menuWindow;
                 m_menuWindow = nullptr;
                 DWORD_PTR sendResult = 0;
                 SendMessageTimeoutW(
-                    menuWnd, GetAnimationFinishedMsg(), 0, 0,
-                    SMTO_ABORTIFHUNG, 2000, &sendResult);
+                    menuWnd,
+                    GetAnimationFinishedMsg(),
+                    reinterpret_cast<WPARAM>(window),
+                    0,
+                    SMTO_ABORTIFHUNG,
+                    2000,
+                    &sendResult);
 
                 Utils::CloakWindow(window, TRUE);
 
@@ -1086,16 +1132,10 @@ namespace GlassCore::Animation
                     (void)m_dcompTarget->SetRoot(nullptr);
                 m_dcompTarget.reset();
                 m_rootVisual.reset();
-                m_thumbnailVisual.reset();
                 m_backdropThumbnailVisual.reset();
                 if (auto dev = Shared::DXHelper::LazyDComposition::GetInstance().GetDCompositionDevice())
                     (void)dev->Commit();
 
-                if (m_thumbnail)
-                {
-                    DwmUnregisterThumbnail(m_thumbnail);
-                    m_thumbnail = nullptr;
-                }
                 if (m_backdropThumbnail)
                 {
                     DwmUnregisterThumbnail(m_backdropThumbnail);
