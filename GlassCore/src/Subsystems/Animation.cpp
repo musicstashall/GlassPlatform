@@ -94,8 +94,11 @@ namespace GlassCore::Animation
     struct Win10PendingThumb
     {
         HTHUMBNAIL thumbnail = nullptr;
+        HTHUMBNAIL backdropThumbnail = nullptr;
+        HWND backdropWindow = nullptr;
         wil::com_ptr<IDCompositionVisual2> rootVisual;
         wil::com_ptr<IDCompositionVisual2> thumbnailVisual;
+        wil::com_ptr<IDCompositionVisual2> backdropThumbnailVisual;
     };
 
     static std::mutex g_win10PendingThumbMutex;
@@ -116,20 +119,33 @@ namespace GlassCore::Animation
             g_win10PendingThumbs.erase(it);
         }
 
-        if (pending.rootVisual && pending.thumbnailVisual)
-            (void)pending.rootVisual->RemoveVisual(pending.thumbnailVisual.get());
+        if (pending.rootVisual)
+        {
+            if (pending.thumbnailVisual)
+                (void)pending.rootVisual->RemoveVisual(pending.thumbnailVisual.get());
+            if (pending.backdropThumbnailVisual)
+                (void)pending.rootVisual->RemoveVisual(pending.backdropThumbnailVisual.get());
+        }
         pending.thumbnailVisual.reset();
+        pending.backdropThumbnailVisual.reset();
         pending.rootVisual.reset();
         if (auto dev = Shared::DXHelper::LazyDComposition::GetInstance().GetDCompositionDevice())
             (void)dev->Commit();
         if (pending.thumbnail)
             (void)DwmUnregisterThumbnail(pending.thumbnail);
+        if (pending.backdropThumbnail)
+            (void)DwmUnregisterThumbnail(pending.backdropThumbnail);
+        if (pending.backdropWindow && IsWindow(pending.backdropWindow))
+            Utils::CloakWindow(pending.backdropWindow, TRUE);
     }
 
-    // Win10 (<22000): захватывает текущий GDI-буфер hWnd в статический IDCompositionSurface,
-    // атомарно подменяет им m_thumbnailVisual на overlayWnd и отрегистрирует m_thumbnail.
-    // Это позволяет держать overlayWnd ПОВЕРХ hWnd (полностью скрывая 1–2 кадра прогрева
-    // CAccentAcrylicBlurBehind на Win10 — без единого чёрного кадра и без пропадания текста).
+    // Win10 (<22000): захватывает финальный скомпозиченный кадр overlayWnd прямо с экрана
+    // (BitBlt SRCCOPY|CAPTUREBLT → непрозрачный IDCompositionSurface), атомарно заменяет
+    // им ОБА живых thumbnail-визуала (m_thumbnailVisual + m_backdropThumbnailVisual) на
+    // overlayWnd и скрывает m_backdropWindow.
+    // За счёт этого overlayWnd держит статичный замороженный кадр поверх hWnd на время
+    // прогрева CAccentAcrylicBlurBehind: нет ни чёрных кадров прогрева, ни «двойного акрила»
+    // (белого кадра в светлой теме от наложения m_backdropWindow поверх нового акрила hWnd).
     static void SwapWin10PendingThumbToSnapshot(
         HWND overlayWnd,
         HWND flyoutHwnd,
@@ -161,10 +177,10 @@ namespace GlassCore::Animation
             const int h = wr.bottom - wr.top;
             if (w > 0 && h > 0 && w <= 4096 && h <= 4096)
             {
-                HDC hdcWin = GetWindowDC(flyoutHwnd);
-                if (hdcWin)
+                HDC hdcScreen = GetDC(nullptr);
+                if (hdcScreen)
                 {
-                    HDC hdcMem = CreateCompatibleDC(hdcWin);
+                    HDC hdcMem = CreateCompatibleDC(hdcScreen);
                     if (hdcMem)
                     {
                         BITMAPINFO bmi{};
@@ -176,20 +192,16 @@ namespace GlassCore::Animation
                         bmi.bmiHeader.biCompression = BI_RGB;
 
                         void* bits = nullptr;
-                        HBITMAP hbmp = CreateDIBSection(hdcWin, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+                        HBITMAP hbmp = CreateDIBSection(hdcScreen, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
                         if (hbmp && bits)
                         {
                             HGDIOBJ oldBmp = SelectObject(hdcMem, hbmp);
-                            if (BitBlt(hdcMem, 0, 0, w, h, hdcWin, 0, 0, SRCCOPY))
+                            if (BitBlt(hdcMem, 0, 0, w, h, hdcScreen, wr.left, wr.top, SRCCOPY | CAPTUREBLT))
                             {
                                 auto* px = static_cast<uint32_t*>(bits);
                                 const size_t count = static_cast<size_t>(w) * static_cast<size_t>(h);
                                 for (size_t i = 0; i < count; ++i)
-                                {
-                                    const uint32_t v = px[i];
-                                    if ((v & 0xFF000000u) == 0 && (v & 0x00FFFFFFu) != 0)
-                                        px[i] = v | 0xFF000000u;
-                                }
+                                    px[i] |= 0xFF000000u;
 
                                 wil::com_ptr<IDCompositionSurface> surface;
                                 if (SUCCEEDED(dev->CreateSurface(
@@ -237,19 +249,29 @@ namespace GlassCore::Animation
                             DeleteObject(hbmp);
                         DeleteDC(hdcMem);
                     }
-                    ReleaseDC(flyoutHwnd, hdcWin);
+                    ReleaseDC(nullptr, hdcScreen);
                 }
             }
         }
 
-        if (pending.rootVisual && pending.thumbnailVisual)
-            (void)pending.rootVisual->RemoveVisual(pending.thumbnailVisual.get());
+        if (pending.rootVisual)
+        {
+            if (pending.thumbnailVisual)
+                (void)pending.rootVisual->RemoveVisual(pending.thumbnailVisual.get());
+            if (pending.backdropThumbnailVisual)
+                (void)pending.rootVisual->RemoveVisual(pending.backdropThumbnailVisual.get());
+        }
         pending.thumbnailVisual.reset();
+        pending.backdropThumbnailVisual.reset();
         pending.rootVisual.reset();
         if (dev)
             (void)dev->Commit();
         if (pending.thumbnail)
             (void)DwmUnregisterThumbnail(pending.thumbnail);
+        if (pending.backdropThumbnail)
+            (void)DwmUnregisterThumbnail(pending.backdropThumbnail);
+        if (pending.backdropWindow && IsWindow(pending.backdropWindow))
+            Utils::CloakWindow(pending.backdropWindow, TRUE);
     }
 
     static bool IsWindowClass(HWND hWnd, const wchar_t* className)
@@ -1069,16 +1091,18 @@ namespace GlassCore::Animation
             if (overlayWnd && IsWindow(overlayWnd))
             {
                 // Win10 (<22000):
-                // Фаза 1: для DropDown/ComboLBox/ViewControl рисуем 1px рамку и клиентский
-                // контент ДО uncloak, пока hWnd полностью скрыто за overlayWnd.
-                if (!isMenu)
-                    GlassCore::DropDown::PrepareForWin10Uncloak(hWnd);
+                // Фаза 1: СНАЧАЛА захватываем финальный скомпозиченный кадр overlayWnd с экрана
+                // (однослойный акрил + текст + рамка) в непрозрачный статический IDCompositionSurface,
+                // атомарно заменяем им ОБА живых thumbnail-визуала (m_thumbnailVisual и
+                // m_backdropThumbnailVisual), отрегистрируем оба thumbnail и cloak-им m_backdropWindow.
+                // Это одновременно устраняет и чёрные кадры прогрева CAccentAcrylicBlurBehind,
+                // и белый кадр «двойного акрила» (m_backdropWindow поверх нового акрила hWnd).
+                wil::com_ptr<IDCompositionVisual2> snapRoot;
+                wil::com_ptr<IDCompositionVisual2> snapVisual;
+                wil::com_ptr<IDCompositionSurface> snapSurface;
+                SwapWin10PendingThumbToSnapshot(overlayWnd, hWnd, snapRoot, snapVisual, snapSurface);
 
-                // Фаза 2: держим overlayWnd ПОВЕРХ hWnd (HWND_TOPMOST в точной геометрии hWnd),
-                // атомарно подменяем живой m_thumbnailVisual на статический IDCompositionSurface-снапшот
-                // hWnd и отрегистрируем m_thumbnail. После этого hWnd uncloak-ится и включает
-                // SWCA(0 → desired) ПОЗАДИ overlayWnd — 1–2 кадра прогрева CAccentAcrylicBlurBehind
-                // полностью скрыты оверлеем с готовым акрилом и контентом (нулевой чёрный кадр!).
+                // Держим замороженный overlayWnd ПОВЕРХ hWnd в точной геометрии и 100% alpha.
                 RECT wr{};
                 if (GetWindowRect(hWnd, &wr))
                 {
@@ -1089,19 +1113,27 @@ namespace GlassCore::Animation
                 }
                 (void)SetLayeredWindowAttributes(overlayWnd, 0, 255, LWA_ALPHA);
 
-                wil::com_ptr<IDCompositionVisual2> snapRoot;
-                wil::com_ptr<IDCompositionVisual2> snapVisual;
-                wil::com_ptr<IDCompositionSurface> snapSurface;
-                SwapWin10PendingThumbToSnapshot(overlayWnd, hWnd, snapRoot, snapVisual, snapSurface);
+                // Фаза 2: для DropDown/ComboLBox/ViewControl рисуем 1px рамку и клиентский
+                // контент на всё ещё cloaked hWnd, полностью скрытом за замороженным overlayWnd.
+                if (!isMenu)
+                    GlassCore::DropDown::PrepareForWin10Uncloak(hWnd);
 
+                // Uncloak hWnd и включаем SWCA(0 → desired) ПОЗАДИ замороженного overlayWnd.
                 Utils::CloakWindow(hWnd, FALSE);
 
                 if (isMenu)
+                {
                     GlassCore::Menu::PaintDeferredFlyoutBorderIfNeeded(hWnd);
+                }
                 else
+                {
                     GlassCore::DropDown::ApplyBackdropForWin10Uncloak(hWnd);
+                    // Для ComboLBox сразу заполняем клиентский буфер (WM_PRINTCLIENT) ещё до
+                    // снятия overlayWnd, чтобы после скрытия оверлея контент уже был на месте.
+                    GlassCore::DropDown::FinalizeAfterWin10Uncloak(hWnd);
+                }
 
-                // Ждём 2 кадра DWM позади overlayWnd, чтобы CAccentAcrylicBlurBehind
+                // Ждём 2 кадра DWM позади замороженного overlayWnd, чтобы CAccentAcrylicBlurBehind
                 // полностью прогрелся и стабилизировался ДО показа hWnd пользователю.
                 (void)DwmFlush();
                 (void)DwmFlush();
@@ -1118,9 +1150,6 @@ namespace GlassCore::Animation
                 snapVisual.reset();
                 snapSurface.reset();
                 snapRoot.reset();
-
-                if (!isMenu)
-                    GlassCore::DropDown::FinalizeAfterWin10Uncloak(hWnd);
 
                 (void)DwmFlush();
                 GlassCore::FlyoutFrame::LogWin10PostUncloakSurfaceDiag(
@@ -1303,9 +1332,13 @@ namespace GlassCore::Animation
                 {
                     Win10PendingThumb pending{};
                     pending.thumbnail = m_thumbnail;
+                    pending.backdropThumbnail = m_backdropThumbnail;
+                    pending.backdropWindow = m_backdropWindow;
                     pending.rootVisual = m_rootVisual;
                     pending.thumbnailVisual = std::move(m_thumbnailVisual);
+                    pending.backdropThumbnailVisual = std::move(m_backdropThumbnailVisual);
                     m_thumbnail = nullptr;
+                    m_backdropThumbnail = nullptr;
                     {
                         std::lock_guard lock(g_win10PendingThumbMutex);
                         g_win10PendingThumbs[window] = std::move(pending);
