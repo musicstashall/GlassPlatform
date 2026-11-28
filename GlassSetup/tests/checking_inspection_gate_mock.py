@@ -31,15 +31,22 @@ namespace InstallLog{void Line(const wchar_t*){}template<class... T>void LineFor
 bool IsControllerChild(){return false;}
 #include "resource.h"
 std::wstring Text(unsigned){return L"Setup diagnostic";}
-enum class Page{Checking,Components};
+namespace GlassReleaseClient {enum class FailureKind{None,Transport,HttpStatus,Cancelled,Local,InvalidData};struct FailureInfo{FailureKind kind=FailureKind::None;unsigned long code=0;};}
+enum class VersionFailureStage{None,Catalog,SetupDownload};
+enum class Page{Checking,Components,Error};
+bool controllerChild=false,noSelfUpdate=false;
+bool IsControllerChild(){return controllerChild;}
+bool HasCommandLineSwitch(const wchar_t*){return noSelfUpdate;}
 struct VersionCheckResult{bool completed=false,fetched=false,newer=false,setupDownloadFailed=false;GlassPackageCatalog::Catalog catalog=7;
- std::wstring self=L"2.0.0.90",latest=L"2.0.0.70",preparedSetup;};
+ std::wstring self=L"2.0.0.90",latest=L"2.0.0.70",preparedSetup,diagnostic;
+ VersionFailureStage failureStage=VersionFailureStage::None;GlassReleaseClient::FailureInfo failure;};
 struct App{Page page_=Page::Checking;std::mutex versionCheckMutex_;
- VersionCheckResult versionCheckResult_;bool versionCheckHandled_=false,inspectionApplied_=false,controllerCheckHandled_=false;
- GlassPackageCatalog::Catalog releaseCatalog_;int scans=0,advances=0,transitions=0,errors=0;bool transfer=false;
+ VersionCheckResult versionCheckResult_;bool versionCheckHandled_=false,inspectionApplied_=false,controllerCheckHandled_=false,versionRecoveryActive_=false;
+ GlassPackageCatalog::Catalog releaseCatalog_;std::wstring errorReason_;int scans=0,advances=0,transitions=0,errors=0;bool transfer=false;
  bool TransitionController(const std::wstring&){++transitions;return transfer;}
  bool BeginProductInspection(){++scans;return true;}
  bool RunPreflightChecks(){return true;}
+ void SetPage(Page page){page_=page;}
  void ContinueAfterLicenseCheck(){++advances;page_=Page::Components;}
  void ShowInstallError(const std::wstring&){++errors;}
 '''
@@ -60,7 +67,24 @@ int main(){
  {App a;a.inspectionApplied_=true;a.versionCheckResult_.completed=true;a.versionCheckResult_.fetched=true;
   a.versionCheckResult_.newer=true;a.versionCheckResult_.setupDownloadFailed=true;
   a.CompleteVersionCheck();assert(a.advances==0&&a.errors==1&&a.versionCheckHandled_);}
- std::cout<<"PASS: actual Checking completion gate: inspection/network in both orders, failed/offline catalog, one advance\n";
+ {App a;a.inspectionApplied_=true;a.versionCheckResult_.completed=true;a.versionCheckResult_.failureStage=VersionFailureStage::Catalog;
+  a.versionCheckResult_.failure.kind=GlassReleaseClient::FailureKind::Transport;a.versionCheckResult_.diagnostic=L"timeout detail";
+  a.CompleteVersionCheck();assert(a.page_==Page::Error&&a.versionRecoveryActive_&&a.advances==0&&a.errors==0);
+  assert(a.errorReason_.find(L"timeout detail")!=std::wstring::npos);}
+ {App a;a.inspectionApplied_=true;a.versionCheckResult_.completed=true;a.versionCheckResult_.fetched=true;
+  a.versionCheckResult_.setupDownloadFailed=true;a.versionCheckResult_.failureStage=VersionFailureStage::SetupDownload;
+  a.versionCheckResult_.failure.kind=GlassReleaseClient::FailureKind::Transport;
+  a.CompleteVersionCheck();assert(a.page_==Page::Error&&a.versionRecoveryActive_&&a.advances==0);}
+ {App a;a.inspectionApplied_=true;a.versionCheckResult_.completed=true;a.versionCheckResult_.failureStage=VersionFailureStage::Catalog;
+  a.versionCheckResult_.failure.kind=GlassReleaseClient::FailureKind::InvalidData;
+  a.CompleteVersionCheck();assert(!a.versionRecoveryActive_&&a.page_==Page::Components&&a.advances==1);}
+ {App a;controllerChild=true;a.inspectionApplied_=true;a.versionCheckResult_.completed=true;
+  a.versionCheckResult_.failureStage=VersionFailureStage::Catalog;a.versionCheckResult_.failure.kind=GlassReleaseClient::FailureKind::Transport;
+  a.CompleteVersionCheck();assert(!a.versionRecoveryActive_&&a.advances==1&&a.scans==1);controllerChild=false;}
+ {App a;noSelfUpdate=true;a.inspectionApplied_=true;a.versionCheckResult_.completed=true;
+  a.versionCheckResult_.failureStage=VersionFailureStage::Catalog;a.versionCheckResult_.failure.kind=GlassReleaseClient::FailureKind::Transport;
+  a.CompleteVersionCheck();assert(!a.versionRecoveryActive_&&a.advances==1);noSelfUpdate=false;}
+ std::cout<<"PASS: actual Checking completion gate: transport recovery only on normal Setup path; catalog errors retain inspection gate\n";
 }
 '''
 with tempfile.TemporaryDirectory(prefix='CheckingGate-') as d:

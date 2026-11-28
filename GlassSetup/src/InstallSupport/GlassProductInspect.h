@@ -2,6 +2,7 @@
 
 #include <Windows.h>
 #include "GlassSecureUxPackage.h"
+#include "GlassReleaseClient.h"
 #include <atomic>
 #include <string>
 #include <vector>
@@ -50,6 +51,10 @@ struct ProductReport {
 
 struct Report {
     bool ran = false;
+    bool catalogChecked = false;
+    bool catalogCheckFailed = false;
+    GlassReleaseClient::FailureInfo catalogFailure;
+    std::wstring catalogDiagnostic;
     // UI capability hint only; execution re-enumerates and verifies the cache.
     std::wstring officialSecureUxThemeCode;
     std::wstring secureUxThemePresenceDetail;

@@ -6,7 +6,7 @@ const binary=pkg.default||pkg,path=require('node:path'),assert=require('node:ass
  try{
   const page=await browser.newPage({viewport:{width:1000,height:540},reducedMotion:'reduce'});
   await page.route('https://glassplatform.invalid/**',r=>r.abort());
-  await page.addInitScript(()=>{window.chrome={webview:{postMessage(){},addEventListener(t,f){window.receive=f;}}};});
+  await page.addInitScript(()=>{window.posts=[];window.chrome={webview:{postMessage(message){window.posts.push(message);},addEventListener(t,f){window.receive=f;}}};});
   await page.goto('file://'+path.resolve(__dirname,'../res/slideshow.html'));
   for(const locale of ['ru','en']){
    await page.evaluate(locale=>window.receive({data:{type:'state',page:'components',locale,components:['x64','x86','settings64','settings32','openglass','secureUxTheme'].map(id=>({id,title:id,checked:true,installed:true,installedVersion:'2.0.0.105',targetVersion:'2.0.0.106',operation:'update'})),downloads:['x64','x86','settings64','settings32','openglass','secureUxTheme'].map(id=>({id,phase:'downloading',network:true,total:10485760,bytes:5242880,elapsedMs:2000}))}}),locale);

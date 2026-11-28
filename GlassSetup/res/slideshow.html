@@ -802,8 +802,8 @@ footer.slideshow-only{position:absolute;bottom:25px;left:48px;right:48px;display
 /* Known upstream compatibility risk, distinct from installed-payload corruption. */
 #components-panel .c-card.compatibility-risk,#components-panel .c-card.compatibility-risk:hover{opacity:1;border-color:#f18383;background:linear-gradient(130deg,#5b272f,#321d2a);box-shadow:inset 0 1px #ffffff0a}
 #components-panel .c-card.compatibility-risk .comp-warning-button{color:#ff6b6b}
-.metadata-error-label{position:absolute;left:8px;right:8px;top:50%;transform:translateY(-50%);text-align:center;font-size:10px;color:#f5ccd0;pointer-events:none;white-space:nowrap}
-#components-panel .c-card:has(.metadata-error-label) .c-meta{visibility:hidden}
+.metadata-error-label,.catalog-error-label{position:absolute;left:8px;right:8px;top:50%;transform:translateY(-50%);text-align:center;font-size:10px;color:#f5ccd0;pointer-events:none;white-space:nowrap}
+#components-panel .c-card:has(.metadata-error-label,.catalog-error-label) .c-meta{visibility:hidden}
 .acrylic-tooltip{position:fixed;z-index:10000;max-width:260px;padding:7px 10px;border:1px solid #d3c8ff45;border-radius:8px;background:#24273bd9;backdrop-filter:blur(22px) saturate(150%);-webkit-backdrop-filter:blur(22px) saturate(150%);box-shadow:0 8px 24px #0005,inset 0 1px #ffffff14;color:#f0edf9;font-size:11px;line-height:1.4;pointer-events:none;white-space:normal}
 .acrylic-tooltip[hidden]{display:none}
 </style></head>
@@ -1042,6 +1042,10 @@ function showProductWarning(item,button){
   dialogParagraph(body,ru?'Проверьте сведения перед применением изменений.':'Review these notes before applying changes.','dialog-description');
   for(const warning of item.planWarnings)dialogParagraph(body,warning,'dialog-warning-entry');
  }else dialogParagraph(body,item.warning,'dialog-warning-entry');
+ if(item.catalogCheckFailed){
+  dialogParagraph(body,ru?'Не удалось проверить версии пакетов Glass. Локальные источники остаются доступными; перед установкой они по-прежнему проходят обычную проверку.':'Glass package versions could not be checked. Local sources remain available and still undergo the normal checks before installation.','dialog-description');
+  dialogParagraph(body,(ru?'Подробности проверки: ':'Check details: ')+(item.catalogDiagnostic||item.catalogCheckError||''),'dialog-diagnostic');
+ }
  document.getElementById('components-warning-hint').textContent=ru?'Esc закрыть':'Esc to close';
  document.getElementById('components-warning-ok').textContent=ru?'Понятно':'Got it';
  document.getElementById('components-warning-close').setAttribute('aria-label',ru?'Закрыть':'Close');shade.hidden=false;document.getElementById('components-warning-close').focus();
@@ -1342,8 +1346,9 @@ function componentCardFacts(item,input){
  const helperChanged=!!(item.installed&&item.nativeSourceDiffers===true);
  const interactive=!input.disabled&&!hostState.componentsLoading;
  const canApply=interactive&&(item.applySupported!==false||resourcesPairedChoice(item));
- return {selected,remove,newer,broken,helperChanged,
-  availableNeeded:interactive&&(hostState.appMode==='unins'?selected:remove||canApply&&!selected&&(!item.installed||newer)),
+ const catalogFailed=hostState.appMode!=='unins'&&item.catalogCheckFailed===true;
+ return {selected,remove,newer,broken,helperChanged,catalogFailed,
+  availableNeeded:interactive&&(hostState.appMode==='unins'?selected:catalogFailed||remove||canApply&&!selected&&(!item.installed||newer)),
   installedNeeded:hostState.appMode==='unins'?selected:selected||canApply&&(newer||broken||helperChanged)};
 }
 function bindComponentName(name,item){
@@ -1474,6 +1479,7 @@ function componentWarningText(item,available,facts){
  const offer=componentOfferWarning(item)||(item?.compatibilityRisk===true?componentDependencyWarning(item):'');
  const offerVisible=!!offer&&(available?!facts.selected:facts.selected)&&!facts.remove;
  const dependency=available?'':componentDependencyWarning(item);
+ if(available&&facts.catalogFailed)return locale==='ru'?'Не удалось проверить версии пакетов Glass. Нажмите ▶, чтобы повторить проверку.':'Could not check Glass package versions. Press ▶ to retry.';
  if(available)return offerVisible?offer:'';
  return [dependency,offerVisible&&offer!==dependency?offer:''].filter(Boolean).join('\n\n');
 }
@@ -1735,11 +1741,12 @@ function syncDownloadVisuals(){
   const planned=!!(input?.checked&&input.dataset.intent!=='remove'&&hostState.appMode!=='unins'&&card.closest('#components-installed-grid'));
   const d=selected.find(d=>d.id===card.dataset.product);
   let bar=card.querySelector('.product-transfer'),retry=card.querySelector('.download-retry');
-  let errorLabel=card.querySelector('.metadata-error-label');
-  // Server-unavailable belongs only to the Available catalogue, including the
-  // mirror of a product already placed in the plan. The plan card stays a normal install.
+  let errorLabel=card.querySelector('.metadata-error-label'),catalogErrorLabel=card.querySelector('.catalog-error-label');
+  // Both retry notices belong only to Available; the planned card stays independent.
   const catalogCard=!!card.closest('#components-grid');
+  const catalogFailed=hostState.appMode!=='unins'&&item?.catalogCheckFailed===true;
   if((!item?.metadataBlocked||!catalogCard)&&errorLabel){errorLabel.remove();errorLabel=null;}
+  if((!catalogFailed||!catalogCard)&&catalogErrorLabel){catalogErrorLabel.remove();catalogErrorLabel=null;}
   if(catalogCard&&item?.metadataBlocked&&hostState.appMode!=='unins'&&input?.dataset.intent!=='remove'){
    if(bar)bar.remove();
    card.classList.remove('download-planned','download-progress','download-local');
@@ -1750,6 +1757,19 @@ function syncDownloadVisuals(){
    errorLabel.textContent=ru?'Сервер недоступен (E403)':'Server unavailable (E403)';
    retry.dataset.tooltip=ru?'Повторить загрузку метаданных':'Retry metadata download';retry.setAttribute('aria-label',ru?'Повторить получение версии':'Retry version discovery');
    retry.onclick=e=>{e.stopPropagation();if(!item.metadataRetrying)window.chrome?.webview?.postMessage('metadata-retry:'+item.id);};
+   continue;
+  }
+  if(catalogCard&&catalogFailed){
+   if(bar)bar.remove();
+   card.classList.remove('download-planned','download-progress','download-local');
+   card.classList.add('download-failed');
+   if(!retry){retry=document.createElement('button');retry.type='button';retry.className='download-retry';card.append(retry);}
+   retry.disabled=!!item.catalogRetrying;
+   if(!catalogErrorLabel){catalogErrorLabel=document.createElement('span');catalogErrorLabel.className='catalog-error-label';card.append(catalogErrorLabel);}
+   catalogErrorLabel.textContent=ru?'Ошибка проверки версий':'Version check failed';
+   retry.dataset.tooltip=ru?'Повторить проверку версий':'Retry version check';
+   retry.setAttribute('aria-label',ru?'Повторить проверку версий Glass':'Retry Glass version check');
+   retry.onclick=e=>{e.stopPropagation();if(!item.catalogRetrying)window.chrome?.webview?.postMessage('catalog-retry');};
    continue;
   }
   const remote=item?.downloadRequired!==false||!!d?.network,active=planned&&remote&&!!d&&d.phase!=='ready';

@@ -142,14 +142,25 @@ bool CreateWorkspace(std::wstring& directory) noexcept {
     }catch(...){return false;}
 }
 bool PrepareSetup(const GlassPackageCatalog::Asset& asset,const std::wstring& workspace,
-    const std::atomic<bool>& cancel,std::wstring& prepared,std::wstring& error) noexcept {
-    prepared.clear();error.clear();
+    const std::atomic<bool>& cancel,std::wstring& prepared,std::wstring& error,
+    GlassReleaseClient::FailureInfo* failure) noexcept {
+    prepared.clear();error.clear();if(failure)*failure={};
     const auto part=workspace+L"\\GlassSetup.exe.part",file=workspace+L"\\GlassSetup.exe";
     try {
         if(!asset.downloadable||asset.file!="GlassSetup.exe"||
            !GlassPackageCatalog::ReleaseUrl(asset.url,asset.file)||!GlassPackageCatalog::Digest(asset.sha256)||
-           asset.size<512||asset.size>1024ull*1024*1024||!GlassMaintenanceCache::TrustedDirectory(workspace)||cancel.load())
-            return Fail(error,L"Setup download metadata/workspace unavailable");
+           asset.size<512||asset.size>1024ull*1024*1024){
+            if(failure)*failure={GlassReleaseClient::FailureKind::InvalidData,ERROR_INVALID_DATA};
+            return Fail(error,L"Setup download metadata unavailable");
+        }
+        if(!GlassMaintenanceCache::TrustedDirectory(workspace)){
+            if(failure)*failure={GlassReleaseClient::FailureKind::Local,GetLastError()};
+            return Fail(error,L"Setup workspace unavailable");
+        }
+        if(cancel.load()){
+            if(failure)*failure={GlassReleaseClient::FailureKind::Cancelled,ERROR_INSTALL_USEREXIT};
+            return Fail(error,L"Setup preparation cancelled");
+        }
         bool ok=false;
         const auto cached=GlassMaintenanceCache::CurrentFile(L"GlassSetup.exe");
         if(!cached.empty()) {
@@ -164,7 +175,10 @@ bool PrepareSetup(const GlassPackageCatalog::Asset& asset,const std::wstring& wo
             DeleteFileW(part.c_str()); // Only this operation's workspace copy.
             error.clear();
             Handle out;out.h=GlassReleaseClient::CreatePrivateFile(part);
-            if(out.h==INVALID_HANDLE_VALUE)return Fail(error,L"Cannot create private Setup staging file");
+            if(out.h==INVALID_HANDLE_VALUE){
+                if(failure)*failure={GlassReleaseClient::FailureKind::Local,GetLastError()};
+                return Fail(error,L"Cannot create private Setup staging file");
+            }
             // Keep the same partial file across a dropped connection. Get sends
             // Range from its current size; a failed attempt does not delete it.
             for(int attempt=0;attempt<8&&!ok&&!cancel.load();++attempt) {
@@ -174,12 +188,24 @@ bool PrepareSetup(const GlassPackageCatalog::Asset& asset,const std::wstring& wo
                     if(cancel.load())break;
                     error.clear();
                 }
-                ok=GlassReleaseClient::Get(Wide(asset.url),out.h,nullptr,asset.size,cancel,error)&&FlushFileBuffers(out.h);
+                GlassReleaseClient::FailureInfo attemptFailure{};
+                const bool downloaded=GlassReleaseClient::Get(Wide(asset.url),out.h,nullptr,asset.size,cancel,error,&attemptFailure);
+                if(downloaded&&!FlushFileBuffers(out.h)){
+                    error=L"Flushing private Setup staging file ("+std::to_wstring(GetLastError())+L")";
+                    attemptFailure={GlassReleaseClient::FailureKind::Local,GetLastError()};
+                }
+                ok=downloaded&&attemptFailure.kind==GlassReleaseClient::FailureKind::None&&error.empty();
+                if(!ok&&failure)*failure=attemptFailure;
             }
+        }
+        if(cancel.load()){
+            if(failure)*failure={GlassReleaseClient::FailureKind::Cancelled,ERROR_INSTALL_USEREXIT};
+            error=L"Setup preparation cancelled";
         }
         if(ok){
             Handle locked;locked.h=CreateFileW(part.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
             ok=locked.h!=INVALID_HANDLE_VALUE&&GlassReleaseClient::VerifyHash(locked.h,asset.size,asset.sha256,cancel,error);
+            if(!ok&&failure)*failure={cancel.load()?GlassReleaseClient::FailureKind::Cancelled:GlassReleaseClient::FailureKind::InvalidData,GetLastError()};
             if(ok){
                 WINTRUST_FILE_INFO info{};info.cbStruct=sizeof(info);info.pcwszFilePath=part.c_str();info.hFile=locked.h;
                 WINTRUST_DATA trust{};trust.cbStruct=sizeof(trust);trust.dwUIChoice=WTD_UI_NONE;
@@ -189,19 +215,25 @@ bool PrepareSetup(const GlassPackageCatalog::Asset& asset,const std::wstring& wo
                 const LONG status=WinVerifyTrust(nullptr,&policy,&trust);
                 trust.dwStateAction=WTD_STATEACTION_CLOSE;WinVerifyTrust(nullptr,&policy,&trust);
                 ok=status==ERROR_SUCCESS&&GlassProductInspect::FileHasSameSignerAsSetup(part);
-                if(!ok)error=L"Downloaded Setup failed Authenticode/expected publisher verification";
+                if(!ok){error=L"Downloaded Setup failed Authenticode/expected publisher verification";
+                    if(failure)*failure={GlassReleaseClient::FailureKind::InvalidData,static_cast<DWORD>(status)};}
             }
         }
-        if(ok&&!cancel.load()&&MoveFileExW(part.c_str(),file.c_str(),MOVEFILE_WRITE_THROUGH)){
-            prepared=file;return true;
+        if(ok&&!cancel.load()){
+            if(MoveFileExW(part.c_str(),file.c_str(),MOVEFILE_WRITE_THROUGH)){
+                prepared=file;if(failure)*failure={};return true;
+            }
+            error=L"Publishing prepared Setup ("+std::to_wstring(GetLastError())+L")";
+            if(failure)*failure={GlassReleaseClient::FailureKind::Local,GetLastError()};
         }
-    }catch(...){error=L"Cannot prepare new Setup";}
+    }catch(...){error=L"Cannot prepare new Setup";if(failure)*failure={GlassReleaseClient::FailureKind::Local,ERROR_GEN_FAILURE};}
     DeleteFileW(part.c_str()); // Only this freshly-created workspace's .part.
     if(error.empty())error=L"Setup preparation failed or cancelled";
     return false;
 }
-bool FetchCatalog(const std::atomic<bool>& cancel,GlassPackageCatalog::Catalog& catalog,std::wstring& diagnostic) noexcept {
-    catalog={};
+bool FetchCatalog(const std::atomic<bool>& cancel,GlassPackageCatalog::Catalog& catalog,std::wstring& diagnostic,
+    GlassReleaseClient::FailureInfo* failure) noexcept {
+    catalog={};if(failure)*failure={};
     try {
         std::lock_guard<std::mutex> lock(GlassSetupSourceLayout::catalogMutex);
         std::string text,error;
@@ -210,20 +242,49 @@ bool FetchCatalog(const std::atomic<bool>& cancel,GlassPackageCatalog::Catalog& 
             text=GlassSetupSourceLayout::catalogText;
             if(GlassPackageCatalog::Parse(text,catalog,error)){diagnostic.clear();return true;}
             GlassSetupSourceLayout::catalogText.clear();
+            GlassSetupSourceLayout::catalogFailureKind=static_cast<std::uint8_t>(GlassReleaseClient::FailureKind::InvalidData);
+            GlassSetupSourceLayout::catalogFailureCode=ERROR_INVALID_DATA;
+            GlassSetupSourceLayout::catalogFailureDiagnostic=Wide(error);
         }
-        // A failed parent check is not a usable source snapshot. The final
-        // controller gets one bounded recovery request; concurrent inspection
-        // shares its outcome under this mutex, with no repeat Setup handoff.
-        if(GlassSetupSourceLayout::catalogChecked)
-            return Fail(diagnostic,L"Release catalog unavailable after this process's check; local sources remain available");
+        if(GlassSetupSourceLayout::catalogChecked){
+            diagnostic=GlassSetupSourceLayout::catalogFailureDiagnostic;
+            if(diagnostic.empty())diagnostic=L"Release catalog unavailable after this process's check; local sources remain available";
+            if(failure)*failure={static_cast<GlassReleaseClient::FailureKind>(GlassSetupSourceLayout::catalogFailureKind),
+                GlassSetupSourceLayout::catalogFailureCode};
+            return false;
+        }
         GlassSetupSourceLayout::catalogChecked=true;
-        text.clear();
+        text.clear();GlassReleaseClient::FailureInfo requestFailure{};
         if(!GlassReleaseClient::Get(L"https://github.com/musicstashall/GlassPlatform/releases/latest/download/version.json",
-            INVALID_HANDLE_VALUE,&text,1024*1024,cancel,diagnostic))return false;
-        if(!GlassPackageCatalog::Parse(text,catalog,error))return Fail(diagnostic,Wide(error));
-        GlassSetupSourceLayout::catalogText=text;
+            INVALID_HANDLE_VALUE,&text,1024*1024,cancel,diagnostic,&requestFailure)){
+            GlassSetupSourceLayout::catalogFailureKind=static_cast<std::uint8_t>(requestFailure.kind);
+            GlassSetupSourceLayout::catalogFailureCode=requestFailure.code;
+            GlassSetupSourceLayout::catalogFailureDiagnostic=diagnostic;
+            if(failure)*failure=requestFailure;return false;
+        }
+        if(!GlassPackageCatalog::Parse(text,catalog,error)){
+            diagnostic=Wide(error);if(diagnostic.empty())diagnostic=L"Invalid release catalog";
+            GlassSetupSourceLayout::catalogFailureKind=static_cast<std::uint8_t>(GlassReleaseClient::FailureKind::InvalidData);
+            GlassSetupSourceLayout::catalogFailureCode=ERROR_INVALID_DATA;
+            GlassSetupSourceLayout::catalogFailureDiagnostic=diagnostic;
+            if(failure)*failure={GlassReleaseClient::FailureKind::InvalidData,ERROR_INVALID_DATA};return false;
+        }
+        GlassSetupSourceLayout::catalogText=text;GlassSetupSourceLayout::catalogFailureKind=0;
+        GlassSetupSourceLayout::catalogFailureCode=0;GlassSetupSourceLayout::catalogFailureDiagnostic.clear();
         diagnostic.clear();return true;
-    }catch(...){return Fail(diagnostic,L"Cannot read release package catalog");}
+    }catch(...){
+        diagnostic=L"Cannot read release package catalog";
+        if(failure)*failure={GlassReleaseClient::FailureKind::Local,ERROR_GEN_FAILURE};return false;
+    }
+}
+void ResetFailedCatalogForRetry() noexcept {
+    try {
+        std::lock_guard<std::mutex> lock(GlassSetupSourceLayout::catalogMutex);
+        if(GlassSetupSourceLayout::catalogText.empty()&&GlassSetupSourceLayout::catalogChecked){
+            GlassSetupSourceLayout::catalogChecked=false;GlassSetupSourceLayout::catalogFailureKind=0;
+            GlassSetupSourceLayout::catalogFailureCode=0;GlassSetupSourceLayout::catalogFailureDiagnostic.clear();
+        }
+    }catch(...){}
 }
 // Shared read-only discovery: identical identity/trust policy for UI and Apply.
 // Holds each file against write/delete while checking metadata and its trust.

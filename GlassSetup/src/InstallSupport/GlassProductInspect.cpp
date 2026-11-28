@@ -524,8 +524,10 @@ Report Run(const Inputs& in)
     std::atomic_bool neverCancel{false};
     const auto& cancel=in.cancelled?*in.cancelled:neverCancel;
     GlassPackageCatalog::Catalog catalog;
-    std::wstring diagnostic;
-    if(in.inspectSources)GlassPackageAcquisition::FetchCatalog(cancel,catalog,diagnostic);
+    if(in.inspectSources){
+        report.catalogChecked=true;
+        report.catalogCheckFailed=!GlassPackageAcquisition::FetchCatalog(cancel,catalog,report.catalogDiagnostic,&report.catalogFailure);
+    }
     const struct { GlassPackageCatalog::Product product; ProductReport* rep; const wchar_t* code; const wchar_t* legacy; } jobs[]={
         {GlassPackageCatalog::Product::Platform64,&report.x64,GlassInstallMsi::kProductPlatformX64,GlassInstallMsi::kLegacyPlatformX64},
         {GlassPackageCatalog::Product::Platform32,&report.x86,GlassInstallMsi::kProductPlatformX86,GlassInstallMsi::kLegacyPlatformX86},

@@ -14,16 +14,22 @@ using HANDLE=int;constexpr int INVALID_HANDLE_VALUE=-1;
 int requests=0;bool network=true,valid=true;
 namespace GlassPackageCatalog {struct Catalog {bool parsed=false;};bool Parse(const std::string&,Catalog& c,std::string&){c.parsed=valid;return valid;}}
 namespace GlassReleaseClient {
+enum class FailureKind : std::uint8_t { None,Transport,HttpStatus,Cancelled,Local,InvalidData };
+struct FailureInfo {FailureKind kind=FailureKind::None;std::uint32_t code=0;};
 std::wstring Wide(const std::string& text){return std::wstring(text.begin(),text.end());}
-bool Get(const wchar_t*,int,std::string* text,int,const std::atomic<bool>&,std::wstring&){++requests;*text="catalog";return network;}
+bool Get(const wchar_t*,int,std::string* text,int,const std::atomic<bool>&,std::wstring& error,FailureInfo* failure){
+ ++requests;if(network){*text="catalog";return true;}error=L"network unavailable";if(failure)*failure={FailureKind::Transport,123};return false;
+}
 }
 using GlassReleaseClient::Wide;
 bool Fail(std::wstring& error,const std::wstring& text){error=text;return false;}
 // SOURCE
-void reset(){requests=0;network=valid=true;GlassSetupSourceLayout::catalogChecked=false;GlassSetupSourceLayout::catalogInherited=false;GlassSetupSourceLayout::catalogText.clear();}
+void reset(){requests=0;network=valid=true;GlassSetupSourceLayout::catalogChecked=false;GlassSetupSourceLayout::catalogInherited=false;GlassSetupSourceLayout::catalogText.clear();GlassSetupSourceLayout::catalogFailureKind=0;GlassSetupSourceLayout::catalogFailureCode=0;GlassSetupSourceLayout::catalogFailureDiagnostic.clear();}
 int main(){std::atomic<bool> cancel=false;GlassPackageCatalog::Catalog catalog;std::wstring error;
  reset();assert(FetchCatalog(cancel,catalog,error)&&requests==1);assert(FetchCatalog(cancel,catalog,error)&&requests==1); // Product inspection reuses the setup check.
- GlassSetupSourceLayout::catalogInherited=true;GlassSetupSourceLayout::catalogChecked=false;network=false;
+ ResetFailedCatalogForRetry();network=false;
+ assert(FetchCatalog(cancel,catalog,error)&&requests==1); // A valid snapshot is never discarded by retry.
+ reset();GlassSetupSourceLayout::catalogInherited=true;GlassSetupSourceLayout::catalogChecked=false;network=false;
  assert(FetchCatalog(cancel,catalog,error)&&catalog.parsed&&requests==1); // Child, no network even when now offline.
  reset();network=false;assert(!FetchCatalog(cancel,catalog,error)&&requests==1);assert(!FetchCatalog(cancel,catalog,error)&&requests==1);
  GlassSetupSourceLayout::catalogInherited=true;GlassSetupSourceLayout::catalogChecked=false;network=true;
@@ -33,8 +39,12 @@ int main(){std::atomic<bool> cancel=false;GlassPackageCatalog::Catalog catalog;s
  assert(!FetchCatalog(cancel,catalog,error)&&requests==1);assert(!FetchCatalog(cancel,catalog,error)&&requests==1);
  reset();GlassSetupSourceLayout::catalogInherited=true;GlassSetupSourceLayout::catalogText="malformed";valid=false;
  assert(!FetchCatalog(cancel,catalog,error)&&requests==1);assert(!FetchCatalog(cancel,catalog,error)&&requests==1);
- reset();valid=false;assert(!FetchCatalog(cancel,catalog,error)&&requests==1);assert(!FetchCatalog(cancel,catalog,error)&&requests==1);
- std::cout<<"PASS: actual catalog fetch: one request, immutable product-inspection reuse, child snapshot reuse, offline/malformed result not retried\n";
+ reset();network=false;assert(!FetchCatalog(cancel,catalog,error)&&requests==1);network=true;
+ assert(!FetchCatalog(cancel,catalog,error)&&requests==1);ResetFailedCatalogForRetry();
+ assert(FetchCatalog(cancel,catalog,error)&&requests==2); // Explicit retry clears only the failed empty snapshot.
+ reset();valid=false;assert(!FetchCatalog(cancel,catalog,error)&&requests==1);valid=true;
+ ResetFailedCatalogForRetry();assert(FetchCatalog(cancel,catalog,error)&&requests==2);
+ std::cout<<"PASS: actual catalog fetch: valid snapshots stay immutable; failed requests reuse until explicit retry\n";
 }
 '''.replace('// SOURCE',s[a:b])
 with tempfile.TemporaryDirectory() as d:
